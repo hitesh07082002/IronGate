@@ -1,0 +1,28 @@
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      - user-service-1
+      - order-service-1
+      - payment-service-1
+    environment:
+      JWT_SECRET: irongate-dev-secret-change-me
+    ports:
+      - "8080:8080"
+
+  user-service-1:
+    build:
+      context: .
+      dockerfile: services/user-service/Dockerfile
+
+  order-service-1:
+    build:
+      context: .
+      dockerfile: services/order-service/Dockerfile
+
+  payment-service-1:
+    build:
+      context: .
+      dockerfile: services/payment-service/Dockerfile
