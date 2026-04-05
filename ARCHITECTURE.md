@@ -30,6 +30,7 @@
   - `user-service-1`, `user-service-2`
   - `order-service-1`, `order-service-2`
   - `payment-service-1`
+  - shared `JWT_SECRET` provided to the gateway and both user-service instances at startup
 
 ### Planned, not shipped yet
 
@@ -147,6 +148,7 @@ This is a deliberate sanitization boundary. Client-supplied request IDs are not 
 - Validates `exp` and `iat`
 - Injects `X-User-ID` from JWT `sub`
 - Injects `X-User-Role` from JWT `role`
+- Removes the original bearer `Authorization` header before proxying protected requests downstream
 - Fails closed with `500` if JWT auth is misconfigured
 
 #### `UnsupportedFeatures`
@@ -257,6 +259,9 @@ The checked-in config also actively uses:
 - `routes`
 - `auth`
 
+The checked-in [`configs/gateway.yaml`](./configs/gateway.yaml) expects `JWT_SECRET` from the
+environment and validates `jwt_algorithm: HS256` when any route requires auth.
+
 ### Future fields already parsed
 
 These fields exist in config structs today but are not live features yet:
@@ -307,6 +312,7 @@ Upstreams currently see:
 - a fresh gateway-generated `X-Request-ID`
 - `X-Forwarded-*` headers from the proxy
 - `X-User-ID` and `X-User-Role` on authenticated routes
+- no forwarded `Authorization` header on protected routes after gateway auth succeeds
 - `X-Served-By` on the response back to the client
 
 ---
@@ -326,7 +332,9 @@ Key test coverage lives in:
 
 - [`cmd/gateway/main_test.go`](./cmd/gateway/main_test.go)
 - [`internal/config/config_test.go`](./internal/config/config_test.go)
+- [`internal/middleware/auth_test.go`](./internal/middleware/auth_test.go)
 - [`internal/transport/loadbalancer/loadbalancer_test.go`](./internal/transport/loadbalancer/loadbalancer_test.go)
+- [`services/user-service/main_test.go`](./services/user-service/main_test.go)
 
 ---
 

@@ -44,7 +44,7 @@ Request → [Tracing] → [Router] → [Auth] → [RateLimiter] → [Proxy] → 
 
 - **Tracing** sanitizes any incoming request ID and generates the `X-Request-ID` used for the request lifecycle.
 - **Router** matches path to route config, stores config in `context.Context`.
-- **Auth** reads `auth_required` from context, validates JWT, injects `X-User-ID`/`X-User-Role`.
+- **Auth** reads `auth_required` from context, validates JWT, injects `X-User-ID`/`X-User-Role`, and strips the bearer token before proxying protected requests.
 - **RateLimiter** reads rate limit config from context, checks Redis sliding window.
 - **Proxy** is `httputil.ReverseProxy` with a custom `Transport` (the inner chain).
 
@@ -133,7 +133,7 @@ Full walk-through: `GET /api/orders/42` with a valid Bearer token.
 | 1 | Client | Sends `GET /api/orders/42` with `Authorization: Bearer <jwt>` |
 | 2 | Tracing | Generates `X-Request-ID: "req-a1b2c3d4"`, starts timer |
 | 3 | Router | Matches `/api/orders/*` → order-service config. Strips prefix: `/api/orders/42` → `/orders/42`. Stores `RouteConfig` in `context.Context`. |
-| 4 | Auth | Reads `auth_required: true` from context. Validates JWT. Extracts `{user_id: "u-789", role: "admin"}`. Adds `X-User-ID`, `X-User-Role` headers. |
+| 4 | Auth | Reads `auth_required: true` from context. Validates JWT. Extracts `{user_id: "u-789", role: "admin"}`. Adds `X-User-ID`, `X-User-Role` headers and removes the original bearer token before proxying. |
 | 5 | RateLimiter | Reads config from context: sliding window, 50 req/60s. Key: `"u-789"`. Redis Lua: 45 < 50 → allow. Sets `X-RateLimit-Remaining: 5`. |
 | 6 | Proxy | Calls `Transport.RoundTrip(req)` → enters inner chain. |
 
@@ -322,7 +322,7 @@ Go's `RoundTrip` contract requires that `RoundTrip` must not mutate the original
    - exp: reject if expired
    - iat: reject if in the future
 5. Extract user identity: sub → X-User-ID, role → X-User-Role
-6. Add identity headers to upstream request
+6. Add identity headers and remove the original `Authorization` header before proxying the protected request
 ```
 
 Auth reads `auth_required` from the route config in `context.Context`. Routes with `auth_required: false` skip validation entirely. There is no global `public_paths` list — the auth decision is per-route.
@@ -383,7 +383,7 @@ See [ADR-003: Fail-Open Rate Limiting](./ADR/003-fail-open-rate-limiting.md).
 | Auth | `golang-jwt/jwt/v5` | Standard JWT library for Go. |
 | Hot Reload | `fsnotify` | Filesystem event-based, no polling. |
 | Load Testing | k6 | JavaScript-based, excellent reporting, open source. |
-| Containerization | Docker + Docker Compose | `docker-compose up` = entire system. Reproducible. |
+| Containerization | Docker + Docker Compose | `docker-compose up` = local system (current `main` requires `JWT_SECRET` in the environment). Reproducible. |
 | TLS (prod) | Caddy | Auto Let's Encrypt. Zero-config HTTPS. |
 
 ---
