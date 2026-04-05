@@ -54,6 +54,7 @@ func buildHandler(cfg *config.Config, logger *slog.Logger) http.Handler {
 		proxyHandler,
 		middleware.Tracing(logger),
 		middleware.Router(cfg.Routes),
+		middleware.Auth(cfg.Auth),
 		middleware.UnsupportedFeatures(),
 	)
 }

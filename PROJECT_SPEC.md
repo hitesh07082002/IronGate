@@ -13,9 +13,9 @@
 
 **IronGate** is a lightweight, configurable API gateway built in Go. The target end-state handles routing, authentication, rate limiting, load balancing, circuit breaking, retry with exponential backoff, and observability through a single YAML config file.
 
-Current status on `main`: Phase 1 foundation and Phase 2 load balancing are shipped. Authentication, rate limiting, retry, circuit breaker, Redis, Prometheus, and Grafana remain planned work.
+Current status on `main`: Phase 1 foundation, Phase 2 load balancing, and Phase 3 JWT authentication are shipped. Rate limiting, retry, circuit breaker, Redis, Prometheus, and Grafana remain planned work.
 
-Target end-state: a single `docker-compose up` brings up the gateway, backend services, Redis, Prometheus, and Grafana. Current `main` brings up the gateway plus five mock upstream service instances for the shipped Phase 2 load-balancing flow.
+Target end-state: a single `docker-compose up` brings up the gateway, backend services, Redis, Prometheus, and Grafana. Current `main` brings up the gateway plus five mock upstream service instances for the shipped Phase 3 auth plus load-balancing flow, with `JWT_SECRET` supplied through the environment.
 
 ---
 
@@ -168,6 +168,7 @@ Three strategies, selectable per route:
   - *Note:* `jti` (JWT ID) is not validated, meaning tokens can be replayed until expiration. This is an accepted tradeoff for v1.
 - Auth decision is **per-route** via `auth_required` flag in route config (no global `public_paths`)
 - On success: inject `X-User-ID` and `X-User-Role` headers into upstream request
+- On protected routes: remove the original bearer `Authorization` header before proxying so downstream services only trust the projected identity headers
 - **Header Sanitization Security Rule:** The gateway MUST explicitly strip `X-User-ID`, `X-User-Role`, and `X-Request-ID` from ALL incoming client requests before processing to prevent privilege escalation via header spoofing.
 - Error responses:
   - Missing token → `401 {"error": "missing authorization header"}`
@@ -201,7 +202,8 @@ Three strategies, selectable per route:
 
 - Gateway sanitizes incoming `X-Request-ID` and generates a fresh request ID on `main`
 - Request ID appears in every structured JSON log entry
-- Headers propagated to upstream: `X-Request-ID`, `X-Forwarded-For`, `X-Forwarded-Host`, `X-User-ID`, `X-User-Role`
+- Headers propagated to upstream: `X-Request-ID`, `X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto`, `X-User-ID`, `X-User-Role`
+- On protected routes, the original `Authorization` bearer token is not forwarded after gateway auth succeeds
 - Trusted request-ID propagation is a possible future enhancement, but it is not the current behavior
 - Not OpenTelemetry — lightweight correlation-ID propagation is sufficient for this scope
 
@@ -223,7 +225,7 @@ Every implemented middleware and proxy path should return errors in this format,
 
 ## 5. Config Schema
 
-Target end-state schema for the full gateway. The shipped Phase 2 runtime config on `main` is a smaller subset and intentionally omits later-phase fields until those behaviors land.
+Target end-state schema for the full gateway. The shipped Phase 3 runtime config on `main` is a smaller subset and intentionally omits later-phase fields until those behaviors land.
 
 ```yaml
 server:
@@ -328,7 +330,7 @@ routes:
   - path: "/api/payments"
     strip_prefix: "/api"
     service: "payment-service"
-    methods: ["POST"]
+    methods: ["GET", "POST"]
     auth_required: true
     rate_limit:
       requests: 20
@@ -385,7 +387,7 @@ Three services simulate real backend behavior for testing and demos.
 | `/users` | GET | List users |
 | `/users/:id` | GET | Single user |
 | `/users` | POST | Create user (mock) |
-| `/users/login` | POST | Return a test JWT |
+| `/users/login` | POST | Return a signed test JWT |
 | `/users/register` | POST | Create account (public, no auth) |
 
 ### Order Service (`:8082`)

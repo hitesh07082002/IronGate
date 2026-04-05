@@ -13,7 +13,7 @@
 
 IronGate is being built as a configurable API gateway in Go using a two-tier middleware pipeline — the same pattern production gateways like Traefik use. The target outer chain (`http.Handler`) handles request-level concerns (tracing, routing, auth, rate limiting), while the target inner chain (`http.RoundTripper`) handles transport-level concerns (retry, load balancing, circuit breaking). This separation is what makes retry-aware load balancing and per-target circuit breaking possible.
 
-Current status on `main`: the two-tier split already exists, but only the tracing, routing, proxy, unsupported-feature guard, and load-balancing pieces are live. Auth, rate limiting, retry, circuit breaker, and metrics remain planned.
+Current status on `main`: the two-tier split already exists, and tracing, routing, auth, proxy, unsupported-feature guards, and load balancing are live. Rate limiting, retry, circuit breaker, and metrics remain planned.
 
 This document covers the target architecture, algorithms, failure modes, and key tradeoffs. Section 8 links to the ADR set that captures those decisions.
 
@@ -28,7 +28,7 @@ IronGate uses two distinct middleware layers with different Go interfaces.
 **Current `main` snapshot:**
 
 ```
-Outer: [Tracing] -> [Router] -> [UnsupportedFeatures] -> [Proxy]
+Outer: [Tracing] -> [Router] -> [Auth] -> [UnsupportedFeatures] -> [Proxy]
 Inner: [LoadBalancer] -> [Base HTTP Transport]
 ```
 
@@ -44,7 +44,7 @@ Request → [Tracing] → [Router] → [Auth] → [RateLimiter] → [Proxy] → 
 
 - **Tracing** sanitizes any incoming request ID and generates the `X-Request-ID` used for the request lifecycle.
 - **Router** matches path to route config, stores config in `context.Context`.
-- **Auth** reads `auth_required` from context, validates JWT, injects `X-User-ID`/`X-User-Role`.
+- **Auth** reads `auth_required` from context, validates JWT, injects `X-User-ID`/`X-User-Role`, and strips the bearer token before proxying protected requests.
 - **RateLimiter** reads rate limit config from context, checks Redis sliding window.
 - **Proxy** is `httputil.ReverseProxy` with a custom `Transport` (the inner chain).
 
@@ -133,7 +133,7 @@ Full walk-through: `GET /api/orders/42` with a valid Bearer token.
 | 1 | Client | Sends `GET /api/orders/42` with `Authorization: Bearer <jwt>` |
 | 2 | Tracing | Generates `X-Request-ID: "req-a1b2c3d4"`, starts timer |
 | 3 | Router | Matches `/api/orders/*` → order-service config. Strips prefix: `/api/orders/42` → `/orders/42`. Stores `RouteConfig` in `context.Context`. |
-| 4 | Auth | Reads `auth_required: true` from context. Validates JWT. Extracts `{user_id: "u-789", role: "admin"}`. Adds `X-User-ID`, `X-User-Role` headers. |
+| 4 | Auth | Reads `auth_required: true` from context. Validates JWT. Extracts `{user_id: "u-789", role: "admin"}`. Adds `X-User-ID`, `X-User-Role` headers and removes the original bearer token before proxying. |
 | 5 | RateLimiter | Reads config from context: sliding window, 50 req/60s. Key: `"u-789"`. Redis Lua: 45 < 50 → allow. Sets `X-RateLimit-Remaining: 5`. |
 | 6 | Proxy | Calls `Transport.RoundTrip(req)` → enters inner chain. |
 
@@ -322,7 +322,7 @@ Go's `RoundTrip` contract requires that `RoundTrip` must not mutate the original
    - exp: reject if expired
    - iat: reject if in the future
 5. Extract user identity: sub → X-User-ID, role → X-User-Role
-6. Add identity headers to upstream request
+6. Add identity headers and remove the original `Authorization` header before proxying the protected request
 ```
 
 Auth reads `auth_required` from the route config in `context.Context`. Routes with `auth_required: false` skip validation entirely. There is no global `public_paths` list — the auth decision is per-route.
@@ -383,7 +383,7 @@ See [ADR-003: Fail-Open Rate Limiting](./ADR/003-fail-open-rate-limiting.md).
 | Auth | `golang-jwt/jwt/v5` | Standard JWT library for Go. |
 | Hot Reload | `fsnotify` | Filesystem event-based, no polling. |
 | Load Testing | k6 | JavaScript-based, excellent reporting, open source. |
-| Containerization | Docker + Docker Compose | `docker-compose up` = entire system. Reproducible. |
+| Containerization | Docker + Docker Compose | `docker-compose up` = local system (current `main` requires `JWT_SECRET` in the environment). Reproducible. |
 | TLS (prod) | Caddy | Auto Let's Encrypt. Zero-config HTTPS. |
 
 ---
