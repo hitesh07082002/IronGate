@@ -9,8 +9,6 @@ services:
       - order-service-1
       - order-service-2
       - payment-service-1
-    environment:
-      JWT_SECRET: irongate-dev-secret-change-me
     ports:
       - "8080:8080"
 

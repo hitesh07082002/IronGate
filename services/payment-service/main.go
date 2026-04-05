@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/hitesh07082002/irongate/services/common"
@@ -28,10 +29,26 @@ func main() {
 	mux.HandleFunc("GET /health", common.HealthHandler("payment-service"))
 	common.RegisterChaosHandlers(mux, chaos)
 
-	server := &http.Server{Addr: ":8083", Handler: chaos.Middleware(mux), ReadHeaderTimeout: 5 * time.Second}
-	slog.Info("service started", "service", "payment-service", "port", 8083)
+	port := servicePort(8083)
+	server := &http.Server{Addr: ":" + strconv.Itoa(port), Handler: chaos.Middleware(mux), ReadHeaderTimeout: 5 * time.Second}
+	slog.Info("service started", "service", "payment-service", "port", port)
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("service stopped", "service", "payment-service", "error", err)
 		os.Exit(1)
 	}
+}
+
+func servicePort(defaultPort int) int {
+	portValue := os.Getenv("PORT")
+	if portValue == "" {
+		return defaultPort
+	}
+
+	port, err := strconv.Atoi(portValue)
+	if err != nil || port <= 0 {
+		slog.Warn("invalid PORT value, using default", "value", portValue, "default", defaultPort)
+		return defaultPort
+	}
+
+	return port
 }

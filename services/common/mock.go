@@ -3,6 +3,7 @@ package common
 import (
 	"encoding/json"
 	"net/http"
+	"sync"
 )
 
 type CollectionHandlers struct {
@@ -14,16 +15,23 @@ type CollectionHandlers struct {
 func NewCollectionHandlers[T any](items []T, idFn func(T) string, createStatus int, createFn func() T) CollectionHandlers {
 	itemsCopy := append([]T(nil), items...)
 	index := make(map[string]T, len(itemsCopy))
+	var mu sync.RWMutex
 	for _, item := range itemsCopy {
 		index[idFn(item)] = item
 	}
 
 	return CollectionHandlers{
 		List: func(w http.ResponseWriter, _ *http.Request) {
-			WriteJSON(w, http.StatusOK, itemsCopy)
+			mu.RLock()
+			snapshot := append([]T(nil), itemsCopy...)
+			mu.RUnlock()
+
+			WriteJSON(w, http.StatusOK, snapshot)
 		},
 		Get: func(w http.ResponseWriter, r *http.Request) {
+			mu.RLock()
 			item, ok := index[r.PathValue("id")]
+			mu.RUnlock()
 			if !ok {
 				WriteJSON(w, http.StatusNotFound, map[string]any{
 					"error": "resource not found",
@@ -33,7 +41,14 @@ func NewCollectionHandlers[T any](items []T, idFn func(T) string, createStatus i
 			WriteJSON(w, http.StatusOK, item)
 		},
 		Create: func(w http.ResponseWriter, _ *http.Request) {
-			WriteJSON(w, createStatus, createFn())
+			created := createFn()
+
+			mu.Lock()
+			itemsCopy = append(itemsCopy, created)
+			index[idFn(created)] = created
+			mu.Unlock()
+
+			WriteJSON(w, createStatus, created)
 		},
 	}
 }
