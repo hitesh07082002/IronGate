@@ -17,9 +17,6 @@ func UnsupportedFeatures() Middleware {
 			}
 
 			switch unsupportedFeature(route) {
-			case "auth":
-				response.WriteError(w, req, http.StatusNotImplemented, "route auth is not implemented yet")
-				return
 			case "rate_limit":
 				response.WriteError(w, req, http.StatusNotImplemented, "route rate limiting is not implemented yet")
 				return

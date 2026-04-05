@@ -78,3 +78,19 @@ func TestLoginFailsClosedWithoutJWTSecret(t *testing.T) {
 		t.Fatalf("expected 500, got %d with body %s", resp.Code, resp.Body.String())
 	}
 }
+
+func TestRequiredJWTSecretRejectsMissingValue(t *testing.T) {
+	if _, err := requiredJWTSecret("   "); err == nil {
+		t.Fatal("expected missing JWT secret to be rejected")
+	}
+}
+
+func TestRequiredJWTSecretKeepsConfiguredValue(t *testing.T) {
+	got, err := requiredJWTSecret("service-secret")
+	if err != nil {
+		t.Fatalf("expected configured JWT secret to be accepted, got %v", err)
+	}
+	if got != "service-secret" {
+		t.Fatalf("expected JWT secret %q, got %q", "service-secret", got)
+	}
+}

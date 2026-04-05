@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -19,10 +20,16 @@ const loginTokenTTL = time.Hour
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 
+	jwtSecret, err := requiredJWTSecret(os.Getenv("JWT_SECRET"))
+	if err != nil {
+		slog.Error("failed to start user-service", "error", err)
+		os.Exit(1)
+	}
+
 	port := common.ServicePortFromEnv(8081)
 	server := &http.Server{
 		Addr:              ":" + strconv.Itoa(port),
-		Handler:           newHandler(os.Getenv("JWT_SECRET")),
+		Handler:           newHandler(jwtSecret),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	slog.Info("service started", "service", "user-service", "port", port)
@@ -95,4 +102,13 @@ func signLoginToken(jwtSecret, subject, role string, issuedAt time.Time) (string
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString([]byte(jwtSecret))
+}
+
+func requiredJWTSecret(raw string) (string, error) {
+	jwtSecret := strings.TrimSpace(raw)
+	if jwtSecret == "" {
+		return "", fmt.Errorf("JWT_SECRET must be set")
+	}
+
+	return jwtSecret, nil
 }
