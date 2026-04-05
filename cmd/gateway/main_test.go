@@ -1386,6 +1386,65 @@ func TestMetricsEndpointRespondsDirectlyAndExportsServiceMetrics(t *testing.T) {
 	}
 }
 
+func TestMetricsEndpointBypassesAuthAndRateLimiting(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeTestJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	}))
+	defer upstream.Close()
+
+	route := routeForServer(t, "/api/users", "/api", "user-service", upstream.URL)
+	route.AuthRequired = true
+	route.RateLimit = &config.RateLimitConfig{
+		Requests: 1,
+		Window:   time.Minute,
+		Strategy: "sliding_window",
+	}
+
+	cfg := testConfig(route)
+	cfg.Metrics.Path = "/internal/metrics"
+
+	gateway := httptest.NewServer(buildHandlerWithOptions(cfg, testLogger(), buildHandlerOptions{
+		metricsRegistry: gatewaymetrics.NewRegistry(),
+		rateLimitStore:  denyAllRateLimitStore{},
+	}))
+	defer gateway.Close()
+
+	metricsResp, err := http.Get(gateway.URL + "/internal/metrics")
+	if err != nil {
+		t.Fatalf("get metrics endpoint: %v", err)
+	}
+	defer metricsResp.Body.Close()
+
+	if metricsResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected metrics endpoint to bypass auth and rate limiting with 200, got %d", metricsResp.StatusCode)
+	}
+
+	unauthorizedResp := doGatewayRequest(t, gateway, http.MethodGet, "/api/users", "")
+	defer unauthorizedResp.Body.Close()
+
+	if unauthorizedResp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected protected service route to require auth, got %d", unauthorizedResp.StatusCode)
+	}
+
+	authorizedResp := doGatewayRequest(
+		t,
+		gateway,
+		http.MethodGet,
+		"/api/users",
+		gatewayBearerToken(t, "test-secret", jwt.SigningMethodHS256, jwt.MapClaims{
+			"sub":  "u-1",
+			"role": "admin",
+			"iat":  time.Now().Add(-time.Minute).Unix(),
+			"exp":  time.Now().Add(time.Hour).Unix(),
+		}),
+	)
+	defer authorizedResp.Body.Close()
+
+	if authorizedResp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("expected protected service route to remain rate limited, got %d", authorizedResp.StatusCode)
+	}
+}
+
 func testConfig(routes ...config.RouteConfig) *config.Config {
 	return &config.Config{
 		Server: config.ServerConfig{
@@ -1431,6 +1490,21 @@ func (allowAllRateLimitStore) Allow(_ context.Context, request ratelimit.Request
 	return ratelimit.Decision{
 		Allowed:   true,
 		Remaining: max(request.Limit-1, 0),
+		ResetAt:   now.Add(request.Window),
+	}, nil
+}
+
+type denyAllRateLimitStore struct{}
+
+func (denyAllRateLimitStore) Allow(_ context.Context, request ratelimit.Request) (ratelimit.Decision, error) {
+	now := request.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+
+	return ratelimit.Decision{
+		Allowed:   false,
+		Remaining: 0,
 		ResetAt:   now.Add(request.Window),
 	}, nil
 }
