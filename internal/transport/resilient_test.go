@@ -71,8 +71,7 @@ func TestCircuitBreakerTransportDelaysSuccessUntilBodyEOF(t *testing.T) {
 		t.Fatal("expected closed breaker to allow request")
 	}
 	breaker.RecordFailure()
-
-	time.Sleep(20 * time.Millisecond)
+	waitForBreakerState(t, breaker, circuitbreaker.StateHalfOpen, 200*time.Millisecond)
 
 	transport := &CircuitBreakerTransport{
 		next: roundTripFunc(func(req *http.Request) (*http.Response, error) {
@@ -125,8 +124,7 @@ func TestCircuitBreakerTransportReopensOnBodyReadError(t *testing.T) {
 		t.Fatal("expected closed breaker to allow request")
 	}
 	breaker.RecordFailure()
-
-	time.Sleep(20 * time.Millisecond)
+	waitForBreakerState(t, breaker, circuitbreaker.StateHalfOpen, 200*time.Millisecond)
 
 	transport := &CircuitBreakerTransport{
 		next: roundTripFunc(func(req *http.Request) (*http.Response, error) {
@@ -187,4 +185,19 @@ func (r *errOnReadCloser) Read(_ []byte) (int, error) {
 
 func (r *errOnReadCloser) Close() error {
 	return nil
+}
+
+func waitForBreakerState(t *testing.T, breaker *circuitbreaker.Breaker, want circuitbreaker.State, timeout time.Duration) {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for {
+		if breaker.State() == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected breaker state %s within %v, got %s", want, timeout, breaker.State())
+		}
+		time.Sleep(time.Millisecond)
+	}
 }

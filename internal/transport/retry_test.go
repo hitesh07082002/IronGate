@@ -155,6 +155,54 @@ func TestRetryTransportStopsWhenContextCancelsDuringBackoff(t *testing.T) {
 	}
 }
 
+func TestRetryTransportPrefersContextCancellationOverOpenCircuitFailover(t *testing.T) {
+	var calls int
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	transport := newRetryTransport(
+		roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			calls++
+			cancel()
+
+			return nil, &AttemptError{
+				Err:    ErrCircuitOpen,
+				Target: "order-service-1:8081",
+			}
+		}),
+		sleepWithContext,
+		rand.New(rand.NewSource(1)),
+	)
+
+	req, err := http.NewRequest(http.MethodGet, "http://gateway/api/orders", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req = req.WithContext(context.WithValue(ctx, middleware.RouteConfigKey, &config.RouteConfig{
+		Path:    "/api/orders",
+		Service: "order-service",
+		Targets: []config.Target{
+			{Host: "order-service-1", Port: 8081},
+			{Host: "order-service-2", Port: 8082},
+		},
+		Retry: config.RetryConfig{
+			MaxAttempts: 3,
+			BaseDelay:   time.Millisecond,
+			MaxDelay:    time.Millisecond,
+			Jitter:      fullJitterStrategy,
+		},
+	}))
+
+	_, err = transport.RoundTrip(req)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation to win over circuit failover, got %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("expected retry loop to stop after cancellation, got %d attempts", calls)
+	}
+}
+
 func TestCaptureRequestBodyPreservesOriginalRequestWhenGetBodyIsAvailable(t *testing.T) {
 	const payload = `{"id":"u-1","status":"retry"}`
 

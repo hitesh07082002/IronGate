@@ -87,6 +87,13 @@ func (rt *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	logicalAttempt := 0
 
 	for {
+		if err := req.Context().Err(); err != nil {
+			return nil, &AttemptError{
+				Err:        err,
+				RetryCount: logicalAttempt,
+			}
+		}
+
 		attemptReq, err := cloneAttemptRequest(req, bufferedBody, hasBufferedBody, logicalAttempt, triedTargets)
 		if err != nil {
 			return nil, err
@@ -102,6 +109,13 @@ func (rt *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 			if totalTargets == 0 || len(triedTargets) >= totalTargets {
 				return nil, &AttemptError{
 					Err:        ErrNoHealthyTargets,
+					RetryCount: logicalAttempt,
+					Target:     metadata.target,
+				}
+			}
+			if err := req.Context().Err(); err != nil {
+				return nil, &AttemptError{
+					Err:        err,
 					RetryCount: logicalAttempt,
 					Target:     metadata.target,
 				}
