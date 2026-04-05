@@ -185,6 +185,10 @@ func TestGatewayConfigPhaseTwoAvoidsUnsupportedRouteFeatures(t *testing.T) {
 			t.Fatalf("expected %s to avoid retry config until Phase 5", route.Path)
 		}
 	}
+
+	if len(paymentsRoute.Methods) != 2 || paymentsRoute.Methods[0] != "GET" || paymentsRoute.Methods[1] != "POST" {
+		t.Fatalf("expected /api/payments to expose GET status lookup and POST creation, got %v", paymentsRoute.Methods)
+	}
 }
 
 func joinErrors(errs []error) string {
