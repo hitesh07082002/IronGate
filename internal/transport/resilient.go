@@ -1,11 +1,9 @@
 package transport
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -207,21 +205,7 @@ func wrapAttemptError(err error, metadata attemptMetadata) error {
 }
 
 func countsTowardCircuit(err error) bool {
-	switch {
-	case err == nil:
-		return false
-	case errors.Is(err, ErrCircuitOpen):
-		return false
-	case errors.Is(err, ErrNoHealthyTargets):
-		return false
-	case errors.Is(err, context.Canceled):
-		return false
-	case errors.Is(err, context.DeadlineExceeded):
-		return true
-	}
-
-	var netErr net.Error
-	return errors.As(err, &netErr)
+	return isTransientError(err)
 }
 
 type releaseOnReadCloser struct {

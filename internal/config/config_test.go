@@ -161,6 +161,38 @@ func TestValidateRejectsPortsOutsideTCPRange(t *testing.T) {
 	assertContains(t, joined, `targets[0] port must be between 1 and 65535`)
 }
 
+func TestValidateRejectsUnknownRetryJitter(t *testing.T) {
+	cfg := &Config{
+		Server: ServerConfig{
+			Port:         8080,
+			ReadTimeout:  30 * time.Second,
+			WriteTimeout: 30 * time.Second,
+		},
+		Routes: []RouteConfig{
+			{
+				Path:         "/api/users",
+				Service:      "user-service",
+				LoadBalancer: "round_robin",
+				Retry: RetryConfig{
+					MaxAttempts: 2,
+					BaseDelay:   100 * time.Millisecond,
+					MaxDelay:    time.Second,
+					Jitter:      "equal",
+				},
+				Targets: []Target{
+					{
+						Host: "user-service-1",
+						Port: 8081,
+					},
+				},
+			},
+		},
+	}
+
+	joined := joinErrors(cfg.Validate())
+	assertContains(t, joined, `retry.jitter "equal" is invalid`)
+}
+
 func TestGatewayConfigPhaseFiveEnablesRetryAndCircuitBreaking(t *testing.T) {
 	t.Setenv("JWT_SECRET", "test-secret")
 

@@ -3,10 +3,14 @@ package transport
 import (
 	"context"
 	"errors"
+	"io"
 	"math/rand"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -51,10 +55,17 @@ func TestIsTransientErrorClassifiesExpectedFailures(t *testing.T) {
 				Err: &net.OpError{
 					Op:  "dial",
 					Net: "tcp",
-					Err: errors.New("connection refused"),
+					Err: os.NewSyscallError("connect", syscall.ECONNREFUSED),
 				},
 			},
 			want: true,
+		},
+		{
+			name: "dns lookup miss does not retry",
+			err: &net.DNSError{
+				Err: "no such host",
+			},
+			want: false,
 		},
 		{
 			name: "context canceled does not retry",
@@ -131,4 +142,63 @@ func TestRetryTransportStopsWhenContextCancelsDuringBackoff(t *testing.T) {
 	}
 }
 
+func TestCaptureRequestBodyPreservesOriginalRequestWhenGetBodyIsAvailable(t *testing.T) {
+	const payload = `{"id":"u-1","status":"retry"}`
+
+	originalBody := &trackingReadCloser{Reader: strings.NewReader(payload)}
+	req, err := http.NewRequest(http.MethodPut, "http://gateway/api/users", http.NoBody)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Body = originalBody
+	req.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(strings.NewReader(payload)), nil
+	}
+	req.ContentLength = int64(len(payload))
+
+	bufferedBody, hasBufferedBody, err := captureRequestBody(req, true)
+	if err != nil {
+		t.Fatalf("capture request body: %v", err)
+	}
+	if !hasBufferedBody {
+		t.Fatal("expected request body to be buffered")
+	}
+	if string(bufferedBody) != payload {
+		t.Fatalf("expected buffered body %q, got %q", payload, string(bufferedBody))
+	}
+	if !originalBody.closed {
+		t.Fatal("expected original request body to be closed after buffering")
+	}
+	if req.Body != originalBody {
+		t.Fatal("expected capture to leave the original request body pointer intact")
+	}
+
+	reader, err := req.GetBody()
+	if err != nil {
+		t.Fatalf("reopen request body: %v", err)
+	}
+	defer reader.Close()
+
+	got, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("read reopened request body: %v", err)
+	}
+	if string(got) != payload {
+		t.Fatalf("expected reopened request body %q, got %q", payload, string(got))
+	}
+	if req.ContentLength != int64(len(payload)) {
+		t.Fatalf("expected content length %d, got %d", len(payload), req.ContentLength)
+	}
+}
+
 type cancelContextKey struct{}
+
+type trackingReadCloser struct {
+	io.Reader
+	closed bool
+}
+
+func (r *trackingReadCloser) Close() error {
+	r.closed = true
+	return nil
+}

@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strconv"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/hitesh07082002/irongate/internal/config"
@@ -230,27 +231,27 @@ func isTransientError(err error) bool {
 		return true
 	}
 
-	var netErr net.Error
-	if errors.As(err, &netErr) {
-		return true
-	}
-
-	var opErr *net.OpError
-	if errors.As(err, &opErr) {
-		return true
-	}
-
-	var dnsErr *net.DNSError
-	if errors.As(err, &dnsErr) {
-		return true
-	}
-
 	var urlErr *url.Error
 	if errors.As(err, &urlErr) {
 		return isTransientError(urlErr.Err)
 	}
 
-	return false
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return dnsErr.Timeout() || dnsErr.Temporary()
+	}
+
+	var opErr *net.OpError
+	if errors.As(err, &opErr) && isConnectionFailure(opErr.Err) {
+		return true
+	}
+
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return netErr.Timeout() || netErr.Temporary()
+	}
+
+	return isConnectionFailure(err)
 }
 
 func captureRequestBody(req *http.Request, shouldBuffer bool) ([]byte, bool, error) {
@@ -267,8 +268,13 @@ func captureRequestBody(req *http.Request, shouldBuffer bool) ([]byte, bool, err
 		if readErr != nil {
 			return nil, false, readErr
 		}
-		defer reader.Close()
 		body, err = io.ReadAll(reader)
+		if closeErr := reader.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
+		if closeErr := req.Body.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
 	} else {
 		body, err = io.ReadAll(req.Body)
 		if closeErr := req.Body.Close(); err == nil && closeErr != nil {
@@ -278,12 +284,6 @@ func captureRequestBody(req *http.Request, shouldBuffer bool) ([]byte, bool, err
 	if err != nil {
 		return nil, false, err
 	}
-
-	req.Body = io.NopCloser(bytes.NewReader(body))
-	req.GetBody = func() (io.ReadCloser, error) {
-		return io.NopCloser(bytes.NewReader(body)), nil
-	}
-	req.ContentLength = int64(len(body))
 
 	return body, true, nil
 }
@@ -375,4 +375,23 @@ func sleepWithContext(ctx context.Context, delay time.Duration) error {
 
 func targetAddress(target config.Target) string {
 	return net.JoinHostPort(target.Host, strconv.Itoa(target.Port))
+}
+
+func isConnectionFailure(err error) bool {
+	switch {
+	case errors.Is(err, syscall.ECONNREFUSED):
+		return true
+	case errors.Is(err, syscall.ECONNRESET):
+		return true
+	case errors.Is(err, syscall.EPIPE):
+		return true
+	case errors.Is(err, syscall.ETIMEDOUT):
+		return true
+	case errors.Is(err, syscall.EHOSTUNREACH):
+		return true
+	case errors.Is(err, syscall.ENETUNREACH):
+		return true
+	default:
+		return false
+	}
 }
