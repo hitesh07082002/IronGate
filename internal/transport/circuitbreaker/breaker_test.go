@@ -2,6 +2,7 @@ package circuitbreaker
 
 import (
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -169,46 +170,44 @@ func TestRegistryReturnsBreakerPerTarget(t *testing.T) {
 }
 
 func TestBreakerConcurrentAccessRaceSafe(t *testing.T) {
-	breaker := New(config.CBConfig{
-		FailureThreshold:    100000,
-		SuccessThreshold:    2,
+	clock := &fakeClock{now: time.Unix(0, 0)}
+	breaker := newWithClock(config.CBConfig{
+		FailureThreshold:    1,
+		SuccessThreshold:    1,
 		Timeout:             time.Second,
 		WindowSize:          time.Minute,
-		HalfOpenMaxRequests: 3,
+		HalfOpenMaxRequests: 2,
+	}, clock)
+
+	runConcurrentWorkers(100, func() {
+		if !breaker.Allow() {
+			return
+		}
+		breaker.RecordFailure()
 	})
 
-	start := make(chan struct{})
-	var wg sync.WaitGroup
-	for range 100 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			<-start
-
-			for i := 0; i < 200; i++ {
-				if !breaker.Allow() {
-					continue
-				}
-
-				switch i % 3 {
-				case 0:
-					breaker.RecordSuccess()
-				case 1:
-					breaker.RecordFailure()
-				default:
-					breaker.RecordIgnored()
-				}
-			}
-		}()
+	if breaker.State() != StateOpen {
+		t.Fatalf("expected breaker to open under concurrent failures, got %s", breaker.State())
 	}
 
-	close(start)
-	wg.Wait()
+	clock.Advance(time.Second)
 
-	switch breaker.State() {
-	case StateClosed, StateOpen, StateHalfOpen:
-	default:
-		t.Fatalf("unexpected breaker state %q", breaker.State())
+	var halfOpenCompletions atomic.Int32
+	runConcurrentWorkers(100, func() {
+		if !breaker.Allow() {
+			return
+		}
+
+		if halfOpenCompletions.Add(1) == 1 {
+			breaker.RecordSuccess()
+			return
+		}
+
+		breaker.RecordIgnored()
+	})
+
+	if breaker.State() != StateClosed {
+		t.Fatalf("expected breaker to close after concurrent half-open probes, got %s", breaker.State())
 	}
 }
 
@@ -227,4 +226,21 @@ func (c *fakeClock) Advance(delay time.Duration) {
 	c.mu.Lock()
 	c.now = c.now.Add(delay)
 	c.mu.Unlock()
+}
+
+func runConcurrentWorkers(workers int, fn func()) {
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			fn()
+		}()
+	}
+
+	close(start)
+	wg.Wait()
 }

@@ -160,6 +160,108 @@ func TestCircuitBreakerTransportReopensOnBodyReadError(t *testing.T) {
 	}
 }
 
+func TestCircuitBreakerTransportIgnoresBodyReadErrorFromCallerCancellation(t *testing.T) {
+	registry := circuitbreaker.NewRegistry(config.CBConfig{
+		FailureThreshold:    1,
+		SuccessThreshold:    1,
+		Timeout:             10 * time.Millisecond,
+		WindowSize:          time.Minute,
+		HalfOpenMaxRequests: 1,
+	})
+	target := "user-service-1:8081"
+	breaker := registry.Breaker(target)
+
+	if !breaker.Allow() {
+		t.Fatal("expected closed breaker to allow request")
+	}
+	breaker.RecordFailure()
+	waitForBreakerState(t, breaker, circuitbreaker.StateHalfOpen, 200*time.Millisecond)
+
+	transport := &CircuitBreakerTransport{
+		next: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       &errOnReadCloser{err: context.Canceled},
+				Request:    req,
+			}, nil
+		}),
+		registry: registry,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+target+"/health", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+
+	resp, err := transport.RoundTrip(req)
+	if err != nil {
+		t.Fatalf("round trip: %v", err)
+	}
+
+	cancel()
+
+	_, err = io.ReadAll(resp.Body)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected caller cancellation read error, got %v", err)
+	}
+	if breaker.State() != circuitbreaker.StateHalfOpen {
+		t.Fatalf("expected caller cancellation to leave breaker half-open, got %s", breaker.State())
+	}
+}
+
+func TestCircuitBreakerTransportIgnoresBodyCloseErrorFromCallerDeadline(t *testing.T) {
+	registry := circuitbreaker.NewRegistry(config.CBConfig{
+		FailureThreshold:    1,
+		SuccessThreshold:    1,
+		Timeout:             10 * time.Millisecond,
+		WindowSize:          time.Minute,
+		HalfOpenMaxRequests: 1,
+	})
+	target := "user-service-1:8081"
+	breaker := registry.Breaker(target)
+
+	if !breaker.Allow() {
+		t.Fatal("expected closed breaker to allow request")
+	}
+	breaker.RecordFailure()
+	waitForBreakerState(t, breaker, circuitbreaker.StateHalfOpen, 200*time.Millisecond)
+
+	transport := &CircuitBreakerTransport{
+		next: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       &closeErrReadCloser{err: context.DeadlineExceeded},
+				Request:    req,
+			}, nil
+		}),
+		registry: registry,
+	}
+
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+target+"/health", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+
+	resp, err := transport.RoundTrip(req)
+	if err != nil {
+		t.Fatalf("round trip: %v", err)
+	}
+
+	err = resp.Body.Close()
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected caller deadline close error, got %v", err)
+	}
+	if breaker.State() != circuitbreaker.StateHalfOpen {
+		t.Fatalf("expected caller deadline to leave breaker half-open, got %s", breaker.State())
+	}
+}
+
 func TestCountsTowardCircuitIgnoresCallerDeadlineExceeded(t *testing.T) {
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 	defer cancel()
@@ -185,6 +287,18 @@ func (r *errOnReadCloser) Read(_ []byte) (int, error) {
 
 func (r *errOnReadCloser) Close() error {
 	return nil
+}
+
+type closeErrReadCloser struct {
+	err error
+}
+
+func (r *closeErrReadCloser) Read(_ []byte) (int, error) {
+	return 0, nil
+}
+
+func (r *closeErrReadCloser) Close() error {
+	return r.err
 }
 
 func waitForBreakerState(t *testing.T, breaker *circuitbreaker.Breaker, want circuitbreaker.State, timeout time.Duration) {
