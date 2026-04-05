@@ -20,6 +20,7 @@ services:
       - "8080:8080"
     environment:
       JWT_SECRET: "${JWT_SECRET:?JWT_SECRET must be set}"
+      IRONGATE_TRUSTED_PROXIES: "${IRONGATE_TRUSTED_PROXIES:-}"
 
   prometheus:
     image: prom/prometheus:v2.53.1
@@ -89,3 +90,5 @@ services:
     build:
       context: .
       dockerfile: services/payment-service/Dockerfile
+    ports:
+      - "127.0.0.1:18083:8083"

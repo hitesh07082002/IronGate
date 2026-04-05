@@ -1,4 +1,4 @@
-.PHONY: all clean lint build test test-race coverage run docker-up docker-down load-test
+.PHONY: all clean lint build test test-race coverage run docker-up docker-down load-test benchmark benchmark-scenario benchmark-render
 
 GO_TEST_FLAGS ?=
 COVERAGE_MIN ?= 70
@@ -42,3 +42,14 @@ docker-down:
 load-test:
 	@command -v k6 >/dev/null 2>&1 || (echo "k6 is required for load-test"; exit 1)
 	IRONGATE_BASE_URL="$${IRONGATE_BASE_URL:-http://127.0.0.1:8080}" k6 run benchmarks/smoke.js
+
+benchmark:
+	python3 benchmarks/runner.py run --scenario all
+
+benchmark-scenario:
+	@test -n "$${SCENARIO:-}" || (echo "SCENARIO is required"; exit 1)
+	python3 benchmarks/runner.py run --scenario "$${SCENARIO}"
+
+benchmark-render:
+	@test -n "$${RESULT_DIR:-}" || (echo "RESULT_DIR is required"; exit 1)
+	python3 benchmarks/runner.py render --result-dir "$${RESULT_DIR}"

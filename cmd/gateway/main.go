@@ -20,7 +20,10 @@ import (
 	gwruntime "github.com/hitesh07082002/irongate/internal/runtime"
 )
 
-const fallbackShutdownTimeout = 10 * time.Second
+const (
+	fallbackShutdownTimeout = 10 * time.Second
+	trustedProxiesEnvVar    = "IRONGATE_TRUSTED_PROXIES"
+)
 
 type buildHandlerOptions struct {
 	rateLimitStore  ratelimit.Store
@@ -49,7 +52,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	manager, err := newRuntimeManager(cfg, logger, buildHandlerOptions{})
+	trustedProxies, err := resolveTrustedProxies()
+	if err != nil {
+		slog.Error("failed to parse trusted proxies", "error", err)
+		os.Exit(1)
+	}
+
+	manager, err := newRuntimeManager(cfg, logger, buildHandlerOptions{
+		trustedProxies: trustedProxies,
+	})
 	if err != nil {
 		slog.Error("failed to build runtime manager", "error", err)
 		os.Exit(1)
@@ -168,6 +179,39 @@ func shutdownTimeout(writeTimeout time.Duration) time.Duration {
 	}
 
 	return fallbackShutdownTimeout
+}
+
+func resolveTrustedProxies() ([]netip.Prefix, error) {
+	rawValue := strings.TrimSpace(os.Getenv(trustedProxiesEnvVar))
+	if rawValue == "" {
+		return nil, nil
+	}
+
+	parts := strings.Split(rawValue, ",")
+	prefixes := make([]netip.Prefix, 0, len(parts))
+	seen := make(map[string]struct{}, len(parts))
+	for _, part := range parts {
+		value := strings.TrimSpace(part)
+		if value == "" {
+			continue
+		}
+
+		prefix, err := netip.ParsePrefix(value)
+		if err != nil {
+			return nil, fmt.Errorf("%s contains invalid prefix %q: %w", trustedProxiesEnvVar, value, err)
+		}
+
+		masked := prefix.Masked()
+		key := masked.String()
+		if _, ok := seen[key]; ok {
+			continue
+		}
+
+		prefixes = append(prefixes, masked)
+		seen[key] = struct{}{}
+	}
+
+	return prefixes, nil
 }
 
 func resolveConfigPath(flagValue string) string {

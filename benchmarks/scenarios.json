@@ -1,0 +1,141 @@
+{
+  "baseline-public-routing": {
+    "kind": "single",
+    "description": "Public login traffic routed through the gateway with distributed client IPs so the public bucket does not dominate the latency profile.",
+    "request": {
+      "method": "POST",
+      "path": "/api/users/login",
+      "expected_statuses": [
+        200
+      ],
+      "xff_mode": "per_request"
+    },
+    "load": {
+      "vus": 24,
+      "duration": "20s"
+    }
+  },
+  "authenticated-rate-limited-traffic": {
+    "kind": "single",
+    "description": "Single authenticated identity hitting the payment status route until the Redis-backed limiter starts returning 429s.",
+    "request": {
+      "method": "GET",
+      "path": "/api/payments/p-1",
+      "expected_statuses": [
+        200,
+        429
+      ]
+    },
+    "auth": {
+      "mode": "static",
+      "subject_prefix": "bench-rate-limit-user",
+      "role": "user"
+    },
+    "load": {
+      "vus": 8,
+      "duration": "20s"
+    }
+  },
+  "full-pipeline-normal": {
+    "kind": "single",
+    "description": "Protected order traffic with a pool of authenticated demo users to exercise auth, rate limiting, retry, load balancing, and healthy circuit breakers together.",
+    "request": {
+      "method": "GET",
+      "path": "/api/orders",
+      "expected_statuses": [
+        200
+      ]
+    },
+    "auth": {
+      "mode": "pool",
+      "pool_size": 1024,
+      "subject_prefix": "bench-order-user",
+      "role": "user"
+    },
+    "load": {
+      "vus": 24,
+      "duration": "20s",
+      "sleep_ms": 100
+    }
+  },
+  "circuit-breaker-transition-recovery": {
+    "kind": "phased",
+    "description": "Payment route across healthy traffic, upstream failure, open-circuit fast rejection, and recovery after the breaker timeout.",
+    "request": {
+      "method": "GET",
+      "path": "/api/payments/p-1"
+    },
+    "auth": {
+      "mode": "pool",
+      "pool_size": 32,
+      "subject_prefix": "bench-cb-user",
+      "role": "user"
+    },
+    "chaos": {
+      "reset_url": "http://127.0.0.1:18083/chaos/reset",
+      "errors_url": "http://127.0.0.1:18083/chaos/errors"
+    },
+    "phases": [
+      {
+        "name": "healthy-warmup",
+        "description": "Healthy upstream responses before inducing failures.",
+        "expected_statuses": [
+          200
+        ],
+        "load": {
+          "vus": 1,
+          "iterations": 8
+        },
+        "chaos_action": {
+          "type": "reset"
+        }
+      },
+      {
+        "name": "failure-trip",
+        "description": "Forced 500s until the per-target breaker crosses the failure threshold.",
+        "expected_statuses": [
+          500,
+          503
+        ],
+        "load": {
+          "vus": 1,
+          "iterations": 8
+        },
+        "chaos_action": {
+          "type": "errors",
+          "rate": 1.0
+        }
+      },
+      {
+        "name": "open-circuit",
+        "description": "Requests after the breaker opens and the gateway fast-rejects the dead upstream.",
+        "expected_statuses": [
+          503
+        ],
+        "load": {
+          "vus": 1,
+          "iterations": 4
+        },
+        "chaos_action": {
+          "type": "errors",
+          "rate": 1.0
+        }
+      },
+      {
+        "name": "recovery",
+        "description": "Reset chaos, wait past the breaker timeout, then confirm traffic succeeds again.",
+        "expected_statuses": [
+          200
+        ],
+        "load": {
+          "vus": 1,
+          "iterations": 5
+        },
+        "sleep_before": "31s",
+        "chaos_action": {
+          "type": "reset"
+        }
+      }
+    ]
+  }
+}

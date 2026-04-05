@@ -945,6 +945,48 @@ func TestRateLimitingHonorsTrustedProxyXForwardedFor(t *testing.T) {
 	}
 }
 
+func TestResolveTrustedProxiesReturnsNilWhenUnset(t *testing.T) {
+	t.Setenv(trustedProxiesEnvVar, "")
+
+	got, err := resolveTrustedProxies()
+	if err != nil {
+		t.Fatalf("expected empty trusted proxy config to succeed, got %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected no trusted proxies, got %#v", got)
+	}
+}
+
+func TestResolveTrustedProxiesParsesCommaSeparatedPrefixes(t *testing.T) {
+	t.Setenv(trustedProxiesEnvVar, " 127.0.0.1/32, 198.51.100.0/24 ,127.0.0.1/32 ")
+
+	got, err := resolveTrustedProxies()
+	if err != nil {
+		t.Fatalf("expected valid trusted proxy config, got %v", err)
+	}
+
+	want := []netip.Prefix{
+		netip.MustParsePrefix("127.0.0.1/32"),
+		netip.MustParsePrefix("198.51.100.0/24"),
+	}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d trusted proxies, got %#v", len(want), got)
+	}
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("expected trusted proxy %s at index %d, got %s", want[index], index, got[index])
+		}
+	}
+}
+
+func TestResolveTrustedProxiesRejectsInvalidPrefix(t *testing.T) {
+	t.Setenv(trustedProxiesEnvVar, "127.0.0.1/32, not-a-prefix")
+
+	if _, err := resolveTrustedProxies(); err == nil {
+		t.Fatal("expected invalid trusted proxy prefix to fail")
+	}
+}
+
 func TestProtectedRoutesForwardJWTIdentityAndOverrideSpoofedHeaders(t *testing.T) {
 	var forwardedRequestID string
 	var forwardedUserID string

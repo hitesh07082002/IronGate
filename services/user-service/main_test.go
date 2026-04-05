@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -64,6 +65,57 @@ func TestLoginReturnsSignedHS256JWT(t *testing.T) {
 		if expiresAt.Before(time.Now().Add(50*time.Minute)) || expiresAt.After(time.Now().Add(70*time.Minute)) {
 			t.Fatalf("expected exp about one hour ahead, got %s", expiresAt)
 		}
+	}
+}
+
+func TestLoginAllowsBenchmarkClaimOverrides(t *testing.T) {
+	handler := newHandler("service-secret")
+
+	req := httptest.NewRequest(http.MethodPost, "/users/login", bytes.NewBufferString(`{"subject":"bench-u-42","role":"user"}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d with body %s", resp.Code, resp.Body.String())
+	}
+
+	var payload struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode login response: %v", err)
+	}
+
+	token, err := jwt.Parse(payload.Token, func(token *jwt.Token) (any, error) {
+		return []byte("service-secret"), nil
+	})
+	if err != nil {
+		t.Fatalf("parse login token: %v", err)
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		t.Fatalf("expected map claims, got %T", token.Claims)
+	}
+	if got := claims["sub"]; got != "bench-u-42" {
+		t.Fatalf("expected overridden sub %q, got %#v", "bench-u-42", got)
+	}
+	if got := claims["role"]; got != "user" {
+		t.Fatalf("expected overridden role %q, got %#v", "user", got)
+	}
+}
+
+func TestLoginRejectsMalformedOverridePayload(t *testing.T) {
+	handler := newHandler("service-secret")
+
+	req := httptest.NewRequest(http.MethodPost, "/users/login", bytes.NewBufferString(`{"subject":`))
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d with body %s", resp.Code, resp.Body.String())
 	}
 }
 

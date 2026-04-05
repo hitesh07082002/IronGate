@@ -1,6 +1,6 @@
 # IronGate Build Progress
 
-> This tracker reflects what is actually shipped on `main`. If work from a later phase lands early, mark the box based on reality rather than the original week label.
+> This tracker reflects what is actually shipped in the current branch. If work from a later phase lands early, mark the box based on reality rather than the original week label.
 
 ## Phase 1: Foundation (Week 1-2)
 - [x] Initialize Git repo, Go modules
@@ -101,11 +101,11 @@
 
 ## Phase 8: Documentation & Benchmarks (Week 7-8) -- NON-NEGOTIABLE
 - [x] ADRs for all architectural decisions (see `ADR/`)
-- [ ] k6 benchmarks: baseline, with rate limiting, full pipeline, during CB transitions
-- [ ] Benchmark results with graphs in `benchmarks/results/`
-- [ ] Polished README with architecture diagram, quick start, feature overview
-- [ ] Demo GIF or video (2 minutes)
-- [ ] `ARCHITECTURE.md` finalized with real code references
+- [x] k6 benchmarks: baseline, with rate limiting, full pipeline, during CB transitions
+- [x] Benchmark results with graphs in `benchmarks/results/`
+- [x] Polished README with architecture diagram, quick start, feature overview
+- [x] Demo capture workflow for the 2-minute GIF/video via `scripts/capture-demo.sh` + `artifacts/demo/README.md`
+- [x] `ARCHITECTURE.md` finalized with real code references
 
 ## Stretch Goals
 - [ ] Chaos control panel (single HTML page)

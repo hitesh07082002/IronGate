@@ -13,9 +13,9 @@
 
 **IronGate** is a lightweight, configurable API gateway built in Go. The target end-state handles routing, authentication, rate limiting, load balancing, circuit breaking, retry with exponential backoff, and observability through a single YAML config file.
 
-Current status on `main`: Phase 1 foundation, Phase 2 load balancing, Phase 3 JWT authentication, Phase 4 Redis-backed rate limiting, Phase 5 retry plus circuit breaking, Phase 6 observability, and Phase 7 runtime-readiness management are shipped.
+Current branch status: Phase 1 foundation, Phase 2 load balancing, Phase 3 JWT authentication, Phase 4 Redis-backed rate limiting, Phase 5 retry plus circuit breaking, Phase 6 observability, Phase 7 runtime-readiness management, and Phase 8 documentation plus benchmark artifacts are shipped in this checkout.
 
-Target end-state: a single `docker-compose up` brings up the gateway, backend services, Redis, Prometheus, and Grafana. Current `main` does that for the shipped auth plus load-balancing plus rate-limiting plus resilience plus observability plus readiness flow, with `JWT_SECRET`, `GRAFANA_ADMIN_USER`, and `GRAFANA_ADMIN_PASSWORD` supplied through the environment.
+Target end-state: a single `docker-compose up` brings up the gateway, backend services, Redis, Prometheus, and Grafana. The current branch does that for the shipped auth plus load-balancing plus rate-limiting plus resilience plus observability plus readiness flow, with `JWT_SECRET`, `GRAFANA_ADMIN_USER`, and `GRAFANA_ADMIN_PASSWORD` supplied through the environment.
 
 ---
 
@@ -202,11 +202,11 @@ Three strategies, selectable per route:
 - Rate-limit rejections over time by service
 - Upstream P95 latency by service
 
-The default checked-in dashboard intentionally focuses on the primary service trend panels above. `gateway_in_flight_requests{service}` and `gateway_retry_delay_seconds{service}` are exported in Prometheus for ad hoc queries and future dashboard expansion, but they are not visualized by default on `main`.
+The default checked-in dashboard intentionally focuses on the primary service trend panels above. `gateway_in_flight_requests{service}` and `gateway_retry_delay_seconds{service}` are exported in Prometheus for ad hoc queries and future dashboard expansion, but they are not visualized by default in the current runtime.
 
 ### 4.8 Distributed Tracing
 
-- Gateway sanitizes incoming `X-Request-ID` and generates a fresh request ID on `main`
+- Gateway sanitizes incoming `X-Request-ID` and generates a fresh request ID in the current runtime
 - Request ID appears in every structured JSON log entry
 - Headers propagated to upstream: `X-Request-ID`, `X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto`, `X-User-ID`, `X-User-Role`
 - On protected routes, the original `Authorization` bearer token is not forwarded after gateway auth succeeds
@@ -238,7 +238,7 @@ Every implemented middleware and proxy path should return errors in this format,
 
 ## 5. Config Schema
 
-Target end-state schema for the full gateway. The shipped Phase 5 runtime config on `main` is a smaller subset and intentionally omits later-phase fields until those behaviors land.
+Target end-state schema for the full gateway. The shipped runtime config is a smaller subset and intentionally omits later-phase fields until those behaviors land.
 
 ```yaml
 server:
@@ -526,6 +526,12 @@ Also running:
 - [ ] README tells a complete story with diagrams, quick start, and demo
 - [ ] Architecture decisions documented with tradeoffs in ADRs
 - [ ] Project can be demoed in under 5 minutes with `demo.sh`
+
+Phase 8 reconciliation note:
+
+- The committed benchmark bundle lives in [`benchmarks/results/20260406-033854-d1edb38/`](./benchmarks/results/20260406-033854-d1edb38/README.md).
+- The committed run was captured on local Apple M4 hardware, not the planned 2-vCPU VPS target, so the explicit 2-vCPU success criterion remains a post-deploy validation item.
+- The README, benchmark suite, recorded graphs, architecture docs, and demo-capture workflow are now present in this branch.
 
 ## GSTACK REVIEW REPORT
 

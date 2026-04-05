@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -69,7 +71,7 @@ func newHandler(jwtSecret string) http.Handler {
 }
 
 func loginHandler(jwtSecret string, user map[string]any) http.HandlerFunc {
-	return func(w http.ResponseWriter, _ *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
 		if strings.TrimSpace(jwtSecret) == "" {
 			common.WriteJSON(w, http.StatusInternalServerError, map[string]string{
 				"error": "jwt secret not configured",
@@ -77,7 +79,15 @@ func loginHandler(jwtSecret string, user map[string]any) http.HandlerFunc {
 			return
 		}
 
-		token, err := signLoginToken(jwtSecret, user["id"].(string), user["role"].(string), time.Now())
+		subject, role, err := resolveLoginClaims(r, user)
+		if err != nil {
+			common.WriteJSON(w, http.StatusBadRequest, map[string]string{
+				"error": "invalid login request",
+			})
+			return
+		}
+
+		token, err := signLoginToken(jwtSecret, subject, role, time.Now())
 		if err != nil {
 			slog.Error("failed to sign login token", "error", err)
 			common.WriteJSON(w, http.StatusInternalServerError, map[string]string{
@@ -90,6 +100,46 @@ func loginHandler(jwtSecret string, user map[string]any) http.HandlerFunc {
 			"token": token,
 		})
 	}
+}
+
+func resolveLoginClaims(r *http.Request, user map[string]any) (string, string, error) {
+	subject := strings.TrimSpace(fmt.Sprint(user["id"]))
+	role := strings.TrimSpace(fmt.Sprint(user["role"]))
+	if r == nil || r.Body == nil {
+		return subject, role, nil
+	}
+
+	var payload struct {
+		Subject string `json:"subject"`
+		Role    string `json:"role"`
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&payload); err != nil {
+		if errors.Is(err, io.EOF) {
+			return subject, role, nil
+		}
+
+		return "", "", err
+	}
+
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return "", "", fmt.Errorf("unexpected trailing JSON payload")
+		}
+
+		return "", "", err
+	}
+
+	if override := strings.TrimSpace(payload.Subject); override != "" {
+		subject = override
+	}
+	if override := strings.TrimSpace(payload.Role); override != "" {
+		role = override
+	}
+
+	return subject, role, nil
 }
 
 func signLoginToken(jwtSecret, subject, role string, issuedAt time.Time) (string, error) {
