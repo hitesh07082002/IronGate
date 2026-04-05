@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httputil"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/hitesh07082002/irongate/internal/middleware"
 	"github.com/hitesh07082002/irongate/internal/response"
+	"github.com/hitesh07082002/irongate/internal/transport"
 )
 
 const (
@@ -51,17 +53,24 @@ func New(logger *slog.Logger, defaultTimeout time.Duration, upstreamTransport ht
 		},
 		Transport: upstreamTransport,
 		ModifyResponse: func(resp *http.Response) error {
-			if resp != nil && resp.Request != nil && resp.Header.Get("X-Served-By") == "" {
-				resp.Header.Set("X-Served-By", resp.Request.URL.Host)
+			if resp != nil && resp.Request != nil && resp.Header.Get(transport.HeaderServedBy) == "" {
+				resp.Header.Set(transport.HeaderServedBy, resp.Request.URL.Host)
 			}
 			return nil
 		},
 		ErrorHandler: func(w http.ResponseWriter, req *http.Request, err error) {
 			statusCode := http.StatusBadGateway
 			message := "upstream request failed"
-			if errors.Is(err, context.DeadlineExceeded) || errors.Is(req.Context().Err(), context.DeadlineExceeded) {
+			switch {
+			case errors.Is(err, context.DeadlineExceeded), errors.Is(req.Context().Err(), context.DeadlineExceeded):
 				statusCode = http.StatusGatewayTimeout
 				message = "upstream request timed out"
+			case errors.Is(err, transport.ErrNoHealthyTargets):
+				statusCode = http.StatusServiceUnavailable
+				message = noHealthyTargetsMessage(req)
+			case errors.Is(err, transport.ErrCircuitOpen):
+				statusCode = http.StatusServiceUnavailable
+				message = "upstream circuit is open"
 			}
 
 			logger.Error("proxy error",
@@ -70,6 +79,7 @@ func New(logger *slog.Logger, defaultTimeout time.Duration, upstreamTransport ht
 				"request_id", response.RequestID(req),
 				"error", err,
 			)
+			transport.ApplyErrorHeaders(w.Header(), err)
 			response.WriteError(w, req, statusCode, message)
 		},
 	}
@@ -137,4 +147,13 @@ func stripPrefix(prefix, path string) string {
 	}
 
 	return trimmed
+}
+
+func noHealthyTargetsMessage(req *http.Request) string {
+	route := middleware.GetRouteConfig(req)
+	if route == nil || route.Service == "" {
+		return "no healthy targets available"
+	}
+
+	return fmt.Sprintf("no healthy targets for service: %s", route.Service)
 }

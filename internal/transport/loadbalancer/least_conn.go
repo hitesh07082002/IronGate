@@ -25,19 +25,27 @@ func NewLeastConn(targets []config.Target) *LeastConn {
 	return &LeastConn{targets: leastConnTargets}
 }
 
-func (lc *LeastConn) Select() (Selection, error) {
+func (lc *LeastConn) Select(options SelectionOptions) (Selection, error) {
 	if len(lc.targets) == 0 {
 		return Selection{}, ErrNoTargets
 	}
 
-	best := lc.targets[0]
-	bestActive := best.active.Load()
-	for _, candidate := range lc.targets[1:] {
+	var best *leastConnTarget
+	var bestActive int64
+	for _, candidate := range lc.targets {
+		if isExcluded(options, candidate.target) {
+			continue
+		}
+
 		candidateActive := candidate.active.Load()
-		if candidateActive < bestActive {
+		if best == nil || candidateActive < bestActive {
 			best = candidate
 			bestActive = candidateActive
 		}
+	}
+
+	if best == nil {
+		return Selection{}, ErrNoTargets
 	}
 
 	best.active.Add(1)

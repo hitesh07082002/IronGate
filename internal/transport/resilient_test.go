@@ -22,7 +22,7 @@ func TestLoadBalancerTransportInitializesNilResponseHeaders(t *testing.T) {
 			Body:       http.NoBody,
 			Request:    req,
 		}, nil
-	}))
+	}), config.CBConfig{})
 
 	route := &config.RouteConfig{
 		Path:         "/api/users",
@@ -46,7 +46,7 @@ func TestLoadBalancerTransportInitializesNilResponseHeaders(t *testing.T) {
 	if resp.Header == nil {
 		t.Fatal("expected transport to initialize response headers")
 	}
-	if got := resp.Header.Get(servedByHeader); got != "user-service-1:8081" {
+	if got := resp.Header.Get(HeaderServedBy); got != "user-service-1:8081" {
 		t.Fatalf("expected %q, got %q", "user-service-1:8081", got)
 	}
 }

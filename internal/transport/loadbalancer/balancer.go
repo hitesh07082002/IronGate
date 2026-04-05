@@ -3,6 +3,8 @@ package loadbalancer
 import (
 	"errors"
 	"fmt"
+	"net"
+	"strconv"
 
 	"github.com/hitesh07082002/irongate/internal/config"
 )
@@ -10,12 +12,16 @@ import (
 var ErrNoTargets = errors.New("no targets configured")
 
 type Balancer interface {
-	Select() (Selection, error)
+	Select(options SelectionOptions) (Selection, error)
 }
 
 type Selection struct {
 	Target config.Target
 	Done   func()
+}
+
+type SelectionOptions struct {
+	ExcludeTargets map[string]struct{}
 }
 
 func New(strategy string, targets []config.Target) (Balancer, error) {
@@ -36,3 +42,16 @@ func cloneTargets(targets []config.Target) []config.Target {
 }
 
 func noopDone() {}
+
+func isExcluded(options SelectionOptions, target config.Target) bool {
+	if len(options.ExcludeTargets) == 0 {
+		return false
+	}
+
+	_, excluded := options.ExcludeTargets[targetAddress(target)]
+	return excluded
+}
+
+func targetAddress(target config.Target) string {
+	return net.JoinHostPort(target.Host, strconv.Itoa(target.Port))
+}

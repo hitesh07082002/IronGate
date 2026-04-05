@@ -15,14 +15,23 @@ func NewRoundRobin(targets []config.Target) *RoundRobin {
 	return &RoundRobin{targets: cloneTargets(targets)}
 }
 
-func (rr *RoundRobin) Select() (Selection, error) {
+func (rr *RoundRobin) Select(options SelectionOptions) (Selection, error) {
 	if len(rr.targets) == 0 {
 		return Selection{}, ErrNoTargets
 	}
 
-	index := (rr.next.Add(1) - 1) % uint64(len(rr.targets))
-	return Selection{
-		Target: rr.targets[index],
-		Done:   noopDone,
-	}, nil
+	start := rr.next.Add(1) - 1
+	for offset := range len(rr.targets) {
+		index := (start + uint64(offset)) % uint64(len(rr.targets))
+		if isExcluded(options, rr.targets[index]) {
+			continue
+		}
+
+		return Selection{
+			Target: rr.targets[index],
+			Done:   noopDone,
+		}, nil
+	}
+
+	return Selection{}, ErrNoTargets
 }

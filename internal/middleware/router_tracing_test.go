@@ -132,54 +132,33 @@ func TestStatusRecorderDefaultsToOKAndIgnoresSecondWriteHeader(t *testing.T) {
 	}
 }
 
-func TestUnsupportedFeaturesBlocksRetryAndAllowsRateLimitOnlyRoutes(t *testing.T) {
-	t.Run("retry is still blocked", func(t *testing.T) {
-		handler := UnsupportedFeatures()(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-			t.Fatal("expected retry-configured route to stop before next handler")
-		}))
+func TestUnsupportedFeaturesAllowsRoutesThroughNowThatRetryIsLive(t *testing.T) {
+	nextCalled := false
+	handler := UnsupportedFeatures()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		nextCalled = true
+		w.WriteHeader(http.StatusNoContent)
+	}))
 
-		req := httptest.NewRequest(http.MethodGet, "/api/orders", nil)
-		req = req.WithContext(context.WithValue(req.Context(), RouteConfigKey, &config.RouteConfig{
-			Path:    "/api/orders",
-			Service: "order-service",
-			Retry:   config.RetryConfig{MaxAttempts: 2},
-		}))
+	req := httptest.NewRequest(http.MethodGet, "/api/orders", nil)
+	req = req.WithContext(context.WithValue(req.Context(), RouteConfigKey, &config.RouteConfig{
+		Path:    "/api/orders",
+		Service: "order-service",
+		Retry:   config.RetryConfig{MaxAttempts: 2},
+		RateLimit: &config.RateLimitConfig{
+			Requests: 10,
+			Window:   time.Minute,
+		},
+	}))
 
-		recorder := httptest.NewRecorder()
-		handler.ServeHTTP(recorder, req)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
 
-		if recorder.Code != http.StatusNotImplemented {
-			t.Fatalf("expected 501, got %d", recorder.Code)
-		}
-	})
-
-	t.Run("rate limit no longer trips unsupported middleware", func(t *testing.T) {
-		nextCalled := false
-		handler := UnsupportedFeatures()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			nextCalled = true
-			w.WriteHeader(http.StatusNoContent)
-		}))
-
-		req := httptest.NewRequest(http.MethodGet, "/api/orders", nil)
-		req = req.WithContext(context.WithValue(req.Context(), RouteConfigKey, &config.RouteConfig{
-			Path:    "/api/orders",
-			Service: "order-service",
-			RateLimit: &config.RateLimitConfig{
-				Requests: 10,
-				Window:   time.Minute,
-			},
-		}))
-
-		recorder := httptest.NewRecorder()
-		handler.ServeHTTP(recorder, req)
-
-		if !nextCalled {
-			t.Fatal("expected rate-limited route to pass through unsupported middleware")
-		}
-		if recorder.Code != http.StatusNoContent {
-			t.Fatalf("expected 204, got %d", recorder.Code)
-		}
-	})
+	if !nextCalled {
+		t.Fatal("expected retry-configured route to pass through unsupported middleware")
+	}
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", recorder.Code)
+	}
 }
 
 func TestUnsupportedFeaturesRequiresRouteConfig(t *testing.T) {

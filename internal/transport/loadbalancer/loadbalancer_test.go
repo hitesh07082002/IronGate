@@ -18,7 +18,7 @@ func TestRoundRobinCyclesThroughTargets(t *testing.T) {
 
 	got := make([]string, 0, 6)
 	for range 6 {
-		selection, err := balancer.Select()
+		selection, err := balancer.Select(SelectionOptions{})
 		if err != nil {
 			t.Fatalf("select target: %v", err)
 		}
@@ -44,7 +44,7 @@ func TestWeightedUsesSmoothWeightedRoundRobin(t *testing.T) {
 
 	got := make([]string, 0, 8)
 	for range 8 {
-		selection, err := balancer.Select()
+		selection, err := balancer.Select(SelectionOptions{})
 		if err != nil {
 			t.Fatalf("select target: %v", err)
 		}
@@ -72,7 +72,7 @@ func TestWeightedDefaultsMissingWeightsToOne(t *testing.T) {
 
 	got := make([]string, 0, 4)
 	for range 4 {
-		selection, err := balancer.Select()
+		selection, err := balancer.Select(SelectionOptions{})
 		if err != nil {
 			t.Fatalf("select target: %v", err)
 		}
@@ -93,7 +93,7 @@ func TestLeastConnPrefersTargetWithFewestActiveRequests(t *testing.T) {
 		{Host: "order-service-2", Port: 8092},
 	})
 
-	first, err := balancer.Select()
+	first, err := balancer.Select(SelectionOptions{})
 	if err != nil {
 		t.Fatalf("select first target: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestLeastConnPrefersTargetWithFewestActiveRequests(t *testing.T) {
 		t.Fatalf("expected first target to break tie with order-service-1, got %s", first.Target.Host)
 	}
 
-	second, err := balancer.Select()
+	second, err := balancer.Select(SelectionOptions{})
 	if err != nil {
 		t.Fatalf("select second target: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestLeastConnPrefersTargetWithFewestActiveRequests(t *testing.T) {
 
 	second.Done()
 
-	third, err := balancer.Select()
+	third, err := balancer.Select(SelectionOptions{})
 	if err != nil {
 		t.Fatalf("select third target: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestLeastConnPrefersTargetWithFewestActiveRequests(t *testing.T) {
 	first.Done()
 	third.Done()
 
-	fourth, err := balancer.Select()
+	fourth, err := balancer.Select(SelectionOptions{})
 	if err != nil {
 		t.Fatalf("select fourth target: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestLeastConnConcurrentSelectionsReleaseAllActiveCounts(t *testing.T) {
 			<-start
 
 			for range 200 {
-				selection, err := balancer.Select()
+				selection, err := balancer.Select(SelectionOptions{})
 				if err != nil {
 					t.Errorf("select target: %v", err)
 					return

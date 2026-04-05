@@ -65,7 +65,7 @@ func buildHandlerWithOptions(cfg *config.Config, logger *slog.Logger, options bu
 		rateLimitStore = ratelimit.NewRedisStore(cfg.Redis)
 	}
 
-	proxyHandler := proxy.New(logger, cfg.Server.WriteTimeout, transport.NewResilientTransport(nil))
+	proxyHandler := proxy.New(logger, cfg.Server.WriteTimeout, transport.NewResilientTransport(nil, cfg.CircuitBreaker))
 	return middleware.Chain(
 		proxyHandler,
 		middleware.Tracing(logger),
@@ -74,7 +74,6 @@ func buildHandlerWithOptions(cfg *config.Config, logger *slog.Logger, options bu
 		middleware.RateLimiter(rateLimitStore, logger, middleware.RateLimiterOptions{
 			TrustedProxies: options.trustedProxies,
 		}),
-		middleware.UnsupportedFeatures(),
 	)
 }
 

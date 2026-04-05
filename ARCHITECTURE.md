@@ -2,7 +2,7 @@
 
 > This is the implementation reference for the current `main` branch.
 >
-> Project status: in progress. `main` has shipped Phase 1 foundation, Phase 2 load balancing, Phase 3 JWT authentication, and Phase 4 Redis-backed rate limiting. Later phases remain planned.
+> Project status: in progress. `main` has shipped Phase 1 foundation, Phase 2 load balancing, Phase 3 JWT authentication, Phase 4 Redis-backed rate limiting, and Phase 5 retry plus circuit breaking. Later phases remain planned.
 >
 > For target end-state scope and design, see [`PROJECT_SPEC.md`](./PROJECT_SPEC.md) and [`DESIGN_DOC.md`](./DESIGN_DOC.md). If either conflicts with this file, this file wins for the current runtime.
 
@@ -13,7 +13,7 @@
 This file documents the architecture that is actually shipped on `main` today:
 
 - live middleware and transport ordering
-- current config contract and fail-closed behavior
+- current config contract and runtime defaults
 - current headers, routes, and verification coverage
 
 ## Full Project Target Design
@@ -31,8 +31,8 @@ The complete end-state and future-phase architecture lives in:
 ### Shipped on `main`
 
 - Reverse proxy gateway built with `net/http` and `httputil.ReverseProxy`
-- Outer middleware chain: `Tracing -> Router -> Auth -> RateLimiter -> UnsupportedFeatures -> Proxy`
-- Inner transport chain: `LoadBalancer -> BaseTransport`
+- Outer middleware chain: `Tracing -> Router -> Auth -> RateLimiter -> Proxy`
+- Inner transport chain: `Retry -> LoadBalancer -> CircuitBreaker -> BaseTransport`
 - Load-balancing strategies:
   - `round_robin` via atomic counter
   - `weighted` via smooth weighted round robin
@@ -41,6 +41,7 @@ The complete end-state and future-phase architecture lives in:
 - Per-route timeout handling in the proxy
 - `X-Forwarded-*` propagation through proxy rewrite
 - `X-Served-By` reporting the actual selected upstream
+- `X-Retry-Count` and `X-Retry-Target` reporting retry outcomes
 - Gateway-served `/health` route via `gateway-internal`
 - Gateway-exposed payment routes: `POST /api/payments` for creation and `GET /api/payments/{id}` for status lookup
 - Docker Compose with:
@@ -54,13 +55,11 @@ The complete end-state and future-phase architecture lives in:
 
 ### Planned, not shipped yet
 
-- Retry transport
-- Circuit breaker transport
 - Metrics, Prometheus, and Grafana
 - Config hot reload
 - Graceful shutdown and readiness endpoints
 
-The codebase already contains some future-facing config fields so later phases can plug into the same route model. On `main`, unsupported later-phase route features fail closed instead of being silently ignored.
+The codebase still contains some future-facing config fields so later phases can plug into the same route model. On `main`, unsupported later-phase features such as non-sliding-window rate limiting still fail closed instead of being silently ignored.
 
 ---
 
@@ -137,14 +136,13 @@ return middleware.Chain(
     middleware.Router(cfg.Routes),
     middleware.Auth(cfg.Auth),
     middleware.RateLimiter(rateLimitStore, logger, ...),
-    middleware.UnsupportedFeatures(),
 )
 ```
 
 Because `Chain` applies middleware in reverse order, the live request flow is:
 
 ```text
-Request -> [Tracing] -> [Router] -> [Auth] -> [RateLimiter] -> [UnsupportedFeatures] -> [Proxy] -> Response
+Request -> [Tracing] -> [Router] -> [Auth] -> [RateLimiter] -> [Proxy] -> Response
 ```
 
 #### `Tracing`
@@ -196,10 +194,8 @@ This is a deliberate sanitization boundary. Client-supplied request IDs are not 
 
 #### `UnsupportedFeatures`
 
-- Fails closed for route features that are planned but not implemented
-- Returns `501 Not Implemented` when a matched route uses retry config with `max_attempts > 1`
-
-This guard exists so future-facing config does not silently do nothing.
+- No longer participates in the live Phase 5 handler chain
+- Retained only as a compatibility shim for legacy references and tests
 
 #### `Proxy`
 
@@ -207,18 +203,30 @@ This guard exists so future-facing config does not silently do nothing.
 - Applies per-route timeout with fallback to server `WriteTimeout`
 - Delegates all upstream selection to the transport layer
 - Uses `httputil.ReverseProxy` `Rewrite`, not `Director`
+- Maps `transport.ErrCircuitOpen` and `transport.ErrNoHealthyTargets` to standardized `503` JSON responses
+- Preserves `504` for upstream deadline expiry
 
 ---
 
 ## 4. Current Transport Pipeline
 
-`transport.NewResilientTransport(nil)` currently returns:
+`transport.NewResilientTransport(nil, cfg.CircuitBreaker)` currently returns:
 
 ```text
-[LoadBalancerTransport] -> [Base http.Transport]
+[RetryTransport] -> [LoadBalancerTransport] -> [CircuitBreakerTransport] -> [Base http.Transport]
 ```
 
-There is no retry or circuit-breaker layer on `main` yet.
+Retry owns the per-attempt loop, load balancer target selection, and circuit-breaker fail-fast behavior are explicit transport layers now.
+
+### Retry Transport
+
+- Reads per-route retry config from `RouteConfig` in context
+- Retries only idempotent methods by default: `GET`, `HEAD`, `PUT`, `DELETE`, `OPTIONS`
+- Retries only `502`, `503`, `504`, plus transient connection and timeout errors
+- Applies exponential backoff with full jitter
+- Replays buffered request bodies for retried requests with bodies
+- Carries retry count plus already-tried targets in request context so downstream layers can act on per-attempt metadata
+- Treats open circuits as fail-fast target exclusions, not backoff retries
 
 ### Load Balancer Transport
 
@@ -226,7 +234,16 @@ There is no retry or circuit-breaker layer on `main` yet.
 - Selects a target inside the transport layer, not in the proxy director path
 - Clones the request before mutating upstream URL/host
 - Sets `X-Served-By` from the actual selected upstream host
+- Sets `X-Retry-Count` and `X-Retry-Target` from the final attempt metadata
+- Prefers a different target on retry attempts when alternatives exist
 - Releases least-connection counters when the response body is fully read or closed
+
+### Circuit Breaker Transport
+
+- Maintains a concurrent-safe per-target (`host:port`) breaker registry
+- Counts only `5xx` responses plus connection and timeout failures toward opening a circuit
+- Supports `CLOSED -> OPEN -> HALF-OPEN -> CLOSED`
+- Returns `transport.ErrCircuitOpen` for open targets so retry can fail over or surface `no healthy targets`
 
 ### Base Transport
 
@@ -388,18 +405,16 @@ Key test coverage lives in:
 
 ## 9. Planned Extensions
 
-The target end-state still uses the same architectural split:
+The live runtime still uses the same architectural split:
 
 - outer `http.Handler` middleware for request-level concerns
 - inner `http.RoundTripper` layers for transport-level concerns
 
-Planned order when later phases land:
+Current steady-state order:
 
 ```text
 Outer: [Tracing] -> [Router] -> [Auth] -> [RateLimiter] -> [Proxy]
 Inner: [Retry] -> [LoadBalancer] -> [CircuitBreaker] -> [BaseTransport]
 ```
 
-`UnsupportedFeatures` is a temporary current-`main` guard. It drops out once retry is implemented instead of fail-closing route retry config.
-
-Treat that as the roadmap, not the current runtime.
+Treat that ordering as the current runtime. Later phases add observability and operational tooling without changing the core request/transport split.
