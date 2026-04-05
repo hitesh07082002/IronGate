@@ -3,6 +3,7 @@ module github.com/hitesh07082002/irongate
 go 1.24.4
 
 require (
+	github.com/fsnotify/fsnotify v1.7.0
 	github.com/golang-jwt/jwt/v5 v5.2.2
 	github.com/google/uuid v1.6.0
 	github.com/prometheus/client_golang v1.20.5

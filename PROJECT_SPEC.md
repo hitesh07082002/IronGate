@@ -110,7 +110,8 @@ Every serious proxy in production — Traefik, Caddy, KrakenD, Envoy's control p
 - Router matches request paths to route configs using prefix matching
 - `strip_prefix` removes the matching prefix before forwarding (e.g., `/api/users/1` → `/users/1`)
 - Config validation at startup rejects: empty targets, unknown LB strategies, unknown retry jitter values, non-positive rate limits, missing `redis.address` when rate limiting is configured, negative `redis.db`, missing JWT secret, invalid durations
-- Hot-reload in Phase 7: file watcher detects changes → parse → validate → swap atomically (keep old config on validation failure)
+- Hot-reload in Phase 7: file watcher detects changes → parse → validate → build a fresh runtime snapshot → swap atomically (keep the old runtime on validation or construction failure)
+- Startup-only server fields (`server.port`, `server.read_timeout`, `server.write_timeout`) are validated on reload but intentionally do not change the live listener
 
 ### 4.2 Rate Limiting
 
@@ -225,6 +226,13 @@ All error responses from the gateway follow a consistent JSON structure:
 ```
 
 Every implemented middleware and proxy path should return errors in this format, and later phases must preserve it. The `request_id` field links every error to the distributed trace, making debugging straightforward.
+
+### 4.10 Runtime Health and Shutdown
+
+- `/health` is liveness-only and remains `200` while the gateway process is alive
+- `/ready` returns `200` only when a valid runtime snapshot is loaded and shutdown has not begun
+- Graceful shutdown flips `/ready` to `503` before draining in-flight requests with a bounded timeout
+- Gateway-internal routes such as `/health`, `/ready`, and `/metrics` are served directly by the gateway and are never proxied upstream
 
 ---
 
@@ -349,6 +357,11 @@ routes:
     load_balancer: "round_robin"
 
   - path: "/health"
+    service: "gateway-internal"
+    auth_required: false
+    rate_limit: null
+
+  - path: "/ready"
     service: "gateway-internal"
     auth_required: false
     rate_limit: null

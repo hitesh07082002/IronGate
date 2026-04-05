@@ -90,14 +90,14 @@
 - [x] Export dashboard JSON for version control
 
 ## Phase 7: Polish & Production Readiness (Week 6-7)
-- [ ] Refactor Config to `atomic.Pointer[Config]` for hot-reload
-- [ ] fsnotify file watcher: parse -> validate -> store (keep old on invalid)
-- [ ] Graceful shutdown (drain in-flight requests)
+- [x] Atomic runtime snapshot manager for hot-reloadable request handling
+- [x] fsnotify file watcher: parse -> validate -> build new runtime -> swap atomically (keep old snapshot on invalid reload)
+- [x] Graceful shutdown (drain in-flight requests)
 - [x] `/health` endpoint for gateway
-- [ ] `/ready` endpoint for gateway
-- [ ] Comprehensive integration test suite
-- [ ] Makefile: `make build`, `make test`, `make run`, `make docker-up`, `make load-test`
-- [ ] `demo.sh` automated demo script
+- [x] `/ready` endpoint for gateway
+- [x] Comprehensive integration coverage for reload, invalid reload fallback, readiness, and graceful shutdown
+- [x] Makefile: `make load-test` (`make build`, `make test`, `make run`, and `make docker-up` were already shipped earlier)
+- [x] `demo.sh` automated demo script
 
 ## Phase 8: Documentation & Benchmarks (Week 7-8) -- NON-NEGOTIABLE
 - [x] ADRs for all architectural decisions (see `ADR/`)

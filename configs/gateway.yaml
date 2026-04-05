@@ -110,6 +110,10 @@ routes:
     service: "gateway-internal"
     auth_required: false
 
+  - path: "/ready"
+    service: "gateway-internal"
+    auth_required: false
+
 circuit_breaker:
   failure_threshold: 5
   success_threshold: 3

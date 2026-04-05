@@ -105,6 +105,22 @@ type LoggingConfig struct {
 	Format string `yaml:"format"`
 }
 
+func (c *Config) Clone() *Config {
+	if c == nil {
+		return nil
+	}
+
+	clone := *c
+	if len(c.Routes) > 0 {
+		clone.Routes = make([]RouteConfig, len(c.Routes))
+		for index := range c.Routes {
+			clone.Routes[index] = cloneRouteConfig(c.Routes[index])
+		}
+	}
+
+	return &clone
+}
+
 func Load(path string) (*Config, error) {
 	rawConfig, err := os.ReadFile(path)
 	if err != nil {
@@ -264,4 +280,20 @@ func (c *Config) Validate() []error {
 	}
 
 	return errs
+}
+
+func cloneRouteConfig(route RouteConfig) RouteConfig {
+	clone := route
+	if len(route.Methods) > 0 {
+		clone.Methods = append([]string(nil), route.Methods...)
+	}
+	if len(route.Targets) > 0 {
+		clone.Targets = append([]Target(nil), route.Targets...)
+	}
+	if route.RateLimit != nil {
+		rateLimitClone := *route.RateLimit
+		clone.RateLimit = &rateLimitClone
+	}
+
+	return clone
 }

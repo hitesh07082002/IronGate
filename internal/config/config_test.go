@@ -307,7 +307,7 @@ func TestValidateTrimsRoutePathBeforeMetricsConflictChecks(t *testing.T) {
 	assertContains(t, joined, `metrics.path "/metrics" must not overlap configured route path "/metrics"`)
 }
 
-func TestGatewayConfigPhaseSixEnablesRetryCircuitBreakingAndMetrics(t *testing.T) {
+func TestGatewayConfigPhaseSevenEnablesRuntimeReadinessAndMetrics(t *testing.T) {
 	t.Setenv("JWT_SECRET", "test-secret")
 
 	cfg, err := Load(repoPathFromThisFile("configs", "gateway.yaml"))
@@ -316,7 +316,7 @@ func TestGatewayConfigPhaseSixEnablesRetryCircuitBreakingAndMetrics(t *testing.T
 	}
 
 	if errs := cfg.Validate(); len(errs) != 0 {
-		t.Fatalf("expected checked-in Phase 6 config to validate, got %v", errs)
+		t.Fatalf("expected checked-in Phase 7 config to validate, got %v", errs)
 	}
 
 	loginRoute := findRouteByPath(cfg.Routes, "/api/users/login")
@@ -325,9 +325,10 @@ func TestGatewayConfigPhaseSixEnablesRetryCircuitBreakingAndMetrics(t *testing.T
 	ordersRoute := findRouteByPath(cfg.Routes, "/api/orders")
 	paymentsRoute := findRouteByPath(cfg.Routes, "/api/payments")
 	healthRoute := findRouteByPath(cfg.Routes, "/health")
+	readyRoute := findRouteByPath(cfg.Routes, "/ready")
 
-	if loginRoute == nil || registerRoute == nil || usersRoute == nil || ordersRoute == nil || paymentsRoute == nil || healthRoute == nil {
-		t.Fatalf("expected login, register, users, orders, payments, and health routes to exist")
+	if loginRoute == nil || registerRoute == nil || usersRoute == nil || ordersRoute == nil || paymentsRoute == nil || healthRoute == nil || readyRoute == nil {
+		t.Fatalf("expected login, register, users, orders, payments, health, and ready routes to exist")
 	}
 	if cfg.CircuitBreaker.FailureThreshold != 5 {
 		t.Fatalf("expected circuit breaker failure threshold 5, got %d", cfg.CircuitBreaker.FailureThreshold)
@@ -398,6 +399,9 @@ func TestGatewayConfigPhaseSixEnablesRetryCircuitBreakingAndMetrics(t *testing.T
 	}
 	if healthRoute.RateLimit != nil {
 		t.Fatalf("expected /health to remain exempt from rate limiting")
+	}
+	if readyRoute.RateLimit != nil {
+		t.Fatalf("expected /ready to remain exempt from rate limiting")
 	}
 
 	assertRouteMethods(t, paymentsRoute, "GET", "POST")
