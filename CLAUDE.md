@@ -49,7 +49,9 @@ IRONGATE_TEST_REDIS_ADDR=127.0.0.1:6379 make test       # run all tests, includi
 IRONGATE_TEST_REDIS_ADDR=127.0.0.1:6379 make coverage   # enforce the 70% statement coverage gate
 IRONGATE_TEST_REDIS_ADDR=127.0.0.1:6379 make test-race  # run race-enabled tests
 make lint       # gofmt check + go vet
+make all        # alias to build
 make build      # compile gateway binary
+make clean      # remove generated binaries and coverage artifacts
 make run        # start gateway on :8080
 ```
 

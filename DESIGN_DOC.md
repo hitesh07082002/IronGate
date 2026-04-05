@@ -33,27 +33,29 @@ Inner: [LoadBalancer] -> [Base HTTP Transport]
 ```
 
 The sections below describe the target end-state ordering after later phases land. On `main`, `UnsupportedFeatures` still sits between `RateLimiter` and `Proxy` so retry remains fail-closed until Phase 5 lands.
+Once retry is implemented, that temporary guard drops out of the steady-state outer chain.
 
 **Outer chain — `http.Handler` middleware (request-level):**
 
 Each middleware wraps the next handler. Applied in reverse order so the first-listed is outermost:
 
 ```text
-Request → [Tracing] → [Router] → [Auth] → [RateLimiter] → [UnsupportedFeatures] → [Proxy] → Response
+Request → [Tracing] → [Router] → [Auth] → [RateLimiter] → [Proxy] → Response
 ```
 
 - **Tracing** sanitizes any incoming request ID and generates the `X-Request-ID` used for the request lifecycle.
 - **Router** matches path to route config, stores config in `context.Context`.
 - **Auth** reads `auth_required` from context, validates JWT, injects `X-User-ID`/`X-User-Role`, and strips the bearer token before proxying protected requests.
 - **RateLimiter** reads rate limit config from context, checks Redis sliding window.
-- **UnsupportedFeatures** still fail-closes later-phase route config such as retry until those behaviors land.
 - **Proxy** is `httputil.ReverseProxy` with a custom `Transport` (the inner chain).
+
+Current `main` note: `UnsupportedFeatures` still sits between `RateLimiter` and `Proxy` until Phase 5 ships, so retry config fails closed instead of being silently ignored.
 
 **Inner chain — `http.RoundTripper` (transport-level):**
 
 Lives inside the Proxy's `Transport` field. Each layer implements `RoundTrip(*Request) (*Response, error)`:
 
-```
+```text
 Proxy calls Transport.RoundTrip(req):
   → [Retry] → [LoadBalancer] → [CircuitBreaker] → [Base HTTP Transport]
 ```
@@ -98,8 +100,7 @@ See [ADR-002: Auth Before Rate Limiting](./ADR/002-auth-before-rate-limiting.md)
                    │                                             │  │
                    │  ┌── OUTER CHAIN (http.Handler) ──────────┐ │  │
                    │  │  [Tracing] → [Router] → [Auth]         │ │  │
-                   │  │  → [RateLimiter] → [UnsupportedFeatures]│ │  │
-                   │  │  → [Proxy]                             │ │  │
+                   │  │  → [RateLimiter] → [Proxy]            │ │  │
                    │  └────────────────────────────────────────┘ │  │
                    │                    │                         │  │
                    │  ┌── INNER CHAIN (http.RoundTripper) ─────┐ │  │

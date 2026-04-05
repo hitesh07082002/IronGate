@@ -400,4 +400,6 @@ Outer: [Tracing] -> [Router] -> [Auth] -> [RateLimiter] -> [Proxy]
 Inner: [Retry] -> [LoadBalancer] -> [CircuitBreaker] -> [BaseTransport]
 ```
 
+`UnsupportedFeatures` is a temporary current-`main` guard. It drops out once retry is implemented instead of fail-closing route retry config.
+
 Treat that as the roadmap, not the current runtime.
