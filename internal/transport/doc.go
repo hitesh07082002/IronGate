@@ -1,2 +1,2 @@
-// Package transport is reserved for the inner RoundTripper chain that lands in later phases.
+// Package transport implements the inner RoundTripper chain used by the gateway proxy.
 package transport

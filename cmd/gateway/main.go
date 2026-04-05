@@ -11,6 +11,7 @@ import (
 	"github.com/hitesh07082002/irongate/internal/config"
 	"github.com/hitesh07082002/irongate/internal/middleware"
 	"github.com/hitesh07082002/irongate/internal/proxy"
+	"github.com/hitesh07082002/irongate/internal/transport"
 )
 
 func main() {
@@ -48,7 +49,7 @@ func main() {
 }
 
 func buildHandler(cfg *config.Config, logger *slog.Logger) http.Handler {
-	proxyHandler := proxy.New(logger, cfg.Server.WriteTimeout)
+	proxyHandler := proxy.New(logger, cfg.Server.WriteTimeout, transport.NewResilientTransport(nil))
 	return middleware.Chain(
 		proxyHandler,
 		middleware.Tracing(logger),

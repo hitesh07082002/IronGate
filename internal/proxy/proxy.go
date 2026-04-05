@@ -4,10 +4,8 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/http/httputil"
-	"strconv"
 	"strings"
 	"time"
 
@@ -26,37 +24,33 @@ type Handler struct {
 	defaultTimeout time.Duration
 }
 
-func New(logger *slog.Logger, defaultTimeout time.Duration) http.Handler {
+func New(logger *slog.Logger, defaultTimeout time.Duration, upstreamTransport http.RoundTripper) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	if defaultTimeout <= 0 {
 		defaultTimeout = fallbackRouteTimeout
 	}
+	if upstreamTransport == nil {
+		upstreamTransport = http.DefaultTransport
+	}
 
 	reverseProxy := &httputil.ReverseProxy{
 		Director: func(req *http.Request) {
 			route := middleware.GetRouteConfig(req)
-			if route == nil || len(route.Targets) == 0 {
+			if route == nil {
 				return
 			}
 
-			target := route.Targets[0]
 			req.URL.Scheme = "http"
-			req.URL.Host = net.JoinHostPort(target.Host, strconv.Itoa(target.Port))
-			req.Host = req.URL.Host
 			req.URL.Path = stripPrefix(route.StripPrefix, req.URL.Path)
 			if req.URL.RawPath != "" {
 				req.URL.RawPath = stripPrefix(route.StripPrefix, req.URL.RawPath)
 			}
 		},
-		Transport: &http.Transport{
-			MaxIdleConnsPerHost: 100,
-			MaxConnsPerHost:     100,
-			IdleConnTimeout:     90 * time.Second,
-		},
+		Transport: upstreamTransport,
 		ModifyResponse: func(resp *http.Response) error {
-			if resp != nil && resp.Request != nil {
+			if resp != nil && resp.Request != nil && resp.Header.Get("X-Served-By") == "" {
 				resp.Header.Set("X-Served-By", resp.Request.URL.Host)
 			}
 			return nil

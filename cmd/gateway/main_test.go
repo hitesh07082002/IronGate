@@ -106,6 +106,98 @@ func TestStripPrefixForwardsExpectedPath(t *testing.T) {
 	}
 }
 
+func TestRoundRobinLoadBalancingAlternatesTargets(t *testing.T) {
+	first := httptest.NewServer(instanceHandler("order-service-1"))
+	defer first.Close()
+
+	second := httptest.NewServer(instanceHandler("order-service-2"))
+	defer second.Close()
+
+	route := routeForTargets(t, "/api/orders", "/api", "order-service", "round_robin", targetsForServers(t, first.URL, second.URL))
+	gateway := httptest.NewServer(buildHandler(testConfig(route), testLogger()))
+	defer gateway.Close()
+
+	got := make([]string, 0, 4)
+	for range 4 {
+		resp, err := http.Get(gateway.URL + "/api/orders")
+		if err != nil {
+			t.Fatalf("get load-balanced route: %v", err)
+		}
+
+		got = append(got, responseInstance(t, resp.Body))
+		resp.Body.Close()
+	}
+
+	assertSequence(t, got, []string{
+		"order-service-1",
+		"order-service-2",
+		"order-service-1",
+		"order-service-2",
+	})
+}
+
+func TestWeightedLoadBalancingDistributesByWeight(t *testing.T) {
+	first := httptest.NewServer(instanceHandler("user-service-1"))
+	defer first.Close()
+
+	second := httptest.NewServer(instanceHandler("user-service-2"))
+	defer second.Close()
+
+	targets := targetsForServers(t, first.URL, second.URL)
+	targets[0].Weight = 3
+	targets[1].Weight = 1
+
+	route := routeForTargets(t, "/api/users", "/api", "user-service", "weighted", targets)
+	gateway := httptest.NewServer(buildHandler(testConfig(route), testLogger()))
+	defer gateway.Close()
+
+	counts := map[string]int{}
+	for range 8 {
+		resp, err := http.Get(gateway.URL + "/api/users")
+		if err != nil {
+			t.Fatalf("get weighted route: %v", err)
+		}
+
+		counts[responseInstance(t, resp.Body)]++
+		resp.Body.Close()
+	}
+
+	if counts["user-service-1"] != 6 || counts["user-service-2"] != 2 {
+		t.Fatalf("expected 6:2 weighted distribution, got %#v", counts)
+	}
+}
+
+func TestServedByHeaderMatchesSelectedTarget(t *testing.T) {
+	first := httptest.NewServer(instanceHandler("user-service-1"))
+	defer first.Close()
+
+	second := httptest.NewServer(instanceHandler("user-service-2"))
+	defer second.Close()
+
+	targetHosts := map[string]string{
+		"user-service-1": targetHost(t, first.URL),
+		"user-service-2": targetHost(t, second.URL),
+	}
+
+	route := routeForTargets(t, "/api/users", "/api", "user-service", "round_robin", targetsForServers(t, first.URL, second.URL))
+	gateway := httptest.NewServer(buildHandler(testConfig(route), testLogger()))
+	defer gateway.Close()
+
+	for range 4 {
+		resp, err := http.Get(gateway.URL + "/api/users")
+		if err != nil {
+			t.Fatalf("get route for served-by check: %v", err)
+		}
+
+		instance := responseInstance(t, resp.Body)
+		resp.Body.Close()
+
+		if got, want := resp.Header.Get("X-Served-By"), targetHosts[instance]; got != want {
+			t.Fatalf("expected X-Served-By %q for instance %q, got %q", want, instance, got)
+		}
+	}
+}
+
 func TestUnknownRouteReturnsStandard404JSON(t *testing.T) {
 	upstream := httptest.NewServer(http.NotFoundHandler())
 	defer upstream.Close()
@@ -349,20 +441,11 @@ func testConfig(routes ...config.RouteConfig) *config.Config {
 func routeForServer(t *testing.T, path, stripPrefix, serviceName, rawURL string) config.RouteConfig {
 	t.Helper()
 
-	parsedURL, err := url.Parse(rawURL)
-	if err != nil {
-		t.Fatalf("parse upstream URL: %v", err)
-	}
+	return routeForTargets(t, path, stripPrefix, serviceName, "round_robin", targetsForServers(t, rawURL))
+}
 
-	host, portValue, err := net.SplitHostPort(parsedURL.Host)
-	if err != nil {
-		t.Fatalf("split host and port: %v", err)
-	}
-
-	port, err := net.LookupPort("tcp", portValue)
-	if err != nil {
-		t.Fatalf("lookup port: %v", err)
-	}
+func routeForTargets(t *testing.T, path, stripPrefix, serviceName, loadBalancer string, targets []config.Target) config.RouteConfig {
+	t.Helper()
 
 	return config.RouteConfig{
 		Path:         path,
@@ -374,14 +457,68 @@ func routeForServer(t *testing.T, path, stripPrefix, serviceName, rawURL string)
 		Retry: config.RetryConfig{
 			MaxAttempts: 1,
 		},
-		Targets: []config.Target{
-			{
-				Host: host,
-				Port: port,
-			},
-		},
-		LoadBalancer: "round_robin",
+		Targets:      append([]config.Target(nil), targets...),
+		LoadBalancer: loadBalancer,
 	}
+}
+
+func targetsForServers(t *testing.T, rawURLs ...string) []config.Target {
+	t.Helper()
+
+	targets := make([]config.Target, 0, len(rawURLs))
+	for _, rawURL := range rawURLs {
+		parsedURL, err := url.Parse(rawURL)
+		if err != nil {
+			t.Fatalf("parse upstream URL: %v", err)
+		}
+
+		host, portValue, err := net.SplitHostPort(parsedURL.Host)
+		if err != nil {
+			t.Fatalf("split host and port: %v", err)
+		}
+
+		port, err := net.LookupPort("tcp", portValue)
+		if err != nil {
+			t.Fatalf("lookup port: %v", err)
+		}
+
+		targets = append(targets, config.Target{
+			Host: host,
+			Port: port,
+		})
+	}
+
+	return targets
+}
+
+func targetHost(t *testing.T, rawURL string) string {
+	t.Helper()
+
+	parsedURL, err := url.Parse(rawURL)
+	if err != nil {
+		t.Fatalf("parse upstream URL: %v", err)
+	}
+
+	return parsedURL.Host
+}
+
+func instanceHandler(instance string) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		writeTestJSON(w, http.StatusOK, map[string]string{"instance": instance})
+	}
+}
+
+func responseInstance(t *testing.T, body io.ReadCloser) string {
+	t.Helper()
+
+	var payload struct {
+		Instance string `json:"instance"`
+	}
+	if err := json.NewDecoder(body).Decode(&payload); err != nil {
+		t.Fatalf("decode instance response: %v", err)
+	}
+
+	return payload.Instance
 }
 
 func testLogger() *slog.Logger {
@@ -401,4 +538,18 @@ func readBody(t *testing.T, body io.Reader) string {
 		t.Fatalf("read body: %v", err)
 	}
 	return string(data)
+}
+
+func assertSequence(t *testing.T, got, want []string) {
+	t.Helper()
+
+	if len(got) != len(want) {
+		t.Fatalf("expected %d items, got %d", len(want), len(got))
+	}
+
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("unexpected sequence at index %d: got %q want %q (full sequence: %v)", index, got[index], want[index], got)
+		}
+	}
 }
