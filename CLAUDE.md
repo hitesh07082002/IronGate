@@ -13,13 +13,20 @@ IronGate is a reverse-proxy API gateway built from scratch using Go's `net/http`
 - [INTERVIEW_GUIDE.md](./INTERVIEW_GUIDE.md) — Talking points and "why" rationale for each design decision
 - [ADR/](./ADR/) — Architecture Decision Records (8 total)
 
+## Source Of Truth
+
+- Treat the Git repo root, [`IronGate/`](./), as the only project root and source of truth.
+- Treat [`ARCHITECTURE.md`](./ARCHITECTURE.md) as the current-runtime reference when code and docs disagree.
+- Treat [`PROJECT_SPEC.md`](./PROJECT_SPEC.md), [`DESIGN_DOC.md`](./DESIGN_DOC.md), and [`PROGRESS.md`](./PROGRESS.md) as the full-project and future-phase references.
+- Do not assume planned features are already shipped just because they appear in the full-project docs.
+
 ## Architecture (Two-Tier Pipeline)
 
 **Current outer chain** (`http.Handler` middleware): Tracing → Router → Auth → UnsupportedFeatures → Proxy
 
 **Current inner chain** (`http.RoundTripper` transport): Load Balancer → Base Transport
 
-Later phases add rate limiting to the outer chain and retry plus circuit breaker to the inner chain.
+Future-phase target architecture lives in [`DESIGN_DOC.md`](./DESIGN_DOC.md) and [`PROJECT_SPEC.md`](./PROJECT_SPEC.md). Later phases add rate limiting to the outer chain and retry plus circuit breaker to the inner chain.
 
 Router stores the matched `RouteConfig` in `context.Context`. All downstream middleware reads config from context, not globals.
 
