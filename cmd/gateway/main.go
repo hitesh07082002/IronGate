@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"net/netip"
 	"os"
 	"os/signal"
@@ -17,10 +18,8 @@ import (
 	gatewaymetrics "github.com/hitesh07082002/irongate/internal/metrics"
 	"github.com/hitesh07082002/irongate/internal/ratelimit"
 	gwruntime "github.com/hitesh07082002/irongate/internal/runtime"
-	"net/http"
 )
 
-const metricsInternalOnlyMessage = "metrics endpoint is internal only"
 const fallbackShutdownTimeout = 10 * time.Second
 
 type buildHandlerOptions struct {

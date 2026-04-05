@@ -285,10 +285,11 @@ func TestReadinessTransitionsDuringGracefulShutdown(t *testing.T) {
 		t.Fatalf("in-flight request failed during shutdown: %v", err)
 	case resp := <-longResponse:
 		defer resp.Body.Close()
+		body := readBody(t, resp.Body)
 		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("expected in-flight request to complete during shutdown, got %d with body %s", resp.StatusCode, readBody(t, resp.Body))
+			t.Fatalf("expected in-flight request to complete during shutdown, got %d with body %s", resp.StatusCode, body)
 		}
-		if !strings.Contains(readBody(t, resp.Body), `"status":"completed"`) {
+		if !strings.Contains(body, `"status":"completed"`) {
 			t.Fatalf("expected completed payload from in-flight request")
 		}
 	case <-time.After(2 * time.Second):
@@ -450,7 +451,12 @@ func startRuntimeWatcher(t *testing.T, configPath string, manager *gwruntime.Man
 		}
 	}()
 
-	time.Sleep(50 * time.Millisecond)
+	select {
+	case <-watcher.Ready():
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for watcher readiness")
+	}
+
 	return cancel
 }
 

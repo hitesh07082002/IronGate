@@ -31,7 +31,7 @@ The complete end-state and future-phase architecture lives in:
 ### Shipped on `main`
 
 - Reverse proxy gateway built with `net/http` and `httputil.ReverseProxy`
-- Outer middleware chain: `Tracing -> Router -> Auth -> RateLimiter -> Proxy`
+- Outer middleware chain: `Tracing -> Router -> Metrics -> Auth -> RateLimiter -> Proxy`
 - Inner transport chain: `Retry -> LoadBalancer -> CircuitBreaker -> BaseTransport`
 - Load-balancing strategies:
   - `round_robin` via atomic counter
@@ -477,7 +477,7 @@ The live runtime still uses the same architectural split:
 Current steady-state order:
 
 ```text
-Outer: [Tracing] -> [Router] -> [Auth] -> [RateLimiter] -> [Proxy]
+Outer: [Tracing] -> [Router] -> [Metrics] -> [Auth] -> [RateLimiter] -> [Proxy]
 Inner: [Retry] -> [LoadBalancer] -> [CircuitBreaker] -> [BaseTransport]
 ```
 

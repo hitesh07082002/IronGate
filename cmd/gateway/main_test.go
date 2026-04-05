@@ -27,6 +27,7 @@ import (
 	gatewaymetrics "github.com/hitesh07082002/irongate/internal/metrics"
 	"github.com/hitesh07082002/irongate/internal/middleware"
 	"github.com/hitesh07082002/irongate/internal/ratelimit"
+	gwruntime "github.com/hitesh07082002/irongate/internal/runtime"
 	"github.com/hitesh07082002/irongate/internal/testutil"
 	"github.com/hitesh07082002/irongate/internal/transport"
 )
@@ -1498,7 +1499,7 @@ func TestMetricsEndpointRejectsExternalClientsAndSanitizesHeaders(t *testing.T) 
 	}
 
 	body := readBody(t, recorder.Body)
-	if !strings.Contains(body, metricsInternalOnlyMessage) {
+	if !strings.Contains(body, gwruntime.MetricsInternalOnlyMessage) {
 		t.Fatalf("expected metrics rejection body to mention internal-only access, got %s", body)
 	}
 }

@@ -28,7 +28,7 @@ IronGate uses two distinct middleware layers with different Go interfaces.
 **Current `main` snapshot:**
 
 ```text
-Outer: [Tracing] -> [Router] -> [Auth] -> [RateLimiter] -> [Proxy]
+Outer: [Tracing] -> [Router] -> [Metrics] -> [Auth] -> [RateLimiter] -> [Proxy]
 Inner: [Retry] -> [LoadBalancer] -> [CircuitBreaker] -> [Base HTTP Transport]
 ```
 
@@ -39,11 +39,12 @@ The sections below now describe the live Phase 5 steady-state ordering. Later ph
 Each middleware wraps the next handler. Applied in reverse order so the first-listed is outermost:
 
 ```text
-Request → [Tracing] → [Router] → [Auth] → [RateLimiter] → [Proxy] → Response
+Request → [Tracing] → [Router] → [Metrics] → [Auth] → [RateLimiter] → [Proxy] → Response
 ```
 
 - **Tracing** sanitizes any incoming request ID and generates the `X-Request-ID` used for the request lifecycle.
 - **Router** matches path to route config, stores config in `context.Context`.
+- **Metrics** records service-only Prometheus metrics for matched routes and bypasses auth and rate limiting on gateway-owned `/metrics` traffic.
 - **Auth** reads `auth_required` from context, validates JWT, injects `X-User-ID`/`X-User-Role`, and strips the bearer token before proxying protected requests.
 - **RateLimiter** reads rate limit config from context, checks Redis sliding window.
 - **Proxy** is `httputil.ReverseProxy` with a custom `Transport` (the inner chain).

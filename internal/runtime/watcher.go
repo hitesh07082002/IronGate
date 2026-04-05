@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -17,6 +18,8 @@ type Watcher struct {
 	debounce   time.Duration
 	logger     *slog.Logger
 	manager    *Manager
+	ready      chan struct{}
+	readyOnce  sync.Once
 }
 
 func NewWatcher(configPath string, manager *Manager, logger *slog.Logger, debounce time.Duration) (*Watcher, error) {
@@ -44,6 +47,7 @@ func NewWatcher(configPath string, manager *Manager, logger *slog.Logger, deboun
 		debounce:   debounce,
 		logger:     logger,
 		manager:    manager,
+		ready:      make(chan struct{}),
 	}, nil
 }
 
@@ -57,12 +61,15 @@ func (w *Watcher) Run(ctx context.Context) error {
 	if err := fsWatcher.Add(filepath.Dir(w.configPath)); err != nil {
 		return fmt.Errorf("watch config directory: %w", err)
 	}
+	w.signalReady()
 
 	var (
 		timer   *time.Timer
 		timerCh <-chan time.Time
 	)
-	defer stopTimer(timer)
+	defer func() {
+		stopTimer(timer)
+	}()
 
 	for {
 		select {
@@ -95,6 +102,26 @@ func (w *Watcher) Run(ctx context.Context) error {
 			timerCh = nil
 		}
 	}
+}
+
+func (w *Watcher) Ready() <-chan struct{} {
+	if w == nil || w.ready == nil {
+		ready := make(chan struct{})
+		close(ready)
+		return ready
+	}
+
+	return w.ready
+}
+
+func (w *Watcher) signalReady() {
+	if w == nil || w.ready == nil {
+		return
+	}
+
+	w.readyOnce.Do(func() {
+		close(w.ready)
+	})
 }
 
 func matchesConfigPath(configPath, eventPath string) bool {

@@ -21,7 +21,7 @@ IronGate is a reverse-proxy API gateway built from scratch using Go's `net/http`
 
 ## Architecture (Two-Tier Pipeline)
 
-**Current outer chain** (`http.Handler` middleware): Tracing → Router → Auth → RateLimiter → Proxy
+**Current outer chain** (`http.Handler` middleware): Tracing → Router → Metrics → Auth → RateLimiter → Proxy
 
 **Current inner chain** (`http.RoundTripper` transport): Retry → Load Balancer → Circuit Breaker → Base Transport
 

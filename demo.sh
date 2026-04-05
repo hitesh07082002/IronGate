@@ -17,14 +17,19 @@ echo "Starting IronGate demo stack..."
 docker-compose up -d --build
 
 echo "Waiting for gateway readiness..."
+ready=false
 for _ in $(seq 1 60); do
   if curl -fsS http://127.0.0.1:8080/ready >/dev/null 2>&1; then
+    ready=true
     break
   fi
   sleep 2
 done
 
-curl -fsS http://127.0.0.1:8080/ready >/dev/null
+if [[ "${ready}" != "true" ]]; then
+  echo "Gateway not ready after 120s" >&2
+  exit 1
+fi
 
 echo
 echo "Gateway liveness:"

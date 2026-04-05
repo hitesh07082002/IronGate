@@ -25,7 +25,7 @@ import (
 const (
 	HealthPath                 = "/health"
 	ReadyPath                  = "/ready"
-	metricsInternalOnlyMessage = "metrics endpoint is internal only"
+	MetricsInternalOnlyMessage = "metrics endpoint is internal only"
 	gatewayNotReadyMessage     = "gateway runtime is not ready"
 	gatewayDrainingMessage     = "gateway is draining"
 )
@@ -258,7 +258,7 @@ func (m *Manager) serveReady(w http.ResponseWriter, req *http.Request) {
 func (m *Manager) serveMetrics(w http.ResponseWriter, req *http.Request) {
 	sanitizeGatewayRequest(w, req)
 	if !isInternalMetricsClient(req.RemoteAddr) {
-		response.WriteError(w, req, http.StatusForbidden, metricsInternalOnlyMessage)
+		response.WriteError(w, req, http.StatusForbidden, MetricsInternalOnlyMessage)
 		return
 	}
 
