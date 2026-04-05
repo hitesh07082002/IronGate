@@ -8,6 +8,24 @@
 
 ---
 
+## Current Runtime
+
+This file documents the architecture that is actually shipped on `main` today:
+
+- live middleware and transport ordering
+- current config contract and fail-closed behavior
+- current headers, routes, and verification coverage
+
+## Full Project Target Design
+
+The complete end-state and future-phase architecture lives in:
+
+- [`DESIGN_DOC.md`](./DESIGN_DOC.md) for target architecture, algorithms, and tradeoffs
+- [`PROJECT_SPEC.md`](./PROJECT_SPEC.md) for full feature scope and project requirements
+- [`PROGRESS.md`](./PROGRESS.md) for what is shipped now versus planned next
+
+---
+
 ## 1. Current Main Snapshot
 
 ### Shipped on `main`
