@@ -1,7 +1,12 @@
-.PHONY: lint build test test-race coverage run docker-up docker-down
+.PHONY: all clean lint build test test-race coverage run docker-up docker-down
 
 GO_TEST_FLAGS ?=
 COVERAGE_MIN ?= 70
+
+all: build
+
+clean:
+	rm -rf bin coverage.out
 
 lint:
 	@test -z "$$(gofmt -l .)" || (gofmt -l . && exit 1)
@@ -19,8 +24,10 @@ test-race:
 
 coverage:
 	go test ./... -covermode=atomic -coverprofile=coverage.out -coverpkg=./... $(GO_TEST_FLAGS)
-	go tool cover -func=coverage.out
-	@total=$$(go tool cover -func=coverage.out | awk '/^total:/ {gsub("%","",$$3); print $$3}'); \
+	@set -eu; \
+		cover_out="$$(go tool cover -func=coverage.out)"; \
+		printf '%s\n' "$$cover_out"; \
+		total=$$(printf '%s\n' "$$cover_out" | awk '/^total:/ {gsub("%","",$$3); print $$3}'); \
 		awk "BEGIN { exit !($$total >= $(COVERAGE_MIN)) }" || (echo "coverage $$total% is below $(COVERAGE_MIN)%"; exit 1)
 
 run:
