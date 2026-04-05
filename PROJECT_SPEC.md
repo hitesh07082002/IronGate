@@ -13,9 +13,9 @@
 
 **IronGate** is a lightweight, configurable API gateway built in Go. The target end-state handles routing, authentication, rate limiting, load balancing, circuit breaking, retry with exponential backoff, and observability through a single YAML config file.
 
-Current status on `main`: Phase 1 foundation, Phase 2 load balancing, and Phase 3 JWT authentication are shipped. Rate limiting, retry, circuit breaker, Redis, Prometheus, and Grafana remain planned work.
+Current status on `main`: Phase 1 foundation, Phase 2 load balancing, Phase 3 JWT authentication, and Phase 4 Redis-backed rate limiting are shipped. Retry, circuit breaker, Prometheus, and Grafana remain planned work.
 
-Target end-state: a single `docker-compose up` brings up the gateway, backend services, Redis, Prometheus, and Grafana. Current `main` brings up the gateway plus five mock upstream service instances for the shipped Phase 3 auth plus load-balancing flow, with `JWT_SECRET` supplied through the environment.
+Target end-state: a single `docker-compose up` brings up the gateway, backend services, Redis, Prometheus, and Grafana. Current `main` brings up the gateway, Redis, and five mock upstream service instances for the shipped auth plus load-balancing plus rate-limiting flow, with `JWT_SECRET` supplied through the environment.
 
 ---
 
@@ -109,7 +109,7 @@ Every serious proxy in production — Traefik, Caddy, KrakenD, Envoy's control p
 - No code changes needed to add routes, change rate limits, or configure services
 - Router matches request paths to route configs using prefix matching
 - `strip_prefix` removes the matching prefix before forwarding (e.g., `/api/users/1` → `/users/1`)
-- Config validation at startup rejects: empty targets, unknown LB strategies, negative rate limits, missing JWT secret, invalid durations
+- Config validation at startup rejects: empty targets, unknown LB strategies, non-positive rate limits, missing `redis.address` when rate limiting is configured, negative `redis.db`, missing JWT secret, invalid durations
 - Hot-reload in Phase 7: file watcher detects changes → parse → validate → swap atomically (keep old config on validation failure)
 
 ### 4.2 Rate Limiting
@@ -122,7 +122,7 @@ Every serious proxy in production — Traefik, Caddy, KrakenD, Envoy's control p
   - `X-RateLimit-Remaining` — requests left
   - `X-RateLimit-Reset` — Unix timestamp when window resets
 - `429 Too Many Requests` with `Retry-After` header when limit exceeded
-- **Fail-open:** If Redis is unreachable, allow the request and log a warning
+- **Fail-open:** If Redis is unreachable, allow the request, log a warning, and omit authoritative rate-limit counters for that request
 
 ### 4.3 Circuit Breaker
 
@@ -225,7 +225,7 @@ Every implemented middleware and proxy path should return errors in this format,
 
 ## 5. Config Schema
 
-Target end-state schema for the full gateway. The shipped Phase 3 runtime config on `main` is a smaller subset and intentionally omits later-phase fields until those behaviors land.
+Target end-state schema for the full gateway. The shipped Phase 4 runtime config on `main` is a smaller subset and intentionally omits later-phase fields until those behaviors land.
 
 ```yaml
 server:

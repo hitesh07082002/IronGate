@@ -148,6 +148,7 @@ func (c *Config) Validate() []error {
 	}
 
 	authRequired := false
+	rateLimitConfigured := false
 	for index := range c.Routes {
 		route := &c.Routes[index]
 		routeName := fmt.Sprintf("routes[%d] (%q)", index, route.Path)
@@ -167,11 +168,12 @@ func (c *Config) Validate() []error {
 		}
 
 		if route.RateLimit != nil {
-			if route.RateLimit.Requests < 0 {
-				errs = append(errs, fmt.Errorf("%s rate_limit.requests must not be negative", routeName))
+			rateLimitConfigured = true
+			if route.RateLimit.Requests <= 0 {
+				errs = append(errs, fmt.Errorf("%s rate_limit.requests must be greater than 0", routeName))
 			}
-			if route.RateLimit.Window < 0 {
-				errs = append(errs, fmt.Errorf("%s rate_limit.window must not be negative", routeName))
+			if route.RateLimit.Window <= 0 {
+				errs = append(errs, fmt.Errorf("%s rate_limit.window must be greater than 0", routeName))
 			}
 			if route.RateLimit.Strategy != "" {
 				if _, ok := validRateLimitStrategies[route.RateLimit.Strategy]; !ok {
@@ -224,6 +226,12 @@ func (c *Config) Validate() []error {
 	}
 	if algorithm := strings.TrimSpace(c.Auth.JWTAlgorithm); algorithm != "" && algorithm != "HS256" {
 		errs = append(errs, fmt.Errorf("auth.jwt_algorithm %q is invalid", c.Auth.JWTAlgorithm))
+	}
+	if rateLimitConfigured && strings.TrimSpace(c.Redis.Address) == "" {
+		errs = append(errs, errors.New("redis.address is required when any route has rate_limit configured"))
+	}
+	if c.Redis.DB < 0 {
+		errs = append(errs, errors.New("redis.db must not be negative"))
 	}
 
 	return errs

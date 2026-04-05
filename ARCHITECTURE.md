@@ -2,7 +2,7 @@
 
 > This is the implementation reference for the current `main` branch.
 >
-> Project status: in progress. `main` has shipped Phase 1 foundation, Phase 2 load balancing, and Phase 3 JWT authentication. Later phases remain planned.
+> Project status: in progress. `main` has shipped Phase 1 foundation, Phase 2 load balancing, Phase 3 JWT authentication, and Phase 4 Redis-backed rate limiting. Later phases remain planned.
 >
 > For target end-state scope and design, see [`PROJECT_SPEC.md`](./PROJECT_SPEC.md) and [`DESIGN_DOC.md`](./DESIGN_DOC.md). If either conflicts with this file, this file wins for the current runtime.
 
@@ -31,7 +31,7 @@ The complete end-state and future-phase architecture lives in:
 ### Shipped on `main`
 
 - Reverse proxy gateway built with `net/http` and `httputil.ReverseProxy`
-- Outer middleware chain: `Tracing -> Router -> Auth -> UnsupportedFeatures -> Proxy`
+- Outer middleware chain: `Tracing -> Router -> Auth -> RateLimiter -> UnsupportedFeatures -> Proxy`
 - Inner transport chain: `LoadBalancer -> BaseTransport`
 - Load-balancing strategies:
   - `round_robin` via atomic counter
@@ -45,14 +45,15 @@ The complete end-state and future-phase architecture lives in:
 - Gateway-exposed payment routes: `POST /api/payments` for creation and `GET /api/payments/{id}` for status lookup
 - Docker Compose with:
   - `gateway`
+  - `redis`
   - `user-service-1`, `user-service-2`
   - `order-service-1`, `order-service-2`
   - `payment-service-1`
   - shared `JWT_SECRET` provided to the gateway and both user-service instances at startup
+  - Redis kept internal-only on the Compose network
 
 ### Planned, not shipped yet
 
-- Redis-backed rate limiting
 - Retry transport
 - Circuit breaker transport
 - Metrics, Prometheus, and Grafana
@@ -81,13 +82,20 @@ irongate/
 │   │   ├── chain.go
 │   │   ├── auth.go
 │   │   ├── auth_test.go
+│   │   ├── ratelimit.go
+│   │   ├── ratelimit_test.go
 │   │   ├── router.go
 │   │   ├── tracing.go
 │   │   └── unsupported.go
 │   ├── proxy/
 │   │   └── proxy.go
+│   ├── ratelimit/
+│   │   ├── store.go
+│   │   └── store_test.go
 │   ├── response/
 │   │   └── response.go
+│   ├── testutil/
+│   │   └── redis.go
 │   └── transport/
 │       ├── doc.go
 │       ├── resilient.go
@@ -128,6 +136,7 @@ return middleware.Chain(
     middleware.Tracing(logger),
     middleware.Router(cfg.Routes),
     middleware.Auth(cfg.Auth),
+    middleware.RateLimiter(rateLimitStore, logger, ...),
     middleware.UnsupportedFeatures(),
 )
 ```
@@ -135,7 +144,7 @@ return middleware.Chain(
 Because `Chain` applies middleware in reverse order, the live request flow is:
 
 ```text
-Request -> [Tracing] -> [Router] -> [Auth] -> [UnsupportedFeatures] -> [Proxy] -> Response
+Request -> [Tracing] -> [Router] -> [Auth] -> [RateLimiter] -> [UnsupportedFeatures] -> [Proxy] -> Response
 ```
 
 #### `Tracing`
@@ -169,12 +178,26 @@ This is a deliberate sanitization boundary. Client-supplied request IDs are not 
 - Removes the original bearer `Authorization` header before proxying protected requests downstream
 - Fails closed with `500` if JWT auth is misconfigured
 
+#### `RateLimiter`
+
+- Reads the matched `RouteConfig` from context
+- Skips routes with `rate_limit: null`
+- Supports `sliding_window` only on `main`
+- Uses authenticated `X-User-ID` when present
+- Falls back to client IP for unauthenticated routes
+- Trusts `X-Forwarded-For` only for explicitly wired trusted proxy IPs
+- Defaults to trusting no proxies on `main`
+- Uses a Redis Lua script plus sorted sets for atomic sliding-window enforcement
+- Keys counters as `rate_limit:{client_key}:{route.Path}`
+- Uses the gateway-generated `X-Request-ID` as the Redis sorted-set member
+- Sets `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset`
+- Returns `429 Too Many Requests` with `Retry-After` when the route is over quota
+- Fails open when Redis is unavailable and omits authoritative rate-limit headers in that case
+
 #### `UnsupportedFeatures`
 
 - Fails closed for route features that are planned but not implemented
-- Returns `501 Not Implemented` when a matched route uses:
-  - non-nil `rate_limit`
-  - retry config with `max_attempts > 1`
+- Returns `501 Not Implemented` when a matched route uses retry config with `max_attempts > 1`
 
 This guard exists so future-facing config does not silently do nothing.
 
@@ -266,6 +289,7 @@ The checked-in [`configs/gateway.yaml`](./configs/gateway.yaml) only uses fields
 - `methods`
 - `auth_required`
 - `timeout`
+- `rate_limit`
 - `targets`
 - `load_balancer`
 
@@ -276,6 +300,7 @@ The checked-in config also actively uses:
 - `server`
 - `routes`
 - `auth`
+- `redis`
 
 The checked-in [`configs/gateway.yaml`](./configs/gateway.yaml) expects `JWT_SECRET` from the
 environment and validates `jwt_algorithm: HS256` when any route requires auth.
@@ -284,10 +309,8 @@ environment and validates `jwt_algorithm: HS256` when any route requires auth.
 
 These fields exist in config structs today but are not live features yet:
 
-- `rate_limit`
 - `retry`
 - `circuit_breaker`
-- `redis`
 - `metrics`
 - `logging`
 
@@ -341,16 +364,23 @@ Current repo verification commands:
 
 ```bash
 make lint
-make test
-make test-race
+IRONGATE_TEST_REDIS_ADDR=127.0.0.1:6379 make test
+IRONGATE_TEST_REDIS_ADDR=127.0.0.1:6379 make coverage
+IRONGATE_TEST_REDIS_ADDR=127.0.0.1:6379 make test-race
 make build
 ```
+
+`make test`, `make coverage`, and `make test-race` require a running Redis instance when you want the Redis-backed integration tests to execute locally. Without `IRONGATE_TEST_REDIS_ADDR`, those Redis integration tests are skipped.
+
+`make coverage` enforces a repo-wide statement coverage floor of 70%.
 
 Key test coverage lives in:
 
 - [`cmd/gateway/main_test.go`](./cmd/gateway/main_test.go)
 - [`internal/config/config_test.go`](./internal/config/config_test.go)
 - [`internal/middleware/auth_test.go`](./internal/middleware/auth_test.go)
+- [`internal/middleware/ratelimit_test.go`](./internal/middleware/ratelimit_test.go)
+- [`internal/ratelimit/store_test.go`](./internal/ratelimit/store_test.go)
 - [`internal/transport/loadbalancer/loadbalancer_test.go`](./internal/transport/loadbalancer/loadbalancer_test.go)
 - [`services/user-service/main_test.go`](./services/user-service/main_test.go)
 
@@ -369,5 +399,7 @@ Planned order when later phases land:
 Outer: [Tracing] -> [Router] -> [Auth] -> [RateLimiter] -> [Proxy]
 Inner: [Retry] -> [LoadBalancer] -> [CircuitBreaker] -> [BaseTransport]
 ```
+
+`UnsupportedFeatures` is a temporary current-`main` guard. It drops out once retry is implemented instead of fail-closing route retry config.
 
 Treat that as the roadmap, not the current runtime.

@@ -17,9 +17,6 @@ func UnsupportedFeatures() Middleware {
 			}
 
 			switch unsupportedFeature(route) {
-			case "rate_limit":
-				response.WriteError(w, req, http.StatusNotImplemented, "route rate limiting is not implemented yet")
-				return
 			case "retry":
 				response.WriteError(w, req, http.StatusNotImplemented, "route retries are not implemented yet")
 				return
@@ -32,8 +29,6 @@ func UnsupportedFeatures() Middleware {
 
 func unsupportedFeature(route *config.RouteConfig) string {
 	switch {
-	case route.RateLimit != nil:
-		return "rate_limit"
 	case route.Retry.MaxAttempts > 1:
 		return "retry"
 	default:

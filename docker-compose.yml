@@ -4,15 +4,31 @@ services:
       context: .
       dockerfile: Dockerfile
     depends_on:
-      - user-service-1
-      - user-service-2
-      - order-service-1
-      - order-service-2
-      - payment-service-1
+      redis:
+        condition: service_healthy
+      user-service-1:
+        condition: service_started
+      user-service-2:
+        condition: service_started
+      order-service-1:
+        condition: service_started
+      order-service-2:
+        condition: service_started
+      payment-service-1:
+        condition: service_started
     ports:
       - "8080:8080"
     environment:
       JWT_SECRET: "${JWT_SECRET:?JWT_SECRET must be set}"
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   user-service-1:
     build:

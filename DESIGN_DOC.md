@@ -13,7 +13,7 @@
 
 IronGate is being built as a configurable API gateway in Go using a two-tier middleware pipeline — the same pattern production gateways like Traefik use. The target outer chain (`http.Handler`) handles request-level concerns (tracing, routing, auth, rate limiting), while the target inner chain (`http.RoundTripper`) handles transport-level concerns (retry, load balancing, circuit breaking). This separation is what makes retry-aware load balancing and per-target circuit breaking possible.
 
-Current status on `main`: the two-tier split already exists, and tracing, routing, auth, proxy, unsupported-feature guards, and load balancing are live. Rate limiting, retry, circuit breaker, and metrics remain planned.
+Current status on `main`: the two-tier split already exists, and tracing, routing, auth, Redis-backed rate limiting, proxy, unsupported-feature guards, and load balancing are live. Retry, circuit breaker, and metrics remain planned.
 
 This document covers the target architecture, algorithms, failure modes, and key tradeoffs. Section 8 links to the ADR set that captures those decisions.
 
@@ -27,18 +27,19 @@ IronGate uses two distinct middleware layers with different Go interfaces.
 
 **Current `main` snapshot:**
 
-```
-Outer: [Tracing] -> [Router] -> [Auth] -> [UnsupportedFeatures] -> [Proxy]
+```text
+Outer: [Tracing] -> [Router] -> [Auth] -> [RateLimiter] -> [UnsupportedFeatures] -> [Proxy]
 Inner: [LoadBalancer] -> [Base HTTP Transport]
 ```
 
-The sections below describe the target end-state ordering after later phases land.
+The sections below describe the target end-state ordering after later phases land. On `main`, `UnsupportedFeatures` still sits between `RateLimiter` and `Proxy` so retry remains fail-closed until Phase 5 lands.
+Once retry is implemented, that temporary guard drops out of the steady-state outer chain.
 
 **Outer chain — `http.Handler` middleware (request-level):**
 
 Each middleware wraps the next handler. Applied in reverse order so the first-listed is outermost:
 
-```
+```text
 Request → [Tracing] → [Router] → [Auth] → [RateLimiter] → [Proxy] → Response
 ```
 
@@ -48,11 +49,13 @@ Request → [Tracing] → [Router] → [Auth] → [RateLimiter] → [Proxy] → 
 - **RateLimiter** reads rate limit config from context, checks Redis sliding window.
 - **Proxy** is `httputil.ReverseProxy` with a custom `Transport` (the inner chain).
 
+Current `main` note: `UnsupportedFeatures` still sits between `RateLimiter` and `Proxy` until Phase 5 ships, so retry config fails closed instead of being silently ignored.
+
 **Inner chain — `http.RoundTripper` (transport-level):**
 
 Lives inside the Proxy's `Transport` field. Each layer implements `RoundTrip(*Request) (*Response, error)`:
 
-```
+```text
 Proxy calls Transport.RoundTrip(req):
   → [Retry] → [LoadBalancer] → [CircuitBreaker] → [Base HTTP Transport]
 ```
@@ -88,7 +91,7 @@ See [ADR-002: Auth Before Rate Limiting](./ADR/002-auth-before-rate-limiting.md)
 
 ### 2.4 System Diagram
 
-```
+```text
                      ┌─────────────────────────────────────────────┐
                      │                DOCKER NETWORK                │
                      │                                              │
@@ -97,7 +100,7 @@ See [ADR-002: Auth Before Rate Limiting](./ADR/002-auth-before-rate-limiting.md)
                    │                                             │  │
                    │  ┌── OUTER CHAIN (http.Handler) ──────────┐ │  │
                    │  │  [Tracing] → [Router] → [Auth]         │ │  │
-                   │  │  → [RateLimiter] → [Proxy]             │ │  │
+                   │  │  → [RateLimiter] → [Proxy]            │ │  │
                    │  └────────────────────────────────────────┘ │  │
                    │                    │                         │  │
                    │  ┌── INNER CHAIN (http.RoundTripper) ─────┐ │  │
@@ -187,12 +190,12 @@ Count requests in the last N seconds. If count ≥ limit, reject with 429.
 
 **Implementation using Redis Sorted Sets + Lua script:**
 
-```
-Key: rate_limit:{client_id}:{route}
+```text
+Key: rate_limit:{client_key}:{route.Path}
 
 1. ZREMRANGEBYSCORE key  0  (now - window)    — remove expired entries
 2. ZCARD key                                   — count entries in window
-3. if count < limit → ZADD key now requestId   — unique member per request
+3. if count < limit → ZADD key now requestId   — unique member per request (`X-Request-ID`)
 4. if count >= limit → reject (429)
 5. EXPIRE key window                           — set TTL for cleanup
 
@@ -212,7 +215,7 @@ See [ADR-005: Sliding Window Over Token Bucket](./ADR/005-sliding-window-over-to
 
 ### 4.3 Circuit Breaker — State Machine
 
-```
+```text
          failures >= threshold
 CLOSED ──────────────────────────→ OPEN
   ↑                                  │
@@ -288,7 +291,7 @@ If `timeout` is not set on a route, the proxy still applies an upstream deadline
 
 **Backoff formula:**
 
-```
+```text
 delay = random(0, min(base_delay × 2^attempt, max_delay))
 ```
 
@@ -314,7 +317,7 @@ Go's `RoundTrip` contract requires that `RoundTrip` must not mutate the original
 
 ### 4.7 JWT Validation Flow
 
-```
+```text
 1. Extract token from Authorization: Bearer <token>
 2. Decode header → verify algorithm matches config (prevent alg-switching attack)
 3. Verify signature using configured secret
@@ -393,7 +396,7 @@ See [ADR-003: Fail-Open Rate Limiting](./ADR/003-fail-open-rate-limiting.md).
 | Level | What | Tool | Coverage Target |
 |-------|------|------|----------------|
 | **Unit** | Each middleware in isolation: CB state transitions (including 100-goroutine concurrent test + `go test -race`), sliding window edge cases, JWT validation, retry backoff timing, jitter distribution | Go `testing` + `testify` | 80%+ on middleware packages |
-| **Integration** | Redis + rate limiter end-to-end, full middleware chain with real HTTP, config reload under load | Go `testing` + `httptest` + real Redis (Docker) | Full inner transport chain |
+| **Integration** | Redis + rate limiter end-to-end, full middleware chain with real HTTP, config reload under load | Go `testing` + `httptest` + real Redis (Docker / CI service) | Full inner transport chain |
 | **Load** | Sustained throughput, breaking point, latency percentiles under load | k6 (smoke, load, stress scripts) | 1000+ req/sec baseline |
 | **Chaos** | Circuit breaker trips on service kill, retry recovers on transient failure, rate limiter fail-open on Redis kill | k6 + chaos endpoints on dummy services | All failure modes exercised |
 

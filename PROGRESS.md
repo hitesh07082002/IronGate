@@ -40,16 +40,17 @@
 - [x] Test: login, register, and health stay public; login -> protected route succeeds
 
 ## Phase 4: Rate Limiting (Week 3-4)
-- [ ] Redis in Docker Compose
-- [ ] Sliding window algorithm with Redis Lua script (sorted sets)
-- [ ] Rate limit middleware reads config from `context.Context`
-- [ ] Client key: authenticated user ID, fallback to IP
-- [ ] `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset` headers
-- [ ] `429 Too Many Requests` with `Retry-After` header
-- [ ] Fail-open when Redis is unreachable (log warning)
-- [ ] Tests: under limit passes, over limit returns 429, window reset, Redis down = fail-open
-- [ ] Test: 50 concurrent goroutines hitting rate limit boundary simultaneously (Lua atomicity verification)
-- [ ] Test: X-Forwarded-For only trusted from known proxy IPs; spoofed header from untrusted source ignored
+- [x] Redis in Docker Compose
+- [x] Sliding window algorithm with Redis Lua script (sorted sets)
+- [x] Rate limit middleware reads config from `context.Context`
+- [x] Client key: authenticated user ID, fallback to IP
+- [x] `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset` headers
+- [x] `429 Too Many Requests` with `Retry-After` header
+- [x] Fail-open when Redis is unreachable (log warning)
+- [x] Tests: under limit passes, over limit returns 429, window reset, Redis down = fail-open
+- [x] Test: 100 concurrent goroutines hitting rate limit boundary simultaneously (Lua atomicity verification)
+- [x] Test: X-Forwarded-For only trusted from known proxy IPs; spoofed header from untrusted source ignored
+- [x] Verification: `IRONGATE_TEST_REDIS_ADDR=127.0.0.1:6379 make coverage` enforces a 70% statement coverage floor in local runs and CI
 
 ## Phase 5: Circuit Breaker + Retry (Week 4-5)
 - [ ] Circuit breaker state machine in `internal/transport/circuitbreaker/`
