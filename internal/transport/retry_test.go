@@ -31,6 +31,19 @@ func TestNormalizeRetryPolicyDisablesRetriesForNonIdempotentMethods(t *testing.T
 	}
 }
 
+func TestNormalizeRetryPolicyKeepsRetriesForIdempotentMethods(t *testing.T) {
+	policy := normalizeRetryPolicy(config.RetryConfig{
+		MaxAttempts: 3,
+		BaseDelay:   time.Millisecond,
+		MaxDelay:    5 * time.Millisecond,
+		Jitter:      fullJitterStrategy,
+	}, true)
+
+	if policy.maxAttempts != 3 {
+		t.Fatalf("expected idempotent methods to keep configured retries, got %d attempts", policy.maxAttempts)
+	}
+}
+
 func TestIsTransientErrorClassifiesExpectedFailures(t *testing.T) {
 	testCases := []struct {
 		name string
@@ -188,6 +201,23 @@ func TestCaptureRequestBodyPreservesOriginalRequestWhenGetBodyIsAvailable(t *tes
 	}
 	if req.ContentLength != int64(len(payload)) {
 		t.Fatalf("expected content length %d, got %d", len(payload), req.ContentLength)
+	}
+}
+
+func TestCaptureRequestBodyRejectsBodiesOverReplayLimit(t *testing.T) {
+	payload := strings.Repeat("a", maxRetryReplayBodyBytes+1)
+
+	req, err := http.NewRequest(http.MethodPut, "http://gateway/api/users", io.NopCloser(strings.NewReader(payload)))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+
+	_, _, err = captureRequestBody(req, true)
+	if err == nil {
+		t.Fatal("expected oversized retry body to fail")
+	}
+	if !strings.Contains(err.Error(), "retry replay limit") {
+		t.Fatalf("expected replay limit error, got %v", err)
 	}
 }
 

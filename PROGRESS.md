@@ -55,14 +55,14 @@
 ## Phase 5: Circuit Breaker + Retry (Week 4-5)
 - [x] Circuit breaker state machine in `internal/transport/circuitbreaker/`
 - [x] Per-target (host:port) circuit breaker registry
-- [x] Only count 5xx + connection failures toward threshold (not 4xx)
+- [x] Only count 5xx + upstream transport failures toward threshold (connection failures and upstream timeouts, not 4xx or caller-side deadlines)
 - [x] CLOSED -> OPEN -> HALF-OPEN -> CLOSED transitions
 - [x] 503 with fallback JSON when circuit is OPEN
 - [x] Retry transport in `internal/transport/retry.go`
 - [x] Exponential backoff + full jitter: `delay = random(0, base_delay * 2^attempt)`
 - [x] Clone request on each retry (RoundTrip must not mutate original)
-- [x] Only retry idempotent methods (GET/HEAD/PUT/DELETE)
-- [x] Only retry on 502/503/504 and connection failures
+- [x] Only retry idempotent methods (GET/HEAD/PUT/DELETE/OPTIONS)
+- [x] Only retry on 502/503/504 and transient transport failures (including connection failures, `context.DeadlineExceeded`, and network timeouts)
 - [x] Skip retries when circuit is OPEN
 - [x] Prefer different target on each retry attempt
 - [x] `X-Retry-Count`, `X-Retry-Target` response headers

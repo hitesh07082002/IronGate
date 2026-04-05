@@ -20,18 +20,31 @@ func (rr *RoundRobin) Select(options SelectionOptions) (Selection, error) {
 		return Selection{}, ErrNoTargets
 	}
 
-	start := rr.next.Add(1) - 1
-	for offset := range len(rr.targets) {
-		index := (start + uint64(offset)) % uint64(len(rr.targets))
-		if isExcluded(options, rr.targets[index]) {
+	for {
+		start := rr.next.Load()
+		chosenIndex := -1
+		chosenOffset := -1
+		for offset := range len(rr.targets) {
+			index := int((start + uint64(offset)) % uint64(len(rr.targets)))
+			if isExcluded(options, rr.targets[index]) {
+				continue
+			}
+
+			chosenIndex = index
+			chosenOffset = offset
+			break
+		}
+
+		if chosenIndex == -1 {
+			return Selection{}, ErrNoTargets
+		}
+		if !rr.next.CompareAndSwap(start, start+uint64(chosenOffset)+1) {
 			continue
 		}
 
 		return Selection{
-			Target: rr.targets[index],
+			Target: rr.targets[chosenIndex],
 			Done:   noopDone,
 		}, nil
 	}
-
-	return Selection{}, ErrNoTargets
 }

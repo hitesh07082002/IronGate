@@ -20,9 +20,10 @@ import (
 )
 
 const (
-	defaultRetryBaseDelay = 100 * time.Millisecond
-	defaultRetryMaxDelay  = 2 * time.Second
-	fullJitterStrategy    = "full"
+	defaultRetryBaseDelay   = 100 * time.Millisecond
+	defaultRetryMaxDelay    = 2 * time.Second
+	maxRetryReplayBodyBytes = 1 << 20
+	fullJitterStrategy      = "full"
 )
 
 type sleepFunc func(context.Context, time.Duration) error
@@ -268,7 +269,7 @@ func captureRequestBody(req *http.Request, shouldBuffer bool) ([]byte, bool, err
 		if readErr != nil {
 			return nil, false, readErr
 		}
-		body, err = io.ReadAll(reader)
+		body, err = io.ReadAll(io.LimitReader(reader, maxRetryReplayBodyBytes+1))
 		if closeErr := reader.Close(); err == nil && closeErr != nil {
 			err = closeErr
 		}
@@ -276,13 +277,16 @@ func captureRequestBody(req *http.Request, shouldBuffer bool) ([]byte, bool, err
 			err = closeErr
 		}
 	} else {
-		body, err = io.ReadAll(req.Body)
+		body, err = io.ReadAll(io.LimitReader(req.Body, maxRetryReplayBodyBytes+1))
 		if closeErr := req.Body.Close(); err == nil && closeErr != nil {
 			err = closeErr
 		}
 	}
 	if err != nil {
 		return nil, false, err
+	}
+	if len(body) > maxRetryReplayBodyBytes {
+		return nil, false, fmt.Errorf("request body exceeds retry replay limit of %d bytes", maxRetryReplayBodyBytes)
 	}
 
 	return body, true, nil

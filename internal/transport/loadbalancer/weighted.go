@@ -40,12 +40,11 @@ func (w *Weighted) Select(options SelectionOptions) (Selection, error) {
 	bestIndex := -1
 	totalWeight := 0
 	for index := range w.targets {
-		w.targets[index].currentWeight += w.targets[index].weight
-
 		if isExcluded(options, w.targets[index].target) {
 			continue
 		}
 
+		w.targets[index].currentWeight += w.targets[index].weight
 		totalWeight += w.targets[index].weight
 
 		if bestIndex == -1 || w.targets[index].currentWeight > w.targets[bestIndex].currentWeight {

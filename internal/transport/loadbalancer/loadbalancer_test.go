@@ -1,6 +1,7 @@
 package loadbalancer
 
 import (
+	"errors"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -10,11 +11,12 @@ import (
 )
 
 func TestRoundRobinCyclesThroughTargets(t *testing.T) {
-	balancer := NewRoundRobin([]config.Target{
+	targets := []config.Target{
 		{Host: "user-service-1", Port: 8081},
 		{Host: "user-service-2", Port: 8091},
 		{Host: "user-service-3", Port: 9091},
-	})
+	}
+	balancer := NewRoundRobin(targets)
 
 	got := make([]string, 0, 6)
 	for range 6 {
@@ -34,6 +36,44 @@ func TestRoundRobinCyclesThroughTargets(t *testing.T) {
 		"user-service-3",
 	}
 	assertSequence(t, got, want)
+}
+
+func TestRoundRobinSkipsExcludedTargetsWithoutConsumingTurns(t *testing.T) {
+	targets := []config.Target{
+		{Host: "user-service-1", Port: 8081},
+		{Host: "user-service-2", Port: 8091},
+		{Host: "user-service-3", Port: 9091},
+	}
+	balancer := NewRoundRobin(targets)
+
+	got := make([]string, 0, 4)
+	for range 4 {
+		selection, err := balancer.Select(excludedTargets(targets[1]))
+		if err != nil {
+			t.Fatalf("select target: %v", err)
+		}
+		got = append(got, selection.Target.Host)
+	}
+
+	assertSequence(t, got, []string{
+		"user-service-1",
+		"user-service-3",
+		"user-service-1",
+		"user-service-3",
+	})
+}
+
+func TestRoundRobinReturnsErrNoTargetsWhenAllTargetsExcluded(t *testing.T) {
+	targets := []config.Target{
+		{Host: "user-service-1", Port: 8081},
+		{Host: "user-service-2", Port: 8091},
+	}
+	balancer := NewRoundRobin(targets)
+
+	_, err := balancer.Select(excludedTargets(targets...))
+	if !errors.Is(err, ErrNoTargets) {
+		t.Fatalf("expected ErrNoTargets, got %v", err)
+	}
 }
 
 func TestWeightedUsesSmoothWeightedRoundRobin(t *testing.T) {
@@ -87,6 +127,51 @@ func TestWeightedDefaultsMissingWeightsToOne(t *testing.T) {
 	})
 }
 
+func TestWeightedSkipsExcludedTargets(t *testing.T) {
+	targets := []config.Target{
+		{Host: "user-service-1", Port: 8081, Weight: 3},
+		{Host: "user-service-2", Port: 8091, Weight: 1},
+	}
+	balancer := NewWeighted(targets)
+
+	selection, err := balancer.Select(excludedTargets(targets[0]))
+	if err != nil {
+		t.Fatalf("select target: %v", err)
+	}
+	if selection.Target.Host != "user-service-2" {
+		t.Fatalf("expected excluded selection to skip user-service-1, got %s", selection.Target.Host)
+	}
+}
+
+func TestWeightedAllExcludedReturnsErrNoTargetsWithoutMutatingState(t *testing.T) {
+	targets := []config.Target{
+		{Host: "user-service-1", Port: 8081, Weight: 3},
+		{Host: "user-service-2", Port: 8091, Weight: 1},
+	}
+	balancer := NewWeighted(targets)
+
+	_, err := balancer.Select(excludedTargets(targets...))
+	if !errors.Is(err, ErrNoTargets) {
+		t.Fatalf("expected ErrNoTargets, got %v", err)
+	}
+
+	got := make([]string, 0, 4)
+	for range 4 {
+		selection, err := balancer.Select(SelectionOptions{})
+		if err != nil {
+			t.Fatalf("select target: %v", err)
+		}
+		got = append(got, selection.Target.Host)
+	}
+
+	assertSequence(t, got, []string{
+		"user-service-1",
+		"user-service-1",
+		"user-service-2",
+		"user-service-1",
+	})
+}
+
 func TestLeastConnPrefersTargetWithFewestActiveRequests(t *testing.T) {
 	balancer := NewLeastConn([]config.Target{
 		{Host: "order-service-1", Port: 8082},
@@ -133,6 +218,29 @@ func TestLeastConnPrefersTargetWithFewestActiveRequests(t *testing.T) {
 	}
 }
 
+func TestLeastConnSkipsExcludedTargetsAndReturnsErrNoTargetsWhenAllExcluded(t *testing.T) {
+	targets := []config.Target{
+		{Host: "order-service-1", Port: 8082},
+		{Host: "order-service-2", Port: 8092},
+	}
+	balancer := NewLeastConn(targets)
+
+	selection, err := balancer.Select(excludedTargets(targets[0]))
+	if err != nil {
+		t.Fatalf("select target: %v", err)
+	}
+	defer selection.Done()
+
+	if selection.Target.Host != "order-service-2" {
+		t.Fatalf("expected excluded selection to skip order-service-1, got %s", selection.Target.Host)
+	}
+
+	_, err = balancer.Select(excludedTargets(targets...))
+	if !errors.Is(err, ErrNoTargets) {
+		t.Fatalf("expected ErrNoTargets, got %v", err)
+	}
+}
+
 func TestLeastConnConcurrentSelectionsReleaseAllActiveCounts(t *testing.T) {
 	balancer := NewLeastConn([]config.Target{
 		{Host: "payment-service-1", Port: 8083},
@@ -144,7 +252,7 @@ func TestLeastConnConcurrentSelectionsReleaseAllActiveCounts(t *testing.T) {
 
 	start := make(chan struct{})
 	var wg sync.WaitGroup
-	for range 64 {
+	for range 100 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -181,6 +289,15 @@ func TestLeastConnConcurrentSelectionsReleaseAllActiveCounts(t *testing.T) {
 			t.Fatalf("expected target %d to end with zero active requests, got %d", index, active)
 		}
 	}
+}
+
+func excludedTargets(targets ...config.Target) SelectionOptions {
+	excluded := make(map[string]struct{}, len(targets))
+	for _, target := range targets {
+		excluded[targetAddress(target)] = struct{}{}
+	}
+
+	return SelectionOptions{ExcludeTargets: excluded}
 }
 
 func assertSequence(t *testing.T, got, want []string) {

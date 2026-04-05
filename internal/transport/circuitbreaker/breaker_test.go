@@ -89,6 +89,70 @@ func TestBreakerHalfOpenFailureReopensCircuit(t *testing.T) {
 	}
 }
 
+func TestBreakerHalfOpenWaitsForAllProbeCompletionsBeforeClosing(t *testing.T) {
+	clock := &fakeClock{now: time.Unix(0, 0)}
+	breaker := newWithClock(config.CBConfig{
+		FailureThreshold:    1,
+		SuccessThreshold:    1,
+		Timeout:             time.Second,
+		WindowSize:          time.Minute,
+		HalfOpenMaxRequests: 2,
+	}, clock)
+
+	if !breaker.Allow() {
+		t.Fatal("expected closed breaker to allow request")
+	}
+	breaker.RecordFailure()
+
+	clock.Advance(time.Second)
+	if !breaker.Allow() {
+		t.Fatal("expected first half-open probe to be allowed")
+	}
+	if !breaker.Allow() {
+		t.Fatal("expected second half-open probe to be allowed")
+	}
+
+	breaker.RecordSuccess()
+	if breaker.State() != StateHalfOpen {
+		t.Fatalf("expected breaker to remain half-open while another probe is in flight, got %s", breaker.State())
+	}
+
+	breaker.RecordFailure()
+	if breaker.State() != StateOpen {
+		t.Fatalf("expected late half-open failure to reopen circuit, got %s", breaker.State())
+	}
+}
+
+func TestBreakerHalfOpenIgnoredProbeCanFinishClosing(t *testing.T) {
+	clock := &fakeClock{now: time.Unix(0, 0)}
+	breaker := newWithClock(config.CBConfig{
+		FailureThreshold:    1,
+		SuccessThreshold:    1,
+		Timeout:             time.Second,
+		WindowSize:          time.Minute,
+		HalfOpenMaxRequests: 2,
+	}, clock)
+
+	if !breaker.Allow() {
+		t.Fatal("expected closed breaker to allow request")
+	}
+	breaker.RecordFailure()
+
+	clock.Advance(time.Second)
+	if !breaker.Allow() {
+		t.Fatal("expected first half-open probe to be allowed")
+	}
+	if !breaker.Allow() {
+		t.Fatal("expected second half-open probe to be allowed")
+	}
+
+	breaker.RecordSuccess()
+	breaker.RecordIgnored()
+	if breaker.State() != StateClosed {
+		t.Fatalf("expected breaker to close after the final in-flight probe completes, got %s", breaker.State())
+	}
+}
+
 func TestRegistryReturnsBreakerPerTarget(t *testing.T) {
 	registry := NewRegistry(config.CBConfig{FailureThreshold: 1})
 

@@ -89,7 +89,7 @@ func (b *Breaker) RecordSuccess() {
 			b.halfOpenInFlight--
 		}
 		b.halfOpenSuccesses++
-		if b.halfOpenSuccesses >= b.config.SuccessThreshold {
+		if b.halfOpenSuccesses >= b.config.SuccessThreshold && b.halfOpenInFlight == 0 {
 			b.closeLocked()
 		}
 	}
@@ -121,6 +121,9 @@ func (b *Breaker) RecordIgnored() {
 
 	if b.state == StateHalfOpen && b.halfOpenInFlight > 0 {
 		b.halfOpenInFlight--
+		if b.halfOpenSuccesses >= b.config.SuccessThreshold && b.halfOpenInFlight == 0 {
+			b.closeLocked()
+		}
 	}
 }
 

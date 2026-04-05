@@ -13,7 +13,7 @@
 This file documents the architecture that is actually shipped on `main` today:
 
 - live middleware and transport ordering
-- current config contract and runtime defaults
+- runtime-reference config contract and supported behavior
 - current headers, routes, and verification coverage
 
 ## Full Project Target Design
@@ -322,19 +322,25 @@ The checked-in config also actively uses:
 The checked-in [`configs/gateway.yaml`](./configs/gateway.yaml) expects `JWT_SECRET` from the
 environment and validates `jwt_algorithm: HS256` when any route requires auth.
 
+### Runtime-supported Phase 5 fields
+
+These config fields are live on `main` today:
+
+- route-level `retry`
+- top-level `circuit_breaker`
+
 ### Future fields already parsed
 
 These fields exist in config structs today but are not live features yet:
 
-- `retry`
-- `circuit_breaker`
 - `metrics`
 - `logging`
 
 Rules on `main`:
 
 - Keeping these fields in the struct is allowed
-- Using unsupported route-level behavior in a live config returns `501`
+- Retry and circuit-breaker settings are runtime-supported and validated on load
+- Future observability fields are currently parsed but inert until later phases land
 - `gateway-internal` routes may omit targets
 
 ---

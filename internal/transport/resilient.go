@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -129,7 +130,7 @@ func (ct *CircuitBreakerTransport) RoundTrip(req *http.Request) (*http.Response,
 
 	resp, err := ct.next.RoundTrip(req)
 	if err != nil {
-		if countsTowardCircuit(err) {
+		if countsTowardCircuit(req.Context(), err) {
 			breaker.RecordFailure()
 		} else {
 			breaker.RecordIgnored()
@@ -143,8 +144,19 @@ func (ct *CircuitBreakerTransport) RoundTrip(req *http.Request) (*http.Response,
 
 	if resp.StatusCode >= http.StatusInternalServerError {
 		breaker.RecordFailure()
-	} else {
+		return resp, nil
+	}
+	if resp.Body == nil {
 		breaker.RecordSuccess()
+		resp.Body = http.NoBody
+		return resp, nil
+	}
+
+	resp.Body = &breakerOnReadCloser{
+		ReadCloser: resp.Body,
+		succeed:    breaker.RecordSuccess,
+		fail:       breaker.RecordFailure,
+		ignore:     breaker.RecordIgnored,
 	}
 
 	return resp, nil
@@ -204,7 +216,11 @@ func wrapAttemptError(err error, metadata attemptMetadata) error {
 	}
 }
 
-func countsTowardCircuit(err error) bool {
+func countsTowardCircuit(ctx context.Context, err error) bool {
+	if ctx != nil && errors.Is(err, context.DeadlineExceeded) && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return false
+	}
+
 	return isTransientError(err)
 }
 
@@ -227,4 +243,37 @@ func (r *releaseOnReadCloser) Close() error {
 	err := r.ReadCloser.Close()
 	r.once.Do(r.release)
 	return err
+}
+
+type breakerOnReadCloser struct {
+	io.ReadCloser
+	once    sync.Once
+	succeed func()
+	fail    func()
+	ignore  func()
+}
+
+func (r *breakerOnReadCloser) Read(p []byte) (int, error) {
+	n, err := r.ReadCloser.Read(p)
+	switch {
+	case err == nil:
+		return n, nil
+	case errors.Is(err, io.EOF):
+		r.once.Do(r.succeed)
+	default:
+		r.once.Do(r.fail)
+	}
+
+	return n, err
+}
+
+func (r *breakerOnReadCloser) Close() error {
+	err := r.ReadCloser.Close()
+	if err != nil {
+		r.once.Do(r.fail)
+		return err
+	}
+
+	r.once.Do(r.ignore)
+	return nil
 }
