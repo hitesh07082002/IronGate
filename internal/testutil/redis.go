@@ -38,14 +38,3 @@ func RedisClient(t testing.TB) *redis.Client {
 
 	return client
 }
-
-func FlushRedis(t testing.TB, client *redis.Client) {
-	t.Helper()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if err := client.FlushDB(ctx).Err(); err != nil {
-		t.Fatalf("flush test redis: %v", err)
-	}
-}

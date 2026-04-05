@@ -46,6 +46,7 @@ Router stores the matched `RouteConfig` in `context.Context`. All downstream mid
 
 ```bash
 make test       # run all tests
+make coverage   # enforce the 70% statement coverage gate
 make test-race  # run race-enabled tests
 make lint       # gofmt check + go vet
 make build      # compile gateway binary

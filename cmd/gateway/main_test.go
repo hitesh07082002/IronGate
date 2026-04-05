@@ -494,15 +494,13 @@ func TestPublicRoutesRemainPublicInPhaseFour(t *testing.T) {
 }
 
 func TestRateLimitingReturnsHeadersAnd429(t *testing.T) {
-	client := testutil.RedisClient(t)
-	testutil.FlushRedis(t, client)
-
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeTestJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	}))
 	defer upstream.Close()
 
-	route := routeForServer(t, "/api/orders", "/api", "order-service", upstream.URL)
+	routePath := "/api/orders/headers"
+	route := routeForServer(t, routePath, "/api", "order-service", upstream.URL)
 	route.RateLimit = &config.RateLimitConfig{
 		Requests: 2,
 		Window:   time.Second,
@@ -514,21 +512,21 @@ func TestRateLimitingReturnsHeadersAnd429(t *testing.T) {
 	gateway := httptest.NewServer(buildHandler(cfg, testLogger()))
 	defer gateway.Close()
 
-	firstResp := doGatewayRequest(t, gateway, http.MethodGet, "/api/orders", "")
+	firstResp := doGatewayRequest(t, gateway, http.MethodGet, routePath, "")
 	defer firstResp.Body.Close()
 	if firstResp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 for first request, got %d with body %s", firstResp.StatusCode, readBody(t, firstResp.Body))
 	}
 	assertRateLimitHeaders(t, firstResp, "2", "1")
 
-	secondResp := doGatewayRequest(t, gateway, http.MethodGet, "/api/orders", "")
+	secondResp := doGatewayRequest(t, gateway, http.MethodGet, routePath, "")
 	defer secondResp.Body.Close()
 	if secondResp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 for second request, got %d with body %s", secondResp.StatusCode, readBody(t, secondResp.Body))
 	}
 	assertRateLimitHeaders(t, secondResp, "2", "0")
 
-	thirdResp := doGatewayRequest(t, gateway, http.MethodGet, "/api/orders", "")
+	thirdResp := doGatewayRequest(t, gateway, http.MethodGet, routePath, "")
 	defer thirdResp.Body.Close()
 	if thirdResp.StatusCode != http.StatusTooManyRequests {
 		t.Fatalf("expected 429 for third request, got %d with body %s", thirdResp.StatusCode, readBody(t, thirdResp.Body))
@@ -540,15 +538,13 @@ func TestRateLimitingReturnsHeadersAnd429(t *testing.T) {
 }
 
 func TestRateLimitingUsesAuthenticatedUserIDAndAuthRunsFirst(t *testing.T) {
-	client := testutil.RedisClient(t)
-	testutil.FlushRedis(t, client)
-
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeTestJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	}))
 	defer upstream.Close()
 
-	route := routeForServer(t, "/api/users", "/api", "user-service", upstream.URL)
+	routePath := "/api/users/rate-limit-auth"
+	route := routeForServer(t, routePath, "/api", "user-service", upstream.URL)
 	route.AuthRequired = true
 	route.RateLimit = &config.RateLimitConfig{
 		Requests: 1,
@@ -561,13 +557,13 @@ func TestRateLimitingUsesAuthenticatedUserIDAndAuthRunsFirst(t *testing.T) {
 	gateway := httptest.NewServer(buildHandler(cfg, testLogger()))
 	defer gateway.Close()
 
-	unauthorizedFirst := doGatewayRequest(t, gateway, http.MethodGet, "/api/users", "")
+	unauthorizedFirst := doGatewayRequest(t, gateway, http.MethodGet, routePath, "")
 	defer unauthorizedFirst.Body.Close()
 	if unauthorizedFirst.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("expected first unauthorized request to stay 401, got %d", unauthorizedFirst.StatusCode)
 	}
 
-	unauthorizedSecond := doGatewayRequest(t, gateway, http.MethodGet, "/api/users", "")
+	unauthorizedSecond := doGatewayRequest(t, gateway, http.MethodGet, routePath, "")
 	defer unauthorizedSecond.Body.Close()
 	if unauthorizedSecond.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("expected second unauthorized request to stay 401, got %d", unauthorizedSecond.StatusCode)
@@ -586,19 +582,19 @@ func TestRateLimitingUsesAuthenticatedUserIDAndAuthRunsFirst(t *testing.T) {
 		"exp":  time.Now().Add(time.Hour).Unix(),
 	})
 
-	userAFirst := doGatewayRequest(t, gateway, http.MethodGet, "/api/users", userAToken)
+	userAFirst := doGatewayRequest(t, gateway, http.MethodGet, routePath, userAToken)
 	defer userAFirst.Body.Close()
 	if userAFirst.StatusCode != http.StatusOK {
 		t.Fatalf("expected first user A request allowed, got %d with body %s", userAFirst.StatusCode, readBody(t, userAFirst.Body))
 	}
 
-	userASecond := doGatewayRequest(t, gateway, http.MethodGet, "/api/users", userAToken)
+	userASecond := doGatewayRequest(t, gateway, http.MethodGet, routePath, userAToken)
 	defer userASecond.Body.Close()
 	if userASecond.StatusCode != http.StatusTooManyRequests {
 		t.Fatalf("expected second user A request rate-limited, got %d with body %s", userASecond.StatusCode, readBody(t, userASecond.Body))
 	}
 
-	userBFirst := doGatewayRequest(t, gateway, http.MethodGet, "/api/users", userBToken)
+	userBFirst := doGatewayRequest(t, gateway, http.MethodGet, routePath, userBToken)
 	defer userBFirst.Body.Close()
 	if userBFirst.StatusCode != http.StatusOK {
 		t.Fatalf("expected user B to have an independent quota, got %d with body %s", userBFirst.StatusCode, readBody(t, userBFirst.Body))
@@ -641,15 +637,13 @@ func TestRateLimiterFailsOpenWhenRedisIsDown(t *testing.T) {
 }
 
 func TestRateLimitingHonorsTrustedProxyXForwardedFor(t *testing.T) {
-	client := testutil.RedisClient(t)
-	testutil.FlushRedis(t, client)
-
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeTestJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	}))
 	defer upstream.Close()
 
-	route := routeForServer(t, "/api/orders", "/api", "order-service", upstream.URL)
+	routePath := "/api/orders/trusted-proxy"
+	route := routeForServer(t, routePath, "/api", "order-service", upstream.URL)
 	route.RateLimit = &config.RateLimitConfig{
 		Requests: 1,
 		Window:   time.Second,
@@ -663,19 +657,19 @@ func TestRateLimitingHonorsTrustedProxyXForwardedFor(t *testing.T) {
 	}))
 	defer gateway.Close()
 
-	first := doGatewayRequestWithForwardedFor(t, gateway, "/api/orders", "198.51.100.10")
+	first := doGatewayRequestWithForwardedFor(t, gateway, routePath, "198.51.100.10")
 	defer first.Body.Close()
 	if first.StatusCode != http.StatusOK {
 		t.Fatalf("expected first forwarded client allowed, got %d", first.StatusCode)
 	}
 
-	second := doGatewayRequestWithForwardedFor(t, gateway, "/api/orders", "203.0.113.20")
+	second := doGatewayRequestWithForwardedFor(t, gateway, routePath, "203.0.113.20")
 	defer second.Body.Close()
 	if second.StatusCode != http.StatusOK {
 		t.Fatalf("expected second forwarded client allowed, got %d with body %s", second.StatusCode, readBody(t, second.Body))
 	}
 
-	third := doGatewayRequestWithForwardedFor(t, gateway, "/api/orders", "198.51.100.10")
+	third := doGatewayRequestWithForwardedFor(t, gateway, routePath, "198.51.100.10")
 	defer third.Body.Close()
 	if third.StatusCode != http.StatusTooManyRequests {
 		t.Fatalf("expected repeated forwarded client to be rate-limited, got %d with body %s", third.StatusCode, readBody(t, third.Body))

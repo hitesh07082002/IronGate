@@ -365,9 +365,12 @@ Current repo verification commands:
 ```bash
 make lint
 make test
+make coverage
 make test-race
 make build
 ```
+
+`make coverage` enforces a repo-wide statement coverage floor of 70%.
 
 Key test coverage lives in:
 
