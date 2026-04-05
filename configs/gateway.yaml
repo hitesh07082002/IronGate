@@ -62,7 +62,7 @@ routes:
   - path: "/api/payments"
     strip_prefix: "/api"
     service: "payment-service"
-    methods: ["POST"]
+    methods: ["GET", "POST"]
     timeout: 30s
     targets:
       - host: "payment-service-1"
