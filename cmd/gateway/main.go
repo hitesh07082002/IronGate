@@ -10,6 +10,7 @@ import (
 	"os"
 
 	"github.com/hitesh07082002/irongate/internal/config"
+	gatewaymetrics "github.com/hitesh07082002/irongate/internal/metrics"
 	"github.com/hitesh07082002/irongate/internal/middleware"
 	"github.com/hitesh07082002/irongate/internal/proxy"
 	"github.com/hitesh07082002/irongate/internal/ratelimit"
@@ -17,8 +18,9 @@ import (
 )
 
 type buildHandlerOptions struct {
-	rateLimitStore ratelimit.Store
-	trustedProxies []netip.Prefix
+	rateLimitStore  ratelimit.Store
+	trustedProxies  []netip.Prefix
+	metricsRegistry *gatewaymetrics.Registry
 }
 
 func main() {
@@ -65,16 +67,31 @@ func buildHandlerWithOptions(cfg *config.Config, logger *slog.Logger, options bu
 		rateLimitStore = ratelimit.NewRedisStore(cfg.Redis)
 	}
 
-	proxyHandler := proxy.New(logger, cfg.Server.WriteTimeout, transport.NewResilientTransport(nil, cfg.CircuitBreaker))
-	return middleware.Chain(
+	metricsRegistry := options.metricsRegistry
+	if cfg.Metrics.Enabled && metricsRegistry == nil {
+		metricsRegistry = gatewaymetrics.NewRegistry()
+	}
+
+	proxyHandler := proxy.New(logger, cfg.Server.WriteTimeout, transport.NewResilientTransport(nil, cfg.Routes, cfg.CircuitBreaker, metricsRegistry))
+	applicationHandler := middleware.Chain(
 		proxyHandler,
 		middleware.Tracing(logger),
 		middleware.Router(cfg.Routes),
+		middleware.Metrics(metricsRegistry),
 		middleware.Auth(cfg.Auth),
-		middleware.RateLimiter(rateLimitStore, logger, middleware.RateLimiterOptions{
+		middleware.RateLimiterWithMetrics(rateLimitStore, logger, metricsRegistry, middleware.RateLimiterOptions{
 			TrustedProxies: options.trustedProxies,
 		}),
 	)
+
+	if !cfg.Metrics.Enabled || metricsRegistry == nil {
+		return applicationHandler
+	}
+
+	mux := http.NewServeMux()
+	mux.Handle(cfg.Metrics.Path, metricsRegistry.Handler())
+	mux.Handle("/", applicationHandler)
+	return mux
 }
 
 func hasRateLimitedRoutes(routes []config.RouteConfig) bool {

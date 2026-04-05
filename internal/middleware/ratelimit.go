@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	gatewaymetrics "github.com/hitesh07082002/irongate/internal/metrics"
 	"github.com/hitesh07082002/irongate/internal/ratelimit"
 	"github.com/hitesh07082002/irongate/internal/response"
 )
@@ -37,6 +38,10 @@ type RateLimiterOptions struct {
 }
 
 func RateLimiter(store ratelimit.Store, logger *slog.Logger, options RateLimiterOptions) Middleware {
+	return RateLimiterWithMetrics(store, logger, nil, options)
+}
+
+func RateLimiterWithMetrics(store ratelimit.Store, logger *slog.Logger, registry *gatewaymetrics.Registry, options RateLimiterOptions) Middleware {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -122,6 +127,7 @@ func RateLimiter(store ratelimit.Store, logger *slog.Logger, options RateLimiter
 
 			setRateLimitHeaders(w.Header(), route.RateLimit.Requests, decision)
 			if !decision.Allowed {
+				registry.IncRateLimitRejection(route.Service)
 				w.Header().Set(HeaderRetryAfter, strconv.FormatInt(retryAfterSeconds(now, decision.ResetAt), 10))
 				response.WriteError(w, req, http.StatusTooManyRequests, rateLimitExceededMessage)
 				return

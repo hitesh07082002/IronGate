@@ -125,6 +125,7 @@ func Load(path string) (*Config, error) {
 
 func (c *Config) Validate() []error {
 	var errs []error
+	routePaths := make(map[string]struct{}, len(c.Routes))
 
 	if c.Server.Port <= 0 || c.Server.Port > 65535 {
 		errs = append(errs, errors.New("server.port must be between 1 and 65535"))
@@ -159,6 +160,8 @@ func (c *Config) Validate() []error {
 
 		if strings.TrimSpace(route.Path) == "" {
 			errs = append(errs, fmt.Errorf("%s path must not be empty", routeName))
+		} else {
+			routePaths[route.Path] = struct{}{}
 		}
 		if strings.TrimSpace(route.Service) == "" {
 			errs = append(errs, fmt.Errorf("%s service must not be empty", routeName))
@@ -239,6 +242,21 @@ func (c *Config) Validate() []error {
 	}
 	if c.Redis.DB < 0 {
 		errs = append(errs, errors.New("redis.db must not be negative"))
+	}
+	if c.Metrics.Enabled {
+		metricsPath := strings.TrimSpace(c.Metrics.Path)
+		switch {
+		case metricsPath == "":
+			errs = append(errs, errors.New("metrics.path is required when metrics.enabled is true"))
+		case !strings.HasPrefix(metricsPath, "/"):
+			errs = append(errs, errors.New("metrics.path must start with /"))
+		case metricsPath == "/":
+			errs = append(errs, errors.New("metrics.path must not be /"))
+		default:
+			if _, exists := routePaths[metricsPath]; exists {
+				errs = append(errs, errors.New("metrics.path must not exactly match a configured route path"))
+			}
+		}
 	}
 
 	return errs

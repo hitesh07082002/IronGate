@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/hitesh07082002/irongate/internal/config"
+	gatewaymetrics "github.com/hitesh07082002/irongate/internal/metrics"
 	"github.com/hitesh07082002/irongate/internal/middleware"
 	"github.com/hitesh07082002/irongate/internal/transport/circuitbreaker"
 	"github.com/hitesh07082002/irongate/internal/transport/loadbalancer"
@@ -23,25 +24,29 @@ type LoadBalancerTransport struct {
 }
 
 type CircuitBreakerTransport struct {
-	next     http.RoundTripper
-	registry *circuitbreaker.Registry
+	next           http.RoundTripper
+	registry       *circuitbreaker.Registry
+	metrics        *gatewaymetrics.Registry
+	serviceTargets map[string][]config.Target
 }
 
-func NewResilientTransport(base http.RoundTripper, breakerConfig config.CBConfig) http.RoundTripper {
+func NewResilientTransport(base http.RoundTripper, routes []config.RouteConfig, breakerConfig config.CBConfig, registry *gatewaymetrics.Registry) http.RoundTripper {
 	if base == nil {
 		base = NewBaseTransport()
 	}
 
 	breakers := &CircuitBreakerTransport{
-		next:     base,
-		registry: circuitbreaker.NewRegistry(breakerConfig),
+		next:           base,
+		registry:       circuitbreaker.NewRegistry(breakerConfig),
+		metrics:        registry,
+		serviceTargets: serviceTargetSets(routes),
 	}
 	loadBalancing := &LoadBalancerTransport{
 		next:     breakers,
 		registry: &balancerRegistry{},
 	}
 
-	return NewRetryTransport(loadBalancing)
+	return NewRetryTransport(loadBalancing, registry)
 }
 
 func NewBaseTransport() http.RoundTripper {
@@ -115,6 +120,8 @@ func (lt *LoadBalancerTransport) RoundTrip(req *http.Request) (*http.Response, e
 }
 
 func (ct *CircuitBreakerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	service := routeService(req)
+	routeTargets := ct.targetsForService(service, routeTargets(req))
 	target := getAttemptMetadata(req).target
 	if target == "" {
 		target = req.URL.Host
@@ -124,30 +131,34 @@ func (ct *CircuitBreakerTransport) RoundTrip(req *http.Request) (*http.Response,
 	}
 
 	breaker := ct.registry.Breaker(target)
-	if !breaker.Allow() {
+	allowed := breaker.Allow()
+	ct.syncOpenCircuitGauge(service, routeTargets, target)
+	if !allowed {
 		return nil, ErrCircuitOpen
 	}
 
+	start := time.Now()
 	resp, err := ct.next.RoundTrip(req)
+	ct.metrics.ObserveUpstreamDuration(service, time.Since(start))
 	if err != nil {
 		if countsTowardCircuit(req.Context(), err) {
-			breaker.RecordFailure()
+			ct.recordBreakerFailure(breaker, service, routeTargets, target)
 		} else {
-			breaker.RecordIgnored()
+			ct.recordBreakerIgnored(breaker, service, routeTargets, target)
 		}
 		return nil, err
 	}
 	if resp == nil {
-		breaker.RecordFailure()
+		ct.recordBreakerFailure(breaker, service, routeTargets, target)
 		return nil, fmt.Errorf("upstream transport returned nil response")
 	}
 
 	if resp.StatusCode >= http.StatusInternalServerError {
-		breaker.RecordFailure()
+		ct.recordBreakerFailure(breaker, service, routeTargets, target)
 		return resp, nil
 	}
 	if resp.Body == nil {
-		breaker.RecordSuccess()
+		ct.recordBreakerSuccess(breaker, service, routeTargets, target)
 		resp.Body = http.NoBody
 		return resp, nil
 	}
@@ -155,9 +166,15 @@ func (ct *CircuitBreakerTransport) RoundTrip(req *http.Request) (*http.Response,
 	resp.Body = &breakerOnReadCloser{
 		ReadCloser: resp.Body,
 		ctx:        req.Context(),
-		succeed:    breaker.RecordSuccess,
-		fail:       breaker.RecordFailure,
-		ignore:     breaker.RecordIgnored,
+		succeed: func() {
+			ct.recordBreakerSuccess(breaker, service, routeTargets, target)
+		},
+		fail: func() {
+			ct.recordBreakerFailure(breaker, service, routeTargets, target)
+		},
+		ignore: func() {
+			ct.recordBreakerIgnored(breaker, service, routeTargets, target)
+		},
 	}
 
 	return resp, nil
@@ -225,6 +242,75 @@ func countsTowardCircuit(ctx context.Context, err error) bool {
 	return isTransientError(err)
 }
 
+func (ct *CircuitBreakerTransport) recordBreakerFailure(breaker *circuitbreaker.Breaker, service string, targets []config.Target, fallbackTarget string) {
+	before := breaker.State()
+	breaker.RecordFailure()
+	after := breaker.State()
+
+	if before != circuitbreaker.StateOpen && after == circuitbreaker.StateOpen {
+		ct.metrics.IncCircuitOpen(service)
+	}
+	ct.syncOpenCircuitGauge(service, targets, fallbackTarget)
+}
+
+func (ct *CircuitBreakerTransport) recordBreakerSuccess(breaker *circuitbreaker.Breaker, service string, targets []config.Target, fallbackTarget string) {
+	breaker.RecordSuccess()
+	ct.syncOpenCircuitGauge(service, targets, fallbackTarget)
+}
+
+func (ct *CircuitBreakerTransport) recordBreakerIgnored(breaker *circuitbreaker.Breaker, service string, targets []config.Target, fallbackTarget string) {
+	breaker.RecordIgnored()
+	ct.syncOpenCircuitGauge(service, targets, fallbackTarget)
+}
+
+func (ct *CircuitBreakerTransport) syncOpenCircuitGauge(service string, targets []config.Target, fallbackTarget string) {
+	if ct.metrics == nil {
+		return
+	}
+
+	ct.metrics.SetOpenCircuits(service, ct.openCircuitCount(targets, fallbackTarget))
+}
+
+func (ct *CircuitBreakerTransport) openCircuitCount(targets []config.Target, fallbackTarget string) int {
+	if len(targets) == 0 {
+		if fallbackTarget == "" {
+			return 0
+		}
+		if ct.registry.Breaker(fallbackTarget).State() == circuitbreaker.StateOpen {
+			return 1
+		}
+		return 0
+	}
+
+	seen := make(map[string]struct{}, len(targets))
+	openCount := 0
+	for _, target := range targets {
+		address := targetAddress(target)
+		if _, ok := seen[address]; ok {
+			continue
+		}
+		seen[address] = struct{}{}
+		if ct.registry.Breaker(address).State() == circuitbreaker.StateOpen {
+			openCount++
+		}
+	}
+
+	return openCount
+}
+
+func (ct *CircuitBreakerTransport) targetsForService(service string, fallback []config.Target) []config.Target {
+	if len(ct.serviceTargets) == 0 || service == "" {
+		return fallback
+	}
+
+	targets, ok := ct.serviceTargets[service]
+	if !ok || len(targets) == 0 {
+		return fallback
+	}
+
+	return targets
+}
+
 func isCallerContextError(ctx context.Context, err error) bool {
 	switch {
 	case errors.Is(err, context.Canceled):
@@ -234,6 +320,54 @@ func isCallerContextError(ctx context.Context, err error) bool {
 	default:
 		return false
 	}
+}
+
+func routeService(req *http.Request) string {
+	if req == nil {
+		return ""
+	}
+
+	if route := middleware.GetRouteConfig(req); route != nil {
+		return route.Service
+	}
+
+	return ""
+}
+
+func routeTargets(req *http.Request) []config.Target {
+	if req == nil {
+		return nil
+	}
+
+	if route := middleware.GetRouteConfig(req); route != nil {
+		return route.Targets
+	}
+
+	return nil
+}
+
+func serviceTargetSets(routes []config.RouteConfig) map[string][]config.Target {
+	serviceTargets := make(map[string][]config.Target)
+	seen := make(map[string]map[string]struct{})
+
+	for _, route := range routes {
+		if route.Service == "" || len(route.Targets) == 0 {
+			continue
+		}
+		if _, ok := seen[route.Service]; !ok {
+			seen[route.Service] = make(map[string]struct{})
+		}
+		for _, target := range route.Targets {
+			address := targetAddress(target)
+			if _, ok := seen[route.Service][address]; ok {
+				continue
+			}
+			seen[route.Service][address] = struct{}{}
+			serviceTargets[route.Service] = append(serviceTargets[route.Service], target)
+		}
+	}
+
+	return serviceTargets
 }
 
 type releaseOnReadCloser struct {

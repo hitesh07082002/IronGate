@@ -1,4 +1,4 @@
-# Phase 5 runtime config only includes behavior implemented in the current runtime.
+# Phase 6 runtime config includes the shipped observability endpoint on /metrics.
 server:
   port: 8080
   read_timeout: 30s
@@ -125,3 +125,7 @@ redis:
   address: "redis:6379"
   password: ""
   db: 0
+
+metrics:
+  enabled: true
+  path: "/metrics"

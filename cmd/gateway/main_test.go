@@ -23,6 +23,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/hitesh07082002/irongate/internal/config"
+	gatewaymetrics "github.com/hitesh07082002/irongate/internal/metrics"
 	"github.com/hitesh07082002/irongate/internal/middleware"
 	"github.com/hitesh07082002/irongate/internal/ratelimit"
 	"github.com/hitesh07082002/irongate/internal/testutil"
@@ -1327,6 +1328,61 @@ func TestGatewayHealthEndpointRespondsDirectly(t *testing.T) {
 	body := readBody(t, resp.Body)
 	if !strings.Contains(body, `"service":"gateway"`) {
 		t.Fatalf("expected gateway health payload, got %s", body)
+	}
+}
+
+func TestMetricsEndpointRespondsDirectlyAndExportsServiceMetrics(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeTestJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	}))
+	defer upstream.Close()
+
+	registry := gatewaymetrics.NewRegistry()
+	route := routeForServer(t, "/api/users", "/api", "user-service", upstream.URL)
+	route.AuthRequired = false
+	route.RateLimit = nil
+
+	cfg := testConfig(route)
+	cfg.Metrics.Path = "/internal/metrics"
+
+	gateway := httptest.NewServer(buildHandlerWithOptions(cfg, testLogger(), buildHandlerOptions{
+		metricsRegistry: registry,
+	}))
+	defer gateway.Close()
+
+	resp, err := http.Get(gateway.URL + "/internal/metrics")
+	if err != nil {
+		t.Fatalf("get metrics before traffic: %v", err)
+	}
+	body := readBody(t, resp.Body)
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected direct metrics endpoint to return 200, got %d", resp.StatusCode)
+	}
+	if !strings.Contains(body, "go_goroutines") {
+		t.Fatalf("expected Prometheus runtime metrics payload, got %s", body)
+	}
+
+	serviceResp, err := http.Get(gateway.URL + "/api/users")
+	if err != nil {
+		t.Fatalf("get service route: %v", err)
+	}
+	serviceResp.Body.Close()
+
+	if serviceResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from service route, got %d", serviceResp.StatusCode)
+	}
+
+	resp, err = http.Get(gateway.URL + "/internal/metrics")
+	if err != nil {
+		t.Fatalf("get metrics after traffic: %v", err)
+	}
+	body = readBody(t, resp.Body)
+	resp.Body.Close()
+
+	if !strings.Contains(body, `gateway_requests_total{service="user-service"} 1`) {
+		t.Fatalf("expected user-service request metric in payload, got %s", body)
 	}
 }
 
