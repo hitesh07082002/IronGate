@@ -169,6 +169,44 @@ func TestRegistryReturnsBreakerPerTarget(t *testing.T) {
 	}
 }
 
+func TestRegistryCloneWithConfigPreservesOpenState(t *testing.T) {
+	registry := NewRegistry(config.CBConfig{
+		FailureThreshold:    1,
+		SuccessThreshold:    1,
+		Timeout:             time.Minute,
+		WindowSize:          time.Minute,
+		HalfOpenMaxRequests: 1,
+	})
+
+	breaker := registry.Breaker("user-service-1:8081")
+	if !breaker.Allow() {
+		t.Fatal("expected closed breaker to allow request")
+	}
+	breaker.RecordFailure()
+	if breaker.State() != StateOpen {
+		t.Fatalf("expected breaker to open, got %s", breaker.State())
+	}
+
+	cloned := registry.CloneWithConfig(config.CBConfig{
+		FailureThreshold:    2,
+		SuccessThreshold:    1,
+		Timeout:             time.Minute,
+		WindowSize:          time.Minute,
+		HalfOpenMaxRequests: 1,
+	})
+	if cloned == nil {
+		t.Fatal("expected cloned registry")
+	}
+
+	clonedBreaker := cloned.Breaker("user-service-1:8081")
+	if clonedBreaker.State() != StateOpen {
+		t.Fatalf("expected cloned breaker to stay open, got %s", clonedBreaker.State())
+	}
+	if clonedBreaker.Allow() {
+		t.Fatal("expected cloned open breaker to reject requests")
+	}
+}
+
 func TestBreakerConcurrentAccessRaceSafe(t *testing.T) {
 	clock := &fakeClock{now: time.Unix(0, 0)}
 	breaker := newWithClock(config.CBConfig{

@@ -10,7 +10,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const gatewayInternalService = "gateway-internal"
+const (
+	gatewayInternalService = "gateway-internal"
+	gatewayHealthPath      = "/health"
+	gatewayReadyPath       = "/ready"
+)
 
 var (
 	validLoadBalancers = map[string]struct{}{
@@ -190,6 +194,17 @@ func (c *Config) Validate() []error {
 		if route.AuthRequired {
 			authRequired = true
 		}
+		if isGatewayReservedPath(normalizedRoutePath) {
+			if route.Service != gatewayInternalService {
+				errs = append(errs, fmt.Errorf("%s path is reserved for the gateway and must use service %q", routeName, gatewayInternalService))
+			}
+			if route.AuthRequired {
+				errs = append(errs, fmt.Errorf("%s path is reserved for the gateway and must keep auth_required false", routeName))
+			}
+			if route.RateLimit != nil {
+				errs = append(errs, fmt.Errorf("%s path is reserved for the gateway and must not configure rate_limit", routeName))
+			}
+		}
 
 		if route.RateLimit != nil {
 			rateLimitConfigured = true
@@ -296,4 +311,8 @@ func cloneRouteConfig(route RouteConfig) RouteConfig {
 	}
 
 	return clone
+}
+
+func isGatewayReservedPath(path string) bool {
+	return path == gatewayHealthPath || path == gatewayReadyPath
 }

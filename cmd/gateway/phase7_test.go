@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -296,6 +297,58 @@ func TestReadinessTransitionsDuringGracefulShutdown(t *testing.T) {
 
 	if err := <-serverErrors; err != nil && !errors.Is(err, http.ErrServerClosed) {
 		t.Fatalf("unexpected server error after shutdown: %v", err)
+	}
+}
+
+func TestReloadPreservesCircuitBreakerState(t *testing.T) {
+	var upstreamHits atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		upstreamHits.Add(1)
+		writeTestJSON(w, http.StatusInternalServerError, map[string]string{"error": "boom"})
+	}))
+	defer upstream.Close()
+
+	route := routeForServer(t, "/api/users", "/api", "user-service", upstream.URL)
+	route.Methods = []string{http.MethodGet}
+
+	cfg := testConfig(route)
+	cfg.Metrics.Enabled = false
+	cfg.CircuitBreaker = config.CBConfig{
+		FailureThreshold:    1,
+		SuccessThreshold:    1,
+		Timeout:             time.Minute,
+		WindowSize:          time.Minute,
+		HalfOpenMaxRequests: 1,
+	}
+
+	manager, err := newRuntimeManager(cfg, testLogger(), buildHandlerOptions{})
+	if err != nil {
+		t.Fatalf("build runtime manager: %v", err)
+	}
+
+	gateway := httptest.NewServer(manager)
+	defer gateway.Close()
+
+	firstResp := doGatewayRequest(t, gateway, http.MethodGet, "/api/users/1", "")
+	defer firstResp.Body.Close()
+	if firstResp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("expected first request to return upstream 500, got %d with body %s", firstResp.StatusCode, readBody(t, firstResp.Body))
+	}
+
+	reloaded := cfg.Clone()
+	reloaded.Metrics.Enabled = true
+	reloaded.Metrics.Path = "/internal/metrics"
+	if err := manager.Reload(reloaded); err != nil {
+		t.Fatalf("reload runtime manager: %v", err)
+	}
+
+	secondResp := doGatewayRequest(t, gateway, http.MethodGet, "/api/users/1", "")
+	defer secondResp.Body.Close()
+	if secondResp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("expected reloaded runtime to preserve open circuit and return 503, got %d with body %s", secondResp.StatusCode, readBody(t, secondResp.Body))
+	}
+	if upstreamHits.Load() != 1 {
+		t.Fatalf("expected open circuit to block another upstream attempt after reload, got %d upstream hits", upstreamHits.Load())
 	}
 }
 

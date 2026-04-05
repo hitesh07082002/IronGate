@@ -19,6 +19,7 @@ import (
 	"github.com/hitesh07082002/irongate/internal/ratelimit"
 	"github.com/hitesh07082002/irongate/internal/response"
 	"github.com/hitesh07082002/irongate/internal/transport"
+	"github.com/hitesh07082002/irongate/internal/transport/circuitbreaker"
 )
 
 const (
@@ -44,6 +45,7 @@ type Snapshot struct {
 	MetricsEnabled bool
 	MetricsPath    string
 	RateLimitStore ratelimit.Store
+	CircuitBreaker *circuitbreaker.Registry
 }
 
 type Manager struct {
@@ -201,10 +203,11 @@ func (m *Manager) buildSnapshot(next *config.Config, previous *Snapshot) (*Snaps
 	}
 
 	rateLimitStore := m.rateLimitStoreFactor(cfg, previous)
+	breakerRegistry := nextCircuitBreakerRegistry(cfg.CircuitBreaker, previous)
 	proxyHandler := proxy.New(
 		m.logger,
 		cfg.Server.WriteTimeout,
-		transport.NewResilientTransport(nil, cfg.Routes, cfg.CircuitBreaker, metricsRegistry),
+		transport.NewResilientTransport(nil, cfg.Routes, cfg.CircuitBreaker, metricsRegistry, breakerRegistry),
 	)
 	applicationHandler := middleware.Chain(
 		proxyHandler,
@@ -223,6 +226,7 @@ func (m *Manager) buildSnapshot(next *config.Config, previous *Snapshot) (*Snaps
 		MetricsEnabled: cfg.Metrics.Enabled && metricsRegistry != nil && metricsPath != "",
 		MetricsPath:    metricsPath,
 		RateLimitStore: rateLimitStore,
+		CircuitBreaker: breakerRegistry,
 	}, nil
 }
 
@@ -270,6 +274,17 @@ func defaultRateLimitStoreFactory(cfg *config.Config, previous *Snapshot) rateli
 	}
 
 	return ratelimit.NewRedisStore(cfg.Redis)
+}
+
+func nextCircuitBreakerRegistry(cfg config.CBConfig, previous *Snapshot) *circuitbreaker.Registry {
+	if previous == nil || previous.CircuitBreaker == nil {
+		return circuitbreaker.NewRegistry(cfg)
+	}
+	if previous.Config != nil && previous.Config.CircuitBreaker == cfg {
+		return previous.CircuitBreaker
+	}
+
+	return previous.CircuitBreaker.CloneWithConfig(cfg)
 }
 
 func hasRateLimitedRoutes(routes []config.RouteConfig) bool {

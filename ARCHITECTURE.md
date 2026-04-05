@@ -235,7 +235,7 @@ The direct `/health`, `/ready`, and `/metrics` handlers also strip `X-Request-ID
 
 ## 4. Current Transport Pipeline
 
-`transport.NewResilientTransport(nil, cfg.CircuitBreaker)` currently returns:
+`transport.NewResilientTransport(nil, cfg.Routes, cfg.CircuitBreaker, metricsRegistry, breakerRegistry)` currently returns:
 
 ```text
 [RetryTransport] -> [LoadBalancerTransport] -> [CircuitBreakerTransport] -> [Base http.Transport]
@@ -335,7 +335,7 @@ The checked-in [`configs/gateway.yaml`](./configs/gateway.yaml) only uses fields
 - `targets`
 - `load_balancer`
 
-The checked-in config also declares the gateway-internal `/health` and `/ready` routes for completeness, even though the runtime manager serves those paths directly before proxying logic is reached.
+The checked-in config also declares the gateway-internal `/health` and `/ready` routes for completeness. Those paths are reserved for the gateway: validation rejects upstream services or auth/rate-limit settings there, and the runtime manager serves them directly before proxying logic is reached.
 
 ### Default shipped top-level config fields
 

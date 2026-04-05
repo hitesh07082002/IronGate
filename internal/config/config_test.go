@@ -127,6 +127,44 @@ func TestValidateAllowsGatewayInternalRouteWithoutTargets(t *testing.T) {
 	}
 }
 
+func TestValidateReservesGatewayHealthAndReadyPaths(t *testing.T) {
+	cfg := &Config{
+		Server: ServerConfig{
+			Port:         8080,
+			ReadTimeout:  30 * time.Second,
+			WriteTimeout: 30 * time.Second,
+		},
+		Routes: []RouteConfig{
+			{
+				Path:         gatewayHealthPath,
+				Service:      "user-service",
+				LoadBalancer: "round_robin",
+				Targets: []Target{
+					{
+						Host: "user-service-1",
+						Port: 8081,
+					},
+				},
+			},
+			{
+				Path:         gatewayReadyPath,
+				Service:      gatewayInternalService,
+				AuthRequired: true,
+				RateLimit: &RateLimitConfig{
+					Requests: 1,
+					Window:   time.Second,
+					Strategy: "sliding_window",
+				},
+			},
+		},
+	}
+
+	joined := joinErrors(cfg.Validate())
+	assertContains(t, joined, `routes[0] ("/health") path is reserved for the gateway and must use service "gateway-internal"`)
+	assertContains(t, joined, `routes[1] ("/ready") path is reserved for the gateway and must keep auth_required false`)
+	assertContains(t, joined, `routes[1] ("/ready") path is reserved for the gateway and must not configure rate_limit`)
+}
+
 func TestValidateRejectsPortsOutsideTCPRange(t *testing.T) {
 	cfg := &Config{
 		Server: ServerConfig{
