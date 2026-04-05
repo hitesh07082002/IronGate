@@ -24,7 +24,7 @@
 - `X-Forwarded-*` propagation through proxy rewrite
 - `X-Served-By` reporting the actual selected upstream
 - Gateway-served `/health` route via `gateway-internal`
-- Gateway-exposed payment routes for both creation and status lookup
+- Gateway-exposed payment routes: `POST /api/payments` for creation and `GET /api/payments/{id}` for status lookup
 - Docker Compose with:
   - `gateway`
   - `user-service-1`, `user-service-2`

@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -103,6 +105,50 @@ func TestStripPrefixForwardsExpectedPath(t *testing.T) {
 
 	if forwardedPath != "/users/1" {
 		t.Fatalf("expected stripped path /users/1, got %q", forwardedPath)
+	}
+}
+
+func TestPaymentStatusRouteIsReachableThroughGateway(t *testing.T) {
+	cfg, err := config.Load(repoPathFromThisFile("configs", "gateway.yaml"))
+	if err != nil {
+		t.Fatalf("load gateway config: %v", err)
+	}
+
+	paymentsRoute := findRouteByPath(cfg.Routes, "/api/payments")
+	if paymentsRoute == nil {
+		t.Fatal("expected /api/payments route in gateway config")
+	}
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("expected GET to reach payment status upstream, got %s", r.Method)
+		}
+		if r.URL.Path != "/payments/p-1" {
+			t.Fatalf("expected upstream path /payments/p-1, got %s", r.URL.Path)
+		}
+		writeTestJSON(w, http.StatusOK, map[string]string{"id": "p-1", "status": "confirmed"})
+	}))
+	defer upstream.Close()
+
+	paymentsRoute.Targets = targetsForServers(t, upstream.URL)
+	cfg.Routes = []config.RouteConfig{*paymentsRoute}
+
+	gateway := httptest.NewServer(buildHandler(cfg, testLogger()))
+	defer gateway.Close()
+
+	resp, err := http.Get(gateway.URL + "/api/payments/p-1")
+	if err != nil {
+		t.Fatalf("get payment status route: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d with body %s", resp.StatusCode, readBody(t, resp.Body))
+	}
+
+	body := readBody(t, resp.Body)
+	if !strings.Contains(body, `"id":"p-1"`) || !strings.Contains(body, `"status":"confirmed"`) {
+		t.Fatalf("expected payment status payload, got %s", body)
 	}
 }
 
@@ -706,4 +752,25 @@ func assertSequence(t *testing.T, got, want []string) {
 			t.Fatalf("unexpected sequence at index %d: got %q want %q (full sequence: %v)", index, got[index], want[index], got)
 		}
 	}
+}
+
+func findRouteByPath(routes []config.RouteConfig, path string) *config.RouteConfig {
+	for index := range routes {
+		if routes[index].Path == path {
+			return &routes[index]
+		}
+	}
+
+	return nil
+}
+
+func repoPathFromThisFile(parts ...string) string {
+	_, filename, _, ok := runtime.Caller(0)
+	if !ok {
+		panic("runtime.Caller failed")
+	}
+
+	base := filepath.Dir(filename)
+	pathParts := append([]string{base, "..", ".."}, parts...)
+	return filepath.Join(pathParts...)
 }

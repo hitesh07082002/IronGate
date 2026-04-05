@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -186,9 +187,7 @@ func TestGatewayConfigPhaseTwoAvoidsUnsupportedRouteFeatures(t *testing.T) {
 		}
 	}
 
-	if len(paymentsRoute.Methods) != 2 || paymentsRoute.Methods[0] != "GET" || paymentsRoute.Methods[1] != "POST" {
-		t.Fatalf("expected /api/payments to expose GET status lookup and POST creation, got %v", paymentsRoute.Methods)
-	}
+	assertRouteMethods(t, paymentsRoute, "GET", "POST")
 }
 
 func joinErrors(errs []error) string {
@@ -204,6 +203,31 @@ func assertContains(t *testing.T, got, want string) {
 	if !strings.Contains(got, want) {
 		t.Fatalf("expected %q to contain %q", got, want)
 	}
+}
+
+func assertRouteMethods(t *testing.T, route *RouteConfig, methods ...string) {
+	t.Helper()
+
+	got := normalizeMethods(route.Methods)
+	want := normalizeMethods(methods)
+	if len(got) != len(want) {
+		t.Fatalf("expected %s to expose methods %v, got %v", route.Path, want, got)
+	}
+
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("expected %s to expose methods %v, got %v", route.Path, want, got)
+		}
+	}
+}
+
+func normalizeMethods(methods []string) []string {
+	normalized := make([]string, len(methods))
+	for index, method := range methods {
+		normalized[index] = strings.ToUpper(strings.TrimSpace(method))
+	}
+	sort.Strings(normalized)
+	return normalized
 }
 
 func findRouteByPath(routes []RouteConfig, path string) *RouteConfig {
