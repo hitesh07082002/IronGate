@@ -219,7 +219,7 @@ The direct `/health`, `/ready`, and `/metrics` handlers also strip `X-Request-ID
 
 #### `UnsupportedFeatures`
 
-- No longer participates in the live Phase 5 handler chain
+- No longer participates in the live handler chain
 - Retained only as a compatibility shim for legacy references and tests
 
 #### `Proxy`
@@ -481,4 +481,4 @@ Outer: [Tracing] -> [Router] -> [Metrics] -> [Auth] -> [RateLimiter] -> [Proxy]
 Inner: [Retry] -> [LoadBalancer] -> [CircuitBreaker] -> [BaseTransport]
 ```
 
-Treat that ordering as the current runtime. Later phases add observability and operational tooling without changing the core request/transport split.
+Treat that ordering as the current runtime. Later planned extensions should preserve the core request/transport split unless the runtime contract is intentionally revised.

@@ -1,6 +1,6 @@
 # IronGate — Technical Design Document
 
-> **Status:** Approved target design, implementation in progress
+> **Status:** Approved target design with current-main annotations
 > **Author:** Hitesh Sadhwani
 > **Last Updated:** April 2026
 >
@@ -32,7 +32,7 @@ Outer: [Tracing] -> [Router] -> [Metrics] -> [Auth] -> [RateLimiter] -> [Proxy]
 Inner: [Retry] -> [LoadBalancer] -> [CircuitBreaker] -> [Base HTTP Transport]
 ```
 
-The sections below now describe the live Phase 5 steady-state ordering. Later phases add observability and operational tooling around the same request and transport split.
+The sections below use the live steady-state ordering as the baseline. Later planned work extends the same request and transport split.
 
 **Outer chain — `http.Handler` middleware (request-level):**
 
