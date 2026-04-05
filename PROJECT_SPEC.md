@@ -151,7 +151,7 @@ Three strategies, selectable per route:
 
 - Exponential backoff with full jitter: `delay = random(0, base_delay × 2^attempt)`
 - Only retry **idempotent methods** by default: GET, HEAD, PUT, DELETE, OPTIONS
-- Only retry on **transient errors**: 502, 503, 504, connection refused, DNS timeout
+- Only retry on **transient transport failures**: 502, 503, 504, connection failures, upstream deadlines, and network timeouts
 - Do **not** retry: 4xx errors, POST requests (unless explicitly configured)
 - Each retry clones the request (Go's RoundTrip contract)
 - Each retry picks a **different target** via the load balancer

@@ -246,11 +246,11 @@ In HALF-OPEN state, the circuit allows up to `half_open_max_requests` (default: 
 Only these count toward the failure threshold:
 - 5xx responses (500, 502, 503, 504)
 - Connection refused
-- DNS resolution failure
-- Socket timeout
+- Upstream timeout / transport timeout
 
 These do NOT count:
 - 4xx responses (client errors, not service failures)
+- Caller-originated request deadlines
 - Successful responses (obviously)
 
 **Concurrent safety:**

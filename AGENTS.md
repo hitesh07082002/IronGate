@@ -37,7 +37,7 @@ Router stores the matched `RouteConfig` in `context.Context`. All downstream mid
 4. Never buffer response bodies in middleware
 5. Rate limiter client IP: trust `X-Forwarded-For` only from known proxy IPs
 6. JWT parsing: explicitly enforce `alg=HS256`, reject `none` and mismatched algorithms
-7. Circuit breaker: per-target (`host:port`), only 5xx + connection errors count
+7. Circuit breaker: per-target (`host:port`), only 5xx + upstream transport failures count; caller-side deadlines do not
 8. Retry: idempotent methods only (GET, HEAD, PUT, DELETE, OPTIONS). Clone request on each attempt.
 9. All state machines must pass `go test -race` with 100 concurrent goroutines
 10. Rate limiter fails-open when Redis is unreachable
