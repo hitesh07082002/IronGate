@@ -364,11 +364,13 @@ Current repo verification commands:
 
 ```bash
 make lint
-make test
-make coverage
-make test-race
+IRONGATE_TEST_REDIS_ADDR=127.0.0.1:6379 make test
+IRONGATE_TEST_REDIS_ADDR=127.0.0.1:6379 make coverage
+IRONGATE_TEST_REDIS_ADDR=127.0.0.1:6379 make test-race
 make build
 ```
+
+`make test`, `make coverage`, and `make test-race` require a running Redis instance when you want the Redis-backed integration tests to execute locally. Without `IRONGATE_TEST_REDIS_ADDR`, those Redis integration tests are skipped.
 
 `make coverage` enforces a repo-wide statement coverage floor of 70%.
 
@@ -377,6 +379,8 @@ Key test coverage lives in:
 - [`cmd/gateway/main_test.go`](./cmd/gateway/main_test.go)
 - [`internal/config/config_test.go`](./internal/config/config_test.go)
 - [`internal/middleware/auth_test.go`](./internal/middleware/auth_test.go)
+- [`internal/middleware/ratelimit_test.go`](./internal/middleware/ratelimit_test.go)
+- [`internal/ratelimit/store_test.go`](./internal/ratelimit/store_test.go)
 - [`internal/transport/loadbalancer/loadbalancer_test.go`](./internal/transport/loadbalancer/loadbalancer_test.go)
 - [`services/user-service/main_test.go`](./services/user-service/main_test.go)
 

@@ -45,13 +45,15 @@ Router stores the matched `RouteConfig` in `context.Context`. All downstream mid
 ## Commands
 
 ```bash
-make test       # run all tests
-make coverage   # enforce the 70% statement coverage gate
-make test-race  # run race-enabled tests
+IRONGATE_TEST_REDIS_ADDR=127.0.0.1:6379 make test       # run all tests, including Redis integration coverage
+IRONGATE_TEST_REDIS_ADDR=127.0.0.1:6379 make coverage   # enforce the 70% statement coverage gate
+IRONGATE_TEST_REDIS_ADDR=127.0.0.1:6379 make test-race  # run race-enabled tests
 make lint       # gofmt check + go vet
 make build      # compile gateway binary
 make run        # start gateway on :8080
 ```
+
+`make test`, `make coverage`, and `make test-race` require a running Redis instance when you want the Redis-backed integration tests to execute locally. Without `IRONGATE_TEST_REDIS_ADDR`, those Redis integration tests are skipped.
 
 ## Config
 

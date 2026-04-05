@@ -21,6 +21,7 @@ const (
 	HeaderRetryAfter         = "Retry-After"
 
 	rateLimitExceededMessage            = "rate limit exceeded"
+	rateLimitConfigInvalidMessage       = "rate limit configuration invalid"
 	rateLimitMetadataMissingMessage     = "rate limit metadata missing"
 	rateLimitStrategyUnsupportedMessage = "route rate limit strategy is not implemented yet"
 	defaultRateLimitStrategy            = "sliding_window"
@@ -54,6 +55,17 @@ func RateLimiter(store ratelimit.Store, logger *slog.Logger, options RateLimiter
 			}
 			if strategy != defaultRateLimitStrategy {
 				response.WriteError(w, req, http.StatusNotImplemented, rateLimitStrategyUnsupportedMessage)
+				return
+			}
+			if route.RateLimit.Requests <= 0 || route.RateLimit.Window <= 0 {
+				logger.Error("rate limit configuration invalid; rejecting request",
+					"path", req.URL.Path,
+					"route", route.Path,
+					"request_id", response.RequestID(req),
+					"requests", route.RateLimit.Requests,
+					"window", route.RateLimit.Window,
+				)
+				response.WriteError(w, req, http.StatusInternalServerError, rateLimitConfigInvalidMessage)
 				return
 			}
 
@@ -137,8 +149,8 @@ func requestClientIP(req *http.Request, trustedProxies []netip.Prefix) (netip.Ad
 	}
 
 	if trustedProxy(remoteIP, trustedProxies) {
-		if forwardedIP, ok := parseForwardedFor(req.Header.Get("X-Forwarded-For")); ok {
-			return forwardedIP, true
+		if forwardedChain, ok := parseForwardedForChain(req.Header.Get("X-Forwarded-For")); ok {
+			return forwardedClientIP(remoteIP, forwardedChain, trustedProxies), true
 		}
 	}
 
@@ -153,14 +165,35 @@ func parseRemoteIP(remoteAddr string) (netip.Addr, bool) {
 	return parseIP(remoteAddr)
 }
 
-func parseForwardedFor(value string) (netip.Addr, bool) {
-	for _, part := range strings.Split(value, ",") {
-		if addr, ok := parseIP(part); ok {
-			return addr, true
-		}
+func parseForwardedForChain(value string) ([]netip.Addr, bool) {
+	if strings.TrimSpace(value) == "" {
+		return nil, false
 	}
 
-	return netip.Addr{}, false
+	parts := strings.Split(value, ",")
+	forwarded := make([]netip.Addr, 0, len(parts))
+	for _, part := range parts {
+		addr, ok := parseIP(part)
+		if !ok {
+			return nil, false
+		}
+		forwarded = append(forwarded, addr)
+	}
+
+	return forwarded, len(forwarded) > 0
+}
+
+func forwardedClientIP(remoteIP netip.Addr, forwarded []netip.Addr, trustedProxies []netip.Prefix) netip.Addr {
+	downstreamHop := remoteIP
+	for index := len(forwarded) - 1; index >= 0; index-- {
+		candidate := forwarded[index]
+		if !trustedProxy(candidate, trustedProxies) {
+			return candidate
+		}
+		downstreamHop = candidate
+	}
+
+	return downstreamHop
 }
 
 func parseIP(value string) (netip.Addr, bool) {

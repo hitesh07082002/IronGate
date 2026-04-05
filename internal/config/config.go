@@ -169,8 +169,8 @@ func (c *Config) Validate() []error {
 
 		if route.RateLimit != nil {
 			rateLimitConfigured = true
-			if route.RateLimit.Requests < 0 {
-				errs = append(errs, fmt.Errorf("%s rate_limit.requests must not be negative", routeName))
+			if route.RateLimit.Requests <= 0 {
+				errs = append(errs, fmt.Errorf("%s rate_limit.requests must be greater than 0", routeName))
 			}
 			if route.RateLimit.Window <= 0 {
 				errs = append(errs, fmt.Errorf("%s rate_limit.window must be greater than 0", routeName))

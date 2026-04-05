@@ -25,16 +25,15 @@ func RedisClient(t testing.TB) *redis.Client {
 	t.Helper()
 
 	client := redis.NewClient(&redis.Options{Addr: RedisAddr(t)})
+	t.Cleanup(func() {
+		_ = client.Close()
+	})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	if err := client.Ping(ctx).Err(); err != nil {
 		t.Fatalf("ping test redis: %v", err)
 	}
-
-	t.Cleanup(func() {
-		_ = client.Close()
-	})
 
 	return client
 }

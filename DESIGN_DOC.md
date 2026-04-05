@@ -39,13 +39,14 @@ The sections below describe the target end-state ordering after later phases lan
 Each middleware wraps the next handler. Applied in reverse order so the first-listed is outermost:
 
 ```
-Request → [Tracing] → [Router] → [Auth] → [RateLimiter] → [Proxy] → Response
+Request → [Tracing] → [Router] → [Auth] → [RateLimiter] → [UnsupportedFeatures] → [Proxy] → Response
 ```
 
 - **Tracing** sanitizes any incoming request ID and generates the `X-Request-ID` used for the request lifecycle.
 - **Router** matches path to route config, stores config in `context.Context`.
 - **Auth** reads `auth_required` from context, validates JWT, injects `X-User-ID`/`X-User-Role`, and strips the bearer token before proxying protected requests.
 - **RateLimiter** reads rate limit config from context, checks Redis sliding window.
+- **UnsupportedFeatures** still fail-closes later-phase route config such as retry until those behaviors land.
 - **Proxy** is `httputil.ReverseProxy` with a custom `Transport` (the inner chain).
 
 **Inner chain — `http.RoundTripper` (transport-level):**

@@ -23,6 +23,7 @@ func TestRedisStoreAllowsUnderLimitRejectsOverLimitAndResets(t *testing.T) {
 	store := ratelimit.NewRedisStoreWithClient(client)
 	key := ratelimit.Key(fmt.Sprintf("ip:test-%d", time.Now().UnixNano()), "/api/orders")
 	ctx := context.Background()
+	base := time.Now()
 
 	first, err := store.Allow(ctx, ratelimit.Request{
 		Key:      key,
@@ -30,7 +31,7 @@ func TestRedisStoreAllowsUnderLimitRejectsOverLimitAndResets(t *testing.T) {
 		Window:   150 * time.Millisecond,
 		Strategy: "sliding_window",
 		Member:   "req-1",
-		Now:      time.Now(),
+		Now:      base,
 	})
 	if err != nil {
 		t.Fatalf("first allow: %v", err)
@@ -45,7 +46,7 @@ func TestRedisStoreAllowsUnderLimitRejectsOverLimitAndResets(t *testing.T) {
 		Window:   150 * time.Millisecond,
 		Strategy: "sliding_window",
 		Member:   "req-2",
-		Now:      time.Now(),
+		Now:      base.Add(10 * time.Millisecond),
 	})
 	if err != nil {
 		t.Fatalf("second allow: %v", err)
@@ -60,7 +61,7 @@ func TestRedisStoreAllowsUnderLimitRejectsOverLimitAndResets(t *testing.T) {
 		Window:   150 * time.Millisecond,
 		Strategy: "sliding_window",
 		Member:   "req-3",
-		Now:      time.Now(),
+		Now:      base.Add(20 * time.Millisecond),
 	})
 	if err != nil {
 		t.Fatalf("third allow: %v", err)
@@ -68,11 +69,9 @@ func TestRedisStoreAllowsUnderLimitRejectsOverLimitAndResets(t *testing.T) {
 	if third.Allowed || third.Remaining != 0 {
 		t.Fatalf("expected third request rejected with remaining=0, got %+v", third)
 	}
-	if !third.ResetAt.After(time.Now()) {
+	if !third.ResetAt.After(base) {
 		t.Fatalf("expected reset time in the future, got %s", third.ResetAt)
 	}
-
-	time.Sleep(175 * time.Millisecond)
 
 	afterReset, err := store.Allow(ctx, ratelimit.Request{
 		Key:      key,
@@ -80,7 +79,7 @@ func TestRedisStoreAllowsUnderLimitRejectsOverLimitAndResets(t *testing.T) {
 		Window:   150 * time.Millisecond,
 		Strategy: "sliding_window",
 		Member:   "req-4",
-		Now:      time.Now(),
+		Now:      base.Add(175 * time.Millisecond),
 	})
 	if err != nil {
 		t.Fatalf("allow after reset: %v", err)
@@ -99,7 +98,7 @@ func TestRedisStoreConcurrentBoundaryIsAtomic(t *testing.T) {
 
 	const (
 		limit       = 25
-		concurrency = 50
+		concurrency = 100
 	)
 
 	start := make(chan struct{})
@@ -173,6 +172,7 @@ func TestRedisStoreRejectsInvalidRequests(t *testing.T) {
 		{
 			name: "missing key",
 			request: ratelimit.Request{
+				Limit:  1,
 				Member: "req-1",
 				Window: time.Second,
 			},
@@ -182,6 +182,7 @@ func TestRedisStoreRejectsInvalidRequests(t *testing.T) {
 			name: "missing member",
 			request: ratelimit.Request{
 				Key:    "rate_limit:{ip:test}:/api/orders",
+				Limit:  1,
 				Window: time.Second,
 			},
 			wantErr: "rate limit member is required",
@@ -190,14 +191,25 @@ func TestRedisStoreRejectsInvalidRequests(t *testing.T) {
 			name: "invalid window",
 			request: ratelimit.Request{
 				Key:    "rate_limit:{ip:test}:/api/orders",
+				Limit:  1,
 				Member: "req-1",
 			},
 			wantErr: "rate limit window must be greater than 0",
 		},
 		{
+			name: "invalid limit",
+			request: ratelimit.Request{
+				Key:    "rate_limit:{ip:test}:/api/orders",
+				Member: "req-1",
+				Window: time.Second,
+			},
+			wantErr: "rate limit limit must be greater than 0",
+		},
+		{
 			name: "unsupported strategy",
 			request: ratelimit.Request{
 				Key:      "rate_limit:{ip:test}:/api/orders",
+				Limit:    1,
 				Member:   "req-1",
 				Window:   time.Second,
 				Strategy: "token_bucket",
@@ -232,29 +244,61 @@ func TestRedisStoreHelpers(t *testing.T) {
 }
 
 func TestRedisStoreUnexpectedScriptResponses(t *testing.T) {
-	store := ratelimit.NewRedisStoreWithClient(scriptStubClient{
+	stub := &scriptStubClient{
 		result: []any{"1", "0"},
-	})
+	}
+	store := ratelimit.NewRedisStoreWithClient(stub)
 
 	_, err := store.Allow(context.Background(), ratelimit.Request{
-		Key:    "rate_limit:{ip:test}:/api/orders",
-		Member: "req-1",
-		Window: time.Second,
+		Key:      "rate_limit:{ip:test}:/api/orders",
+		Limit:    1,
+		Strategy: "sliding_window",
+		Member:   "req-1",
+		Window:   time.Second,
+		Now:      time.Now(),
 	})
 	if err == nil || err.Error() != "unexpected rate limit script response length 2" {
 		t.Fatalf("expected unexpected response length error, got %v", err)
 	}
 
-	store = ratelimit.NewRedisStoreWithClient(scriptStubClient{
+	stub = &scriptStubClient{
 		result: []any{"bad", "0", "1"},
-	})
+	}
+	store = ratelimit.NewRedisStoreWithClient(stub)
 	_, err = store.Allow(context.Background(), ratelimit.Request{
-		Key:    "rate_limit:{ip:test}:/api/orders",
-		Member: "req-1",
-		Window: time.Second,
+		Key:      "rate_limit:{ip:test}:/api/orders",
+		Limit:    1,
+		Strategy: "sliding_window",
+		Member:   "req-1",
+		Window:   time.Second,
+		Now:      time.Now(),
 	})
 	if err == nil || !strings.Contains(err.Error(), "decode rate limit allowed flag") {
 		t.Fatalf("expected decode error, got %v", err)
+	}
+}
+
+func TestRedisStoreRoundsSubMillisecondWindowsUpToOneMillisecond(t *testing.T) {
+	stub := &scriptStubClient{
+		result: []any{int64(1), int64(0), time.Now().Add(time.Millisecond).UnixMilli()},
+	}
+	store := ratelimit.NewRedisStoreWithClient(stub)
+
+	_, err := store.Allow(context.Background(), ratelimit.Request{
+		Key:    "rate_limit:{ip:test}:/api/orders",
+		Limit:  1,
+		Member: "req-1",
+		Window: 500 * time.Microsecond,
+		Now:    time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("allow with sub-millisecond window: %v", err)
+	}
+	if len(stub.args) != 4 {
+		t.Fatalf("expected 4 script args, got %d", len(stub.args))
+	}
+	if got := stub.args[1]; got != int64(1) {
+		t.Fatalf("expected sub-millisecond window rounded up to 1ms, got %#v", got)
 	}
 }
 
@@ -262,9 +306,11 @@ type scriptStubClient struct {
 	redis.UniversalClient
 	result []any
 	err    error
+	args   []any
 }
 
-func (s scriptStubClient) EvalSha(_ context.Context, _ string, _ []string, _ ...any) *redis.Cmd {
+func (s *scriptStubClient) EvalSha(_ context.Context, _ string, _ []string, args ...any) *redis.Cmd {
+	s.args = append([]any(nil), args...)
 	cmd := redis.NewCmd(context.Background())
 	if s.err != nil {
 		cmd.SetErr(s.err)
@@ -274,19 +320,19 @@ func (s scriptStubClient) EvalSha(_ context.Context, _ string, _ []string, _ ...
 	return cmd
 }
 
-func (s scriptStubClient) ScriptExists(_ context.Context, _ ...string) *redis.BoolSliceCmd {
+func (s *scriptStubClient) ScriptExists(_ context.Context, _ ...string) *redis.BoolSliceCmd {
 	cmd := redis.NewBoolSliceCmd(context.Background())
 	cmd.SetVal([]bool{true})
 	return cmd
 }
 
-func (s scriptStubClient) ScriptLoad(_ context.Context, _ string) *redis.StringCmd {
+func (s *scriptStubClient) ScriptLoad(_ context.Context, _ string) *redis.StringCmd {
 	cmd := redis.NewStringCmd(context.Background())
 	cmd.SetVal("sha")
 	return cmd
 }
 
-func (s scriptStubClient) Eval(_ context.Context, _ string, _ []string, _ ...any) *redis.Cmd {
+func (s *scriptStubClient) Eval(_ context.Context, _ string, _ []string, _ ...any) *redis.Cmd {
 	cmd := redis.NewCmd(context.Background())
 	cmd.SetErr(errors.New("unexpected eval fallback"))
 	return cmd

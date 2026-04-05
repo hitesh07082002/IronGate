@@ -60,6 +60,34 @@ func TestRateLimiterFailsOpenWhenStoreIsUnavailable(t *testing.T) {
 	}
 }
 
+func TestRateLimiterRejectsInvalidRouteConfig(t *testing.T) {
+	var logBuffer bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logBuffer, nil))
+	nextCalled := false
+
+	handler := RateLimiter(&stubRateLimitStore{}, logger, RateLimiterOptions{})(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		nextCalled = true
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	req := rateLimitedRequest(t)
+	route := GetRouteConfig(req)
+	route.RateLimit.Requests = 0
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+
+	if nextCalled {
+		t.Fatal("expected invalid rate limit config to fail closed before next handler")
+	}
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", recorder.Code)
+	}
+	if !strings.Contains(logBuffer.String(), "rate limit configuration invalid; rejecting request") {
+		t.Fatalf("expected error log, got %q", logBuffer.String())
+	}
+}
+
 func TestRateLimiterUsesAuthenticatedUserIDForKeying(t *testing.T) {
 	store := &stubRateLimitStore{
 		decision: ratelimit.Decision{
@@ -102,8 +130,21 @@ func TestRateLimitClientKeyHonorsTrustedProxyForwardedFor(t *testing.T) {
 	req.Header.Set("X-Forwarded-For", "198.51.100.10, 203.0.113.8")
 
 	trustedProxy := []netip.Prefix{netip.MustParsePrefix("127.0.0.1/32")}
+	if got := rateLimitClientKey(req, trustedProxy); got != "ip:203.0.113.8" {
+		t.Fatalf("expected first untrusted forwarded hop honored, got %q", got)
+	}
+}
+
+func TestRateLimitClientKeyTraversesTrustedProxyChain(t *testing.T) {
+	req := rateLimitedRequest(t)
+	req.Header.Set("X-Forwarded-For", "198.51.100.10, 10.0.0.2")
+
+	trustedProxy := []netip.Prefix{
+		netip.MustParsePrefix("127.0.0.1/32"),
+		netip.MustParsePrefix("10.0.0.0/8"),
+	}
 	if got := rateLimitClientKey(req, trustedProxy); got != "ip:198.51.100.10" {
-		t.Fatalf("expected trusted proxy forwarded-for honored, got %q", got)
+		t.Fatalf("expected trusted proxy chain to resolve original client, got %q", got)
 	}
 }
 

@@ -499,7 +499,7 @@ func TestRateLimitingReturnsHeadersAnd429(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	routePath := "/api/orders/headers"
+	routePath := uniqueRoutePath("/api/orders/headers")
 	route := routeForServer(t, routePath, "/api", "order-service", upstream.URL)
 	route.RateLimit = &config.RateLimitConfig{
 		Requests: 2,
@@ -543,7 +543,7 @@ func TestRateLimitingUsesAuthenticatedUserIDAndAuthRunsFirst(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	routePath := "/api/users/rate-limit-auth"
+	routePath := uniqueRoutePath("/api/users/rate-limit-auth")
 	route := routeForServer(t, routePath, "/api", "user-service", upstream.URL)
 	route.AuthRequired = true
 	route.RateLimit = &config.RateLimitConfig{
@@ -642,7 +642,7 @@ func TestRateLimitingHonorsTrustedProxyXForwardedFor(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	routePath := "/api/orders/trusted-proxy"
+	routePath := uniqueRoutePath("/api/orders/trusted-proxy")
 	route := routeForServer(t, routePath, "/api", "order-service", upstream.URL)
 	route.RateLimit = &config.RateLimitConfig{
 		Requests: 1,
@@ -1157,6 +1157,10 @@ func routeForServer(t *testing.T, path, stripPrefix, serviceName, rawURL string)
 	t.Helper()
 
 	return routeForTargets(t, path, stripPrefix, serviceName, "round_robin", targetsForServers(t, rawURL))
+}
+
+func uniqueRoutePath(base string) string {
+	return base + "-" + uuid.NewString()
 }
 
 func routeForTargets(t *testing.T, path, stripPrefix, serviceName, loadBalancer string, targets []config.Target) config.RouteConfig {

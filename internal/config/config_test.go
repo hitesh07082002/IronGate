@@ -69,7 +69,7 @@ func TestValidateCollectsMultipleErrors(t *testing.T) {
 				Service:      "user-service",
 				AuthRequired: true,
 				RateLimit: &RateLimitConfig{
-					Requests: -1,
+					Requests: 0,
 					Window:   60 * time.Second,
 					Strategy: "sliding_window",
 				},
@@ -94,7 +94,7 @@ func TestValidateCollectsMultipleErrors(t *testing.T) {
 	joined := joinErrors(errs)
 	assertContains(t, joined, `must define at least one target`)
 	assertContains(t, joined, `load_balancer "random" is invalid`)
-	assertContains(t, joined, `rate_limit.requests must not be negative`)
+	assertContains(t, joined, `rate_limit.requests must be greater than 0`)
 	assertContains(t, joined, `redis.address is required when any route has rate_limit configured`)
 	assertContains(t, joined, `auth.jwt_secret is required when any route has auth_required: true`)
 	assertContains(t, joined, `auth.jwt_algorithm is required when any route has auth_required: true`)
@@ -202,9 +202,6 @@ func TestGatewayConfigPhaseFourEnablesRateLimitingWithoutLaterPhaseFeatures(t *t
 	for _, route := range []*RouteConfig{usersRoute, ordersRoute, paymentsRoute} {
 		if !route.AuthRequired {
 			t.Fatalf("expected %s to require auth in Phase 4", route.Path)
-		}
-		if route.Path == "/health" {
-			continue
 		}
 		if route.RateLimit == nil {
 			t.Fatalf("expected %s to have a Phase 4 rate limit", route.Path)

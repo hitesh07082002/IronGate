@@ -109,7 +109,7 @@ Every serious proxy in production — Traefik, Caddy, KrakenD, Envoy's control p
 - No code changes needed to add routes, change rate limits, or configure services
 - Router matches request paths to route configs using prefix matching
 - `strip_prefix` removes the matching prefix before forwarding (e.g., `/api/users/1` → `/users/1`)
-- Config validation at startup rejects: empty targets, unknown LB strategies, negative rate limits, missing `redis.address` when rate limiting is configured, missing JWT secret, invalid durations
+- Config validation at startup rejects: empty targets, unknown LB strategies, non-positive rate limits, missing `redis.address` when rate limiting is configured, negative `redis.db`, missing JWT secret, invalid durations
 - Hot-reload in Phase 7: file watcher detects changes → parse → validate → swap atomically (keep old config on validation failure)
 
 ### 4.2 Rate Limiting

@@ -108,6 +108,9 @@ func (s *RedisStore) Allow(ctx context.Context, request Request) (Decision, erro
 	if strings.TrimSpace(request.Member) == "" {
 		return Decision{}, errors.New("rate limit member is required")
 	}
+	if request.Limit <= 0 {
+		return Decision{}, errors.New("rate limit limit must be greater than 0")
+	}
 	if request.Window <= 0 {
 		return Decision{}, errors.New("rate limit window must be greater than 0")
 	}
@@ -124,10 +127,14 @@ func (s *RedisStore) Allow(ctx context.Context, request Request) (Decision, erro
 	if now.IsZero() {
 		now = time.Now()
 	}
+	windowMillis := request.Window.Milliseconds()
+	if request.Window%time.Millisecond != 0 {
+		windowMillis++
+	}
 
 	values, err := s.script.Run(ctx, s.client, []string{request.Key},
 		now.UnixMilli(),
-		request.Window.Milliseconds(),
+		windowMillis,
 		request.Limit,
 		request.Member,
 	).Slice()

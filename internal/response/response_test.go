@@ -30,17 +30,38 @@ func TestWriteJSONSetsHeadersAndBody(t *testing.T) {
 
 func TestWriteErrorIncludesRequestID(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/orders", nil)
-	req.Header.Set("X-Request-ID", "req-123")
+	req.Header.Set("X-Request-ID", "spoofed-request-id")
+	req.Header.Del("X-Request-ID")
+
+	generatedRequestID := "generated-req-123"
+	req.Header.Set("X-Request-ID", generatedRequestID)
 
 	recorder := httptest.NewRecorder()
 	WriteError(recorder, req, http.StatusBadGateway, "upstream failed")
+
+	if recorder.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502, got %d", recorder.Code)
+	}
+	if got := recorder.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("expected application/json content type, got %q", got)
+	}
 
 	var payload ErrorBody
 	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode payload: %v", err)
 	}
-	if payload.Error != "upstream failed" || payload.Code != http.StatusBadGateway || payload.RequestID != "req-123" {
+	if payload.Error != "upstream failed" || payload.Code != http.StatusBadGateway || payload.RequestID != generatedRequestID {
 		t.Fatalf("unexpected error payload: %#v", payload)
+	}
+}
+
+func TestRequestIDReturnsEmptyWithoutGeneratedHeader(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/orders", nil)
+	req.Header.Set("X-Request-ID", "spoofed-request-id")
+	req.Header.Del("X-Request-ID")
+
+	if got := RequestID(req); got != "" {
+		t.Fatalf("expected empty request id without generated header, got %q", got)
 	}
 }
 
