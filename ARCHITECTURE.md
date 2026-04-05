@@ -351,7 +351,7 @@ environment and validates `jwt_algorithm: HS256` when any route requires auth. T
 checked-in Compose stack also expects `GRAFANA_ADMIN_USER` and `GRAFANA_ADMIN_PASSWORD`
 for the local Grafana instance.
 
-### Runtime-supported Phase 6 fields
+### Runtime-supported live fields
 
 These config fields are live on `main` today:
 
