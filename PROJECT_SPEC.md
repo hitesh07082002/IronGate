@@ -1,6 +1,6 @@
 # IronGate — Project Specification
 
-> **Status:** Planning
+> **Status:** In Progress
 > **Author:** Hitesh Sadhwani
 > **Last Updated:** April 2026
 >
@@ -11,9 +11,11 @@
 
 ## 1. Overview
 
-**IronGate** is a lightweight, configurable API gateway built in Go. It sits in front of microservices and handles routing, authentication, rate limiting, load balancing, circuit breaking, retry with exponential backoff, and real-time observability — all driven by a single YAML config file.
+**IronGate** is a lightweight, configurable API gateway built in Go. The target end-state handles routing, authentication, rate limiting, load balancing, circuit breaking, retry with exponential backoff, and observability through a single YAML config file.
 
-A single `docker-compose up` command spins up the gateway, three backend services, Redis, Prometheus, and Grafana. The system demonstrates production-grade infrastructure patterns at a level that generates 30+ minutes of interview depth.
+Current status on `main`: Phase 1 foundation and Phase 2 load balancing are shipped. Authentication, rate limiting, retry, circuit breaker, Redis, Prometheus, and Grafana remain planned work.
+
+Target end-state: a single `docker-compose up` brings up the gateway, backend services, Redis, Prometheus, and Grafana. Current `main` brings up the gateway plus five mock upstream service instances for the shipped Phase 2 load-balancing flow.
 
 ---
 
@@ -99,7 +101,7 @@ Every serious proxy in production — Traefik, Caddy, KrakenD, Envoy's control p
 
 ## 4. Feature Requirements
 
-> This section defines **what** each feature must do. For **how** it works internally (algorithms, state machines, Lua scripts), see [`DESIGN_DOC.md`](./DESIGN_DOC.md).
+> This section defines the target end-state behavior for the full project. `main` currently ships only a subset of these requirements. For current runtime behavior, see [`ARCHITECTURE.md`](./ARCHITECTURE.md) and [`PROGRESS.md`](./PROGRESS.md).
 
 ### 4.1 Config-Driven Routing
 
@@ -197,9 +199,10 @@ Three strategies, selectable per route:
 
 ### 4.8 Distributed Tracing
 
-- Gateway generates a unique `X-Request-ID` for each incoming request (or propagates an existing one)
+- Gateway sanitizes incoming `X-Request-ID` and generates a fresh request ID on `main`
 - Request ID appears in every structured JSON log entry
 - Headers propagated to upstream: `X-Request-ID`, `X-Forwarded-For`, `X-Forwarded-Host`, `X-User-ID`, `X-User-Role`
+- Trusted request-ID propagation is a possible future enhancement, but it is not the current behavior
 - Not OpenTelemetry — lightweight correlation-ID propagation is sufficient for this scope
 
 ### 4.9 Standard Error Response Format
@@ -214,13 +217,13 @@ All error responses from the gateway follow a consistent JSON structure:
 }
 ```
 
-Every middleware (Auth, RateLimiter, CircuitBreaker, Proxy) returns errors in this format. The `request_id` field links every error to the distributed trace, making debugging trivial. This consistency signals that the gateway is a designed system, not a collection of independent handlers.
+Every implemented middleware and proxy path should return errors in this format, and later phases must preserve it. The `request_id` field links every error to the distributed trace, making debugging straightforward.
 
 ---
 
 ## 5. Config Schema
 
-Single source of truth for the gateway configuration format.
+Target end-state schema for the full gateway. The shipped Phase 2 runtime config on `main` is a smaller subset and intentionally omits later-phase fields until those behaviors land.
 
 ```yaml
 server:

@@ -1,19 +1,21 @@
 # IronGate Build Progress
 
+> This tracker reflects what is actually shipped on `main`. If work from a later phase lands early, mark the box based on reality rather than the original week label.
+
 ## Phase 1: Foundation (Week 1-2)
-- [ ] Initialize Git repo, Go modules
-- [ ] Project structure: `cmd/gateway/`, `internal/config/`, `internal/middleware/`, `internal/transport/`, `internal/proxy/`
-- [ ] Config struct with YAML parsing and `Validate()` method
-- [ ] Basic HTTP server on `:8080`
-- [ ] Path-matching router (prefix match, strip prefix)
-- [ ] Router stores matched route config in `context.Context`
-- [ ] Reverse proxy with `httputil.ReverseProxy`
-- [ ] Tuned `http.Transport`: `MaxIdleConnsPerHost=100`, `MaxConnsPerHost=100`
-- [ ] 3 dummy Go services (User :8081, Order :8082, Payment :8083) with mock data
-- [ ] Chaos endpoints on each service (`/chaos/latency`, `/chaos/errors`, `/chaos/down`, `/chaos/reset`)
-- [ ] Docker Compose: gateway + 3 services
-- [ ] Integration tests: request routes to correct service
-- [ ] Test: overlapping routes (/api/users vs /api/users/login) resolve to the more specific match
+- [x] Initialize Git repo, Go modules
+- [x] Project structure: `cmd/gateway/`, `internal/config/`, `internal/middleware/`, `internal/transport/`, `internal/proxy/`
+- [x] Config struct with YAML parsing and `Validate()` method
+- [x] Basic HTTP server on `:8080`
+- [x] Path-matching router (prefix match, strip prefix)
+- [x] Router stores matched route config in `context.Context`
+- [x] Reverse proxy with `httputil.ReverseProxy`
+- [x] Tuned `http.Transport`: `MaxIdleConnsPerHost=100`, `MaxConnsPerHost=100`
+- [x] 3 dummy Go services (User :8081, Order :8082, Payment :8083) with mock data
+- [x] Chaos endpoints on each service (`/chaos/latency`, `/chaos/errors`, `/chaos/down`, `/chaos/reset`)
+- [x] Docker Compose: gateway + 3 services
+- [x] Integration tests: request routes to correct service
+- [x] Test: overlapping routes (/api/users vs /api/users/login) resolve to the more specific match
 
 ## Phase 2: Load Balancing (Week 2-3)
 - [x] Load balancer interface in `internal/transport/loadbalancer/`
@@ -74,8 +76,8 @@
 - [ ] Full end-to-end pipeline test: request through all 8 layers (tracing → router → auth → rate limit → proxy → retry → LB → CB)
 
 ## Phase 6: Observability (Week 5-6)
-- [ ] Structured JSON logging for every request
-- [ ] X-Request-ID generation and propagation (tracing middleware)
+- [x] Structured JSON logging for every request
+- [x] X-Request-ID generation and propagation (tracing middleware)
 - [ ] Prometheus Go client integration
 - [ ] `/metrics` endpoint with all gateway metrics
 - [ ] Prometheus in Docker Compose with scrape config
@@ -87,13 +89,14 @@
 - [ ] Refactor Config to `atomic.Pointer[Config]` for hot-reload
 - [ ] fsnotify file watcher: parse -> validate -> store (keep old on invalid)
 - [ ] Graceful shutdown (drain in-flight requests)
-- [ ] `/health` and `/ready` endpoints for gateway
+- [x] `/health` endpoint for gateway
+- [ ] `/ready` endpoint for gateway
 - [ ] Comprehensive integration test suite
 - [ ] Makefile: `make build`, `make test`, `make run`, `make docker-up`, `make load-test`
 - [ ] `demo.sh` automated demo script
 
 ## Phase 8: Documentation & Benchmarks (Week 7-8) -- NON-NEGOTIABLE
-- [ ] ADRs for all architectural decisions (see `ADR/` directory)
+- [x] ADRs for all architectural decisions (see `ADR/`)
 - [ ] k6 benchmarks: baseline, with rate limiting, full pipeline, during CB transitions
 - [ ] Benchmark results with graphs in `benchmarks/results/`
 - [ ] Polished README with architecture diagram, quick start, feature overview

@@ -1,19 +1,21 @@
 # IronGate — Technical Design Document
 
-> **Status:** Approved
+> **Status:** Approved target design, implementation in progress
 > **Author:** Hitesh Sadhwani
 > **Last Updated:** April 2026
 >
 > For project scope and feature requirements, see [`PROJECT_SPEC.md`](./PROJECT_SPEC.md).
-> For implementation reference and pseudocode, see [`ARCHITECTURE.md`](./ARCHITECTURE.md).
+> For current implementation reference, see [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
 ---
 
 ## 1. Summary
 
-IronGate is a configurable API gateway in Go using a two-tier middleware pipeline — the same pattern production gateways like Traefik use. The outer chain (`http.Handler`) handles request-level concerns (tracing, routing, auth, rate limiting), while the inner chain (`http.RoundTripper`) handles transport-level concerns (retry, load balancing, circuit breaking). This separation is what makes retry-aware load balancing and per-target circuit breaking possible.
+IronGate is being built as a configurable API gateway in Go using a two-tier middleware pipeline — the same pattern production gateways like Traefik use. The target outer chain (`http.Handler`) handles request-level concerns (tracing, routing, auth, rate limiting), while the target inner chain (`http.RoundTripper`) handles transport-level concerns (retry, load balancing, circuit breaking). This separation is what makes retry-aware load balancing and per-target circuit breaking possible.
 
-This document covers the architecture, algorithms, failure modes, and key tradeoffs. For a summary of each tradeoff, see the [ADR index](#8-architecture-decision-records).
+Current status on `main`: the two-tier split already exists, but only the tracing, routing, proxy, unsupported-feature guard, and load-balancing pieces are live. Auth, rate limiting, retry, circuit breaker, and metrics remain planned.
+
+This document covers the target architecture, algorithms, failure modes, and key tradeoffs. Section 8 links to the ADR set that captures those decisions.
 
 ---
 
@@ -23,6 +25,15 @@ This document covers the architecture, algorithms, failure modes, and key tradeo
 
 IronGate uses two distinct middleware layers with different Go interfaces.
 
+**Current `main` snapshot:**
+
+```
+Outer: [Tracing] -> [Router] -> [UnsupportedFeatures] -> [Proxy]
+Inner: [LoadBalancer] -> [Base HTTP Transport]
+```
+
+The sections below describe the target end-state ordering after later phases land.
+
 **Outer chain — `http.Handler` middleware (request-level):**
 
 Each middleware wraps the next handler. Applied in reverse order so the first-listed is outermost:
@@ -31,7 +42,7 @@ Each middleware wraps the next handler. Applied in reverse order so the first-li
 Request → [Tracing] → [Router] → [Auth] → [RateLimiter] → [Proxy] → Response
 ```
 
-- **Tracing** generates/propagates `X-Request-ID`, starts timer.
+- **Tracing** sanitizes any incoming request ID and generates the `X-Request-ID` used for the request lifecycle.
 - **Router** matches path to route config, stores config in `context.Context`.
 - **Auth** reads `auth_required` from context, validates JWT, injects `X-User-ID`/`X-User-Role`.
 - **RateLimiter** reads rate limit config from context, checks Redis sliding window.
@@ -390,6 +401,8 @@ See [ADR-003: Fail-Open Rate Limiting](./ADR/003-fail-open-rate-limiting.md).
 
 ## 8. Architecture Decision Records
 
+The ADRs for this project live in [`./ADR/`](./ADR/). This section is the index for that decision set.
+
 | ADR | Decision | Key Tradeoff |
 |-----|----------|-------------|
 | [001](./ADR/001-two-tier-pipeline.md) | Two-tier pipeline (Handler + RoundTripper) | More complex wiring vs. correct retry/LB/CB interaction |
@@ -398,7 +411,7 @@ See [ADR-003: Fail-Open Rate Limiting](./ADR/003-fail-open-rate-limiting.md).
 | [004](./ADR/004-per-route-auth-not-global-public-paths.md) | Per-route auth (no global public_paths) | Config locality over centralized auth config |
 | [005](./ADR/005-sliding-window-over-token-bucket.md) | Sliding window over token bucket (core) | Simplicity and accuracy over burst tolerance |
 | [006](./ADR/006-in-memory-least-connections.md) | In-memory least connections | Sufficient for single-instance gateway |
-| [007](./ADR/007-context-for-route-config.md) | context.Context for route config | Thread-safety and testability over simplicity |
+| [007](./ADR/007-context-for-route-config.md) | `context.Context` for route config | Thread-safety and testability over simplicity |
 | [008](./ADR/008-standard-middleware-interface.md) | Standard middleware interface | Compatibility with Go ecosystem over custom abstractions |
 
 ---
