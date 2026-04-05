@@ -1,6 +1,8 @@
 package metrics
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -69,6 +71,30 @@ func TestObserveRequestCountsOnly5xxAsFailures(t *testing.T) {
 	}
 	if got := counterValueForService(t, families, MetricRequestFailuresTotal, "payment-service"); got != 1 {
 		t.Fatalf("expected only 5xx requests to count as failures, got %v", got)
+	}
+}
+
+func TestZeroValueRegistryHandlerReturnsNotFound(t *testing.T) {
+	var registry Registry
+
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	recorder := httptest.NewRecorder()
+	registry.Handler().ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("expected zero-value registry handler to return 404, got %d", recorder.Code)
+	}
+}
+
+func TestZeroValueRegistryGatherReturnsNilFamilies(t *testing.T) {
+	var registry Registry
+
+	families, err := registry.Gather()
+	if err != nil {
+		t.Fatalf("expected nil error from zero-value registry gather, got %v", err)
+	}
+	if families != nil {
+		t.Fatalf("expected nil metric families from zero-value registry, got %v", families)
 	}
 }
 

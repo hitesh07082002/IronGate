@@ -15,7 +15,7 @@
 
 Current status on `main`: Phase 1 foundation, Phase 2 load balancing, Phase 3 JWT authentication, Phase 4 Redis-backed rate limiting, Phase 5 retry plus circuit breaking, and Phase 6 observability are shipped.
 
-Target end-state: a single `docker-compose up` brings up the gateway, backend services, Redis, Prometheus, and Grafana. Current `main` does that for the shipped auth plus load-balancing plus rate-limiting plus resilience plus observability flow, with `JWT_SECRET` supplied through the environment.
+Target end-state: a single `docker-compose up` brings up the gateway, backend services, Redis, Prometheus, and Grafana. Current `main` does that for the shipped auth plus load-balancing plus rate-limiting plus resilience plus observability flow, with `JWT_SECRET`, `GRAFANA_ADMIN_USER`, and `GRAFANA_ADMIN_PASSWORD` supplied through the environment.
 
 ---
 

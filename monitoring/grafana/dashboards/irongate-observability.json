@@ -110,13 +110,30 @@
           "color": {
             "mode": "palette-classic"
           },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          },
           "unit": "percent"
         },
         "overrides": []
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
+        "w": 6,
         "x": 0,
         "y": 8
       },
@@ -157,8 +174,8 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
-        "x": 8,
+        "w": 6,
+        "x": 6,
         "y": 8
       },
       "id": 4,
@@ -198,8 +215,8 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
-        "x": 16,
+        "w": 6,
+        "x": 12,
         "y": 8
       },
       "id": 5,
@@ -216,16 +233,52 @@
       "targets": [
         {
           "expr": "sum by (service) (increase(gateway_circuit_opens_total[$__rate_interval]))",
-          "legendFormat": "{{service}} opens",
+          "legendFormat": "{{service}}",
           "refId": "A"
-        },
-        {
-          "expr": "max by (service) (gateway_open_circuits)",
-          "legendFormat": "{{service}} currently open",
-          "refId": "B"
         }
       ],
-      "title": "Circuit Activity",
+      "title": "Circuit Opens",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "irongate-prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 8
+      },
+      "id": 8,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "max by (service) (gateway_open_circuits)",
+          "legendFormat": "{{service}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Open Circuits",
       "type": "timeseries"
     },
     {
@@ -329,6 +382,6 @@
   "timezone": "",
   "title": "IronGate Service Observability",
   "uid": "irongate-observability",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }

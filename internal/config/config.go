@@ -157,11 +157,12 @@ func (c *Config) Validate() []error {
 	for index := range c.Routes {
 		route := &c.Routes[index]
 		routeName := fmt.Sprintf("routes[%d] (%q)", index, route.Path)
+		normalizedRoutePath := strings.TrimSpace(route.Path)
 
-		if strings.TrimSpace(route.Path) == "" {
+		if normalizedRoutePath == "" {
 			errs = append(errs, fmt.Errorf("%s path must not be empty", routeName))
 		} else {
-			routePaths[route.Path] = struct{}{}
+			routePaths[normalizedRoutePath] = struct{}{}
 		}
 		if strings.TrimSpace(route.Service) == "" {
 			errs = append(errs, fmt.Errorf("%s service must not be empty", routeName))
@@ -253,8 +254,11 @@ func (c *Config) Validate() []error {
 		case metricsPath == "/":
 			errs = append(errs, errors.New("metrics.path must not be /"))
 		default:
-			if _, exists := routePaths[metricsPath]; exists {
-				errs = append(errs, errors.New("metrics.path must not exactly match a configured route path"))
+			for routePath := range routePaths {
+				if strings.HasPrefix(metricsPath, routePath) || strings.HasPrefix(routePath, metricsPath) {
+					errs = append(errs, errors.New("metrics.path must not overlap a configured route path prefix"))
+					break
+				}
 			}
 		}
 	}

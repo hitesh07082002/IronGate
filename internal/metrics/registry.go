@@ -221,7 +221,7 @@ func NewRegistry() *Registry {
 }
 
 func (r *Registry) Handler() http.Handler {
-	if r == nil {
+	if r == nil || r.registry == nil {
 		return http.NotFoundHandler()
 	}
 
@@ -229,7 +229,7 @@ func (r *Registry) Handler() http.Handler {
 }
 
 func (r *Registry) Gather() ([]*dto.MetricFamily, error) {
-	if r == nil {
+	if r == nil || r.registry == nil {
 		return nil, nil
 	}
 

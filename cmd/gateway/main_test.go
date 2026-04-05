@@ -21,6 +21,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	dto "github.com/prometheus/client_model/go"
 
 	"github.com/hitesh07082002/irongate/internal/config"
 	gatewaymetrics "github.com/hitesh07082002/irongate/internal/metrics"
@@ -1339,14 +1340,19 @@ func TestMetricsEndpointRespondsDirectlyAndExportsServiceMetrics(t *testing.T) {
 
 	registry := gatewaymetrics.NewRegistry()
 	route := routeForServer(t, "/api/users", "/api", "user-service", upstream.URL)
-	route.AuthRequired = false
-	route.RateLimit = nil
+	route.AuthRequired = true
+	route.RateLimit = &config.RateLimitConfig{
+		Requests: 10,
+		Window:   time.Minute,
+		Strategy: "sliding_window",
+	}
 
 	cfg := testConfig(route)
 	cfg.Metrics.Path = "/internal/metrics"
 
 	gateway := httptest.NewServer(buildHandlerWithOptions(cfg, testLogger(), buildHandlerOptions{
 		metricsRegistry: registry,
+		rateLimitStore:  allowAllRateLimitStore{},
 	}))
 	defer gateway.Close()
 
@@ -1364,11 +1370,19 @@ func TestMetricsEndpointRespondsDirectlyAndExportsServiceMetrics(t *testing.T) {
 		t.Fatalf("expected Prometheus runtime metrics payload, got %s", body)
 	}
 
-	serviceResp, err := http.Get(gateway.URL + "/api/users")
-	if err != nil {
-		t.Fatalf("get service route: %v", err)
-	}
-	serviceResp.Body.Close()
+	serviceResp := doGatewayRequest(
+		t,
+		gateway,
+		http.MethodGet,
+		"/api/users",
+		gatewayBearerToken(t, "test-secret", jwt.SigningMethodHS256, jwt.MapClaims{
+			"sub":  "u-1",
+			"role": "admin",
+			"iat":  time.Now().Add(-time.Minute).Unix(),
+			"exp":  time.Now().Add(time.Hour).Unix(),
+		}),
+	)
+	defer serviceResp.Body.Close()
 
 	if serviceResp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 from service route, got %d", serviceResp.StatusCode)
@@ -1445,6 +1459,85 @@ func TestMetricsEndpointBypassesAuthAndRateLimiting(t *testing.T) {
 	}
 }
 
+func TestMetricsEndpointRejectsExternalClientsAndSanitizesHeaders(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeTestJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	}))
+	defer upstream.Close()
+
+	cfg := testConfig(routeForServer(t, "/api/users", "/api", "user-service", upstream.URL))
+	cfg.Metrics.Path = "/internal/metrics"
+
+	handler := buildHandlerWithOptions(cfg, testLogger(), buildHandlerOptions{
+		metricsRegistry: gatewaymetrics.NewRegistry(),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/internal/metrics", nil)
+	req.RemoteAddr = "8.8.8.8:1234"
+	req.Header.Set(middleware.HeaderUserID, "spoofed-user")
+	req.Header.Set(middleware.HeaderUserRole, "spoofed-role")
+	req.Header.Set(middleware.HeaderRequestID, "spoofed-request")
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("expected external metrics request to be forbidden, got %d", recorder.Code)
+	}
+	if got := recorder.Header().Get(middleware.HeaderRequestID); got == "" || got == "spoofed-request" {
+		t.Fatalf("expected metrics guard to issue a fresh %s, got %q", middleware.HeaderRequestID, got)
+	}
+	if req.Header.Get(middleware.HeaderUserID) != "" {
+		t.Fatalf("expected %s to be stripped", middleware.HeaderUserID)
+	}
+	if req.Header.Get(middleware.HeaderUserRole) != "" {
+		t.Fatalf("expected %s to be stripped", middleware.HeaderUserRole)
+	}
+	if got := req.Header.Get(middleware.HeaderRequestID); got == "" || got == "spoofed-request" {
+		t.Fatalf("expected %s to be replaced with a fresh value, got %q", middleware.HeaderRequestID, got)
+	}
+
+	body := readBody(t, recorder.Body)
+	if !strings.Contains(body, metricsInternalOnlyMessage) {
+		t.Fatalf("expected metrics rejection body to mention internal-only access, got %s", body)
+	}
+}
+
+func TestMetricsDisabledSkipsInjectedInstrumentation(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeTestJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	}))
+	defer upstream.Close()
+
+	registry := gatewaymetrics.NewRegistry()
+	cfg := testConfig(routeForServer(t, "/api/users", "/api", "user-service", upstream.URL))
+	cfg.Metrics.Enabled = false
+	cfg.Metrics.Path = ""
+
+	gateway := httptest.NewServer(buildHandlerWithOptions(cfg, testLogger(), buildHandlerOptions{
+		metricsRegistry: registry,
+	}))
+	defer gateway.Close()
+
+	resp, err := http.Get(gateway.URL + "/api/users")
+	if err != nil {
+		t.Fatalf("get service route with metrics disabled: %v", err)
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from service route, got %d", resp.StatusCode)
+	}
+
+	families, err := registry.Gather()
+	if err != nil {
+		t.Fatalf("gather registry after disabled metrics request: %v", err)
+	}
+	if hasMetricForService(families, gatewaymetrics.MetricRequestsTotal, "user-service") {
+		t.Fatalf("expected metrics-disabled handler to skip instrumentation even with an injected registry")
+	}
+}
+
 func testConfig(routes ...config.RouteConfig) *config.Config {
 	return &config.Config{
 		Server: config.ServerConfig{
@@ -1507,6 +1600,23 @@ func (denyAllRateLimitStore) Allow(_ context.Context, request ratelimit.Request)
 		Remaining: 0,
 		ResetAt:   now.Add(request.Window),
 	}, nil
+}
+
+func hasMetricForService(families []*dto.MetricFamily, name, service string) bool {
+	for _, family := range families {
+		if family.GetName() != name {
+			continue
+		}
+		for _, metric := range family.Metric {
+			for _, label := range metric.Label {
+				if label.GetName() == "service" && label.GetValue() == service {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
 }
 
 func doGatewayRequest(t *testing.T, gateway *httptest.Server, method, path, authorization string) *http.Response {

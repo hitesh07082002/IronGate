@@ -235,7 +235,76 @@ func TestValidateRejectsMetricsPathConflictingWithRoute(t *testing.T) {
 	}
 
 	joined := joinErrors(cfg.Validate())
-	assertContains(t, joined, "metrics.path must not exactly match a configured route path")
+	assertContains(t, joined, "metrics.path must not overlap a configured route path prefix")
+}
+
+func TestValidateRejectsMetricsPathNestedUnderRoutePrefix(t *testing.T) {
+	cfg := &Config{
+		Server: ServerConfig{
+			Port:         8080,
+			ReadTimeout:  30 * time.Second,
+			WriteTimeout: 30 * time.Second,
+		},
+		Routes: []RouteConfig{
+			{
+				Path:    "/api",
+				Service: gatewayInternalService,
+			},
+		},
+		Metrics: MetricsConfig{
+			Enabled: true,
+			Path:    "/api/metrics",
+		},
+	}
+
+	joined := joinErrors(cfg.Validate())
+	assertContains(t, joined, "metrics.path must not overlap a configured route path prefix")
+}
+
+func TestValidateRejectsMetricsPathThatPrefixesRoute(t *testing.T) {
+	cfg := &Config{
+		Server: ServerConfig{
+			Port:         8080,
+			ReadTimeout:  30 * time.Second,
+			WriteTimeout: 30 * time.Second,
+		},
+		Routes: []RouteConfig{
+			{
+				Path:    "/metrics/users",
+				Service: gatewayInternalService,
+			},
+		},
+		Metrics: MetricsConfig{
+			Enabled: true,
+			Path:    "/metrics",
+		},
+	}
+
+	joined := joinErrors(cfg.Validate())
+	assertContains(t, joined, "metrics.path must not overlap a configured route path prefix")
+}
+
+func TestValidateTrimsRoutePathBeforeMetricsConflictChecks(t *testing.T) {
+	cfg := &Config{
+		Server: ServerConfig{
+			Port:         8080,
+			ReadTimeout:  30 * time.Second,
+			WriteTimeout: 30 * time.Second,
+		},
+		Routes: []RouteConfig{
+			{
+				Path:    "  /metrics  ",
+				Service: gatewayInternalService,
+			},
+		},
+		Metrics: MetricsConfig{
+			Enabled: true,
+			Path:    "/metrics",
+		},
+	}
+
+	joined := joinErrors(cfg.Validate())
+	assertContains(t, joined, "metrics.path must not overlap a configured route path prefix")
 }
 
 func TestGatewayConfigPhaseSixEnablesRetryCircuitBreakingAndMetrics(t *testing.T) {

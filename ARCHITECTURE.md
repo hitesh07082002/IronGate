@@ -54,7 +54,9 @@ The complete end-state and future-phase architecture lives in:
   - `order-service-1`, `order-service-2`
   - `payment-service-1`
   - shared `JWT_SECRET` provided to the gateway and both user-service instances at startup
-  - Redis and Prometheus kept internal-only on the Compose network
+  - `GRAFANA_ADMIN_USER` and `GRAFANA_ADMIN_PASSWORD` provided to Grafana at startup
+  - Redis kept internal-only on the Compose network
+  - Prometheus and Grafana bound to `127.0.0.1` on the host for local-only access
 
 ### Planned, not shipped yet
 
@@ -322,7 +324,9 @@ The checked-in config also actively uses:
 - `redis`
 
 The checked-in [`configs/gateway.yaml`](./configs/gateway.yaml) expects `JWT_SECRET` from the
-environment and validates `jwt_algorithm: HS256` when any route requires auth.
+environment and validates `jwt_algorithm: HS256` when any route requires auth. The
+checked-in Compose stack also expects `GRAFANA_ADMIN_USER` and `GRAFANA_ADMIN_PASSWORD`
+for the local Grafana instance.
 
 ### Runtime-supported Phase 6 fields
 
@@ -384,6 +388,7 @@ Upstreams currently see:
 ## 8. Observability on `main`
 
 - `/metrics` is mounted directly in [`cmd/gateway/main.go`](./cmd/gateway/main.go). It does not flow through router auth, rate limiting, or proxy logic.
+- The metrics endpoint strips `X-User-ID`, `X-User-Role`, and `X-Request-ID` before handling the request and only serves loopback or private-network clients.
 - Every gateway-exported application metric uses only the `{service}` label.
 - Exported application series on `main`:
   - `gateway_requests_total`
@@ -399,7 +404,7 @@ Upstreams currently see:
 
 ---
 
-## 8. Verification
+## 9. Verification
 
 Current repo verification commands:
 
@@ -427,7 +432,7 @@ Key test coverage lives in:
 
 ---
 
-## 9. Planned Extensions
+## 10. Planned Extensions
 
 The live runtime still uses the same architectural split:
 

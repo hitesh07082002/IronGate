@@ -385,7 +385,7 @@ See [ADR-003: Fail-Open Rate Limiting](./ADR/003-fail-open-rate-limiting.md).
 | Auth | `golang-jwt/jwt/v5` | Standard JWT library for Go. |
 | Hot Reload | `fsnotify` | Filesystem event-based, no polling. |
 | Load Testing | k6 | JavaScript-based, excellent reporting, open source. |
-| Containerization | Docker + Docker Compose | `docker-compose up` = local system (current `main` requires `JWT_SECRET` in the environment). Reproducible. |
+| Containerization | Docker + Docker Compose | `docker-compose up` = local system (current `main` requires `JWT_SECRET`, `GRAFANA_ADMIN_USER`, and `GRAFANA_ADMIN_PASSWORD` in the environment). Reproducible. |
 | TLS (prod) | Caddy | Auto Let's Encrypt. Zero-config HTTPS. |
 
 ---
