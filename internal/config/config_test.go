@@ -193,7 +193,121 @@ func TestValidateRejectsUnknownRetryJitter(t *testing.T) {
 	assertContains(t, joined, `retry.jitter "equal" is invalid`)
 }
 
-func TestGatewayConfigPhaseFiveEnablesRetryAndCircuitBreaking(t *testing.T) {
+func TestValidateRequiresMetricsPathWhenEnabled(t *testing.T) {
+	cfg := &Config{
+		Server: ServerConfig{
+			Port:         8080,
+			ReadTimeout:  30 * time.Second,
+			WriteTimeout: 30 * time.Second,
+		},
+		Routes: []RouteConfig{
+			{
+				Path:    "/health",
+				Service: gatewayInternalService,
+			},
+		},
+		Metrics: MetricsConfig{
+			Enabled: true,
+		},
+	}
+
+	joined := joinErrors(cfg.Validate())
+	assertContains(t, joined, "metrics.path is required when metrics.enabled is true")
+}
+
+func TestValidateRejectsMetricsPathConflictingWithRoute(t *testing.T) {
+	cfg := &Config{
+		Server: ServerConfig{
+			Port:         8080,
+			ReadTimeout:  30 * time.Second,
+			WriteTimeout: 30 * time.Second,
+		},
+		Routes: []RouteConfig{
+			{
+				Path:    "/metrics",
+				Service: gatewayInternalService,
+			},
+		},
+		Metrics: MetricsConfig{
+			Enabled: true,
+			Path:    "/metrics",
+		},
+	}
+
+	joined := joinErrors(cfg.Validate())
+	assertContains(t, joined, `metrics.path "/metrics" must not overlap configured route path "/metrics"`)
+}
+
+func TestValidateRejectsMetricsPathNestedUnderRoutePrefix(t *testing.T) {
+	cfg := &Config{
+		Server: ServerConfig{
+			Port:         8080,
+			ReadTimeout:  30 * time.Second,
+			WriteTimeout: 30 * time.Second,
+		},
+		Routes: []RouteConfig{
+			{
+				Path:    "/api",
+				Service: gatewayInternalService,
+			},
+		},
+		Metrics: MetricsConfig{
+			Enabled: true,
+			Path:    "/api/metrics",
+		},
+	}
+
+	joined := joinErrors(cfg.Validate())
+	assertContains(t, joined, `metrics.path "/api/metrics" must not overlap configured route path "/api"`)
+}
+
+func TestValidateRejectsMetricsPathThatPrefixesRoute(t *testing.T) {
+	cfg := &Config{
+		Server: ServerConfig{
+			Port:         8080,
+			ReadTimeout:  30 * time.Second,
+			WriteTimeout: 30 * time.Second,
+		},
+		Routes: []RouteConfig{
+			{
+				Path:    "/metrics/users",
+				Service: gatewayInternalService,
+			},
+		},
+		Metrics: MetricsConfig{
+			Enabled: true,
+			Path:    "/metrics",
+		},
+	}
+
+	joined := joinErrors(cfg.Validate())
+	assertContains(t, joined, `metrics.path "/metrics" must not overlap configured route path "/metrics/users"`)
+}
+
+func TestValidateTrimsRoutePathBeforeMetricsConflictChecks(t *testing.T) {
+	cfg := &Config{
+		Server: ServerConfig{
+			Port:         8080,
+			ReadTimeout:  30 * time.Second,
+			WriteTimeout: 30 * time.Second,
+		},
+		Routes: []RouteConfig{
+			{
+				Path:    "  /metrics  ",
+				Service: gatewayInternalService,
+			},
+		},
+		Metrics: MetricsConfig{
+			Enabled: true,
+			Path:    "/metrics",
+		},
+	}
+
+	joined := joinErrors(cfg.Validate())
+	assertContains(t, joined, `metrics.path "/metrics" must not overlap configured route path "/metrics"`)
+}
+
+func TestGatewayConfigPhaseSixEnablesRetryCircuitBreakingAndMetrics(t *testing.T) {
 	t.Setenv("JWT_SECRET", "test-secret")
 
 	cfg, err := Load(repoPathFromThisFile("configs", "gateway.yaml"))
@@ -202,7 +316,7 @@ func TestGatewayConfigPhaseFiveEnablesRetryAndCircuitBreaking(t *testing.T) {
 	}
 
 	if errs := cfg.Validate(); len(errs) != 0 {
-		t.Fatalf("expected checked-in Phase 5 config to validate, got %v", errs)
+		t.Fatalf("expected checked-in Phase 6 config to validate, got %v", errs)
 	}
 
 	loginRoute := findRouteByPath(cfg.Routes, "/api/users/login")
@@ -275,6 +389,12 @@ func TestGatewayConfigPhaseFiveEnablesRetryAndCircuitBreaking(t *testing.T) {
 	}
 	if cfg.Redis.Address != "redis:6379" {
 		t.Fatalf("expected redis.address %q, got %q", "redis:6379", cfg.Redis.Address)
+	}
+	if !cfg.Metrics.Enabled {
+		t.Fatal("expected metrics.enabled to be true in the checked-in config")
+	}
+	if cfg.Metrics.Path != "/metrics" {
+		t.Fatalf("expected metrics.path %q, got %q", "/metrics", cfg.Metrics.Path)
 	}
 	if healthRoute.RateLimit != nil {
 		t.Fatalf("expected /health to remain exempt from rate limiting")

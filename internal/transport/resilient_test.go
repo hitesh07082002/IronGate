@@ -27,7 +27,7 @@ func TestLoadBalancerTransportInitializesNilResponseHeaders(t *testing.T) {
 			Body:       http.NoBody,
 			Request:    req,
 		}, nil
-	}), config.CBConfig{})
+	}), nil, config.CBConfig{}, nil)
 
 	route := &config.RouteConfig{
 		Path:         "/api/users",

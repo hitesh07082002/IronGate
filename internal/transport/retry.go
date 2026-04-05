@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/hitesh07082002/irongate/internal/config"
+	gatewaymetrics "github.com/hitesh07082002/irongate/internal/metrics"
 	"github.com/hitesh07082002/irongate/internal/middleware"
 )
 
@@ -36,14 +37,15 @@ type retryPolicy struct {
 }
 
 type RetryTransport struct {
-	next  http.RoundTripper
-	sleep sleepFunc
+	next    http.RoundTripper
+	sleep   sleepFunc
+	metrics *gatewaymetrics.Registry
 
 	randMu sync.Mutex
 	rand   *rand.Rand
 }
 
-func NewRetryTransport(next http.RoundTripper) http.RoundTripper {
+func NewRetryTransport(next http.RoundTripper, registry *gatewaymetrics.Registry) http.RoundTripper {
 	if next == nil {
 		next = http.DefaultTransport
 	}
@@ -52,10 +54,11 @@ func NewRetryTransport(next http.RoundTripper) http.RoundTripper {
 		next,
 		sleepWithContext,
 		rand.New(rand.NewSource(time.Now().UnixNano())),
+		registry,
 	)
 }
 
-func newRetryTransport(next http.RoundTripper, sleep sleepFunc, rng *rand.Rand) *RetryTransport {
+func newRetryTransport(next http.RoundTripper, sleep sleepFunc, rng *rand.Rand, registry *gatewaymetrics.Registry) *RetryTransport {
 	if sleep == nil {
 		sleep = sleepWithContext
 	}
@@ -64,9 +67,10 @@ func newRetryTransport(next http.RoundTripper, sleep sleepFunc, rng *rand.Rand) 
 	}
 
 	return &RetryTransport{
-		next:  next,
-		sleep: sleep,
-		rand:  rng,
+		next:    next,
+		sleep:   sleep,
+		metrics: registry,
+		rand:    rng,
 	}
 }
 
@@ -77,6 +81,7 @@ func (rt *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 
 	policy := normalizeRetryPolicy(route.Retry, isRetryableMethod(req.Method))
+	service := route.Service
 	bufferedBody, hasBufferedBody, err := captureRequestBody(req, policy.maxAttempts > 1)
 	if err != nil {
 		return nil, fmt.Errorf("capture request body: %w", err)
@@ -97,6 +102,10 @@ func (rt *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		attemptReq, err := cloneAttemptRequest(req, bufferedBody, hasBufferedBody, logicalAttempt, triedTargets)
 		if err != nil {
 			return nil, err
+		}
+
+		if logicalAttempt > 0 {
+			rt.metrics.IncRetry(service)
 		}
 
 		resp, roundTripErr := rt.next.RoundTrip(attemptReq)
@@ -146,6 +155,7 @@ func (rt *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 				Target:     metadata.target,
 			}
 		}
+		rt.metrics.ObserveRetryDelay(service, delay)
 
 		logicalAttempt++
 	}

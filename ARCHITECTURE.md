@@ -43,19 +43,23 @@ The complete end-state and future-phase architecture lives in:
 - `X-Served-By` reporting the actual selected upstream
 - `X-Retry-Count` and `X-Retry-Target` reporting retry outcomes
 - Gateway-served `/health` route via `gateway-internal`
+- Direct `/metrics` Prometheus handler with service-only labels
 - Gateway-exposed payment routes: `POST /api/payments` for creation and `GET /api/payments/{id}` for status lookup
 - Docker Compose with:
   - `gateway`
   - `redis`
+  - `prometheus`
+  - `grafana`
   - `user-service-1`, `user-service-2`
   - `order-service-1`, `order-service-2`
   - `payment-service-1`
   - shared `JWT_SECRET` provided to the gateway and both user-service instances at startup
+  - `GRAFANA_ADMIN_USER` and `GRAFANA_ADMIN_PASSWORD` provided to Grafana at startup
   - Redis kept internal-only on the Compose network
+  - Prometheus and Grafana bound to `127.0.0.1` on the host for local-only access
 
 ### Planned, not shipped yet
 
-- Metrics, Prometheus, and Grafana
 - Config hot reload
 - Graceful shutdown and readiness endpoints
 
@@ -320,27 +324,29 @@ The checked-in config also actively uses:
 - `redis`
 
 The checked-in [`configs/gateway.yaml`](./configs/gateway.yaml) expects `JWT_SECRET` from the
-environment and validates `jwt_algorithm: HS256` when any route requires auth.
+environment and validates `jwt_algorithm: HS256` when any route requires auth. The
+checked-in Compose stack also expects `GRAFANA_ADMIN_USER` and `GRAFANA_ADMIN_PASSWORD`
+for the local Grafana instance.
 
-### Runtime-supported Phase 5 fields
+### Runtime-supported Phase 6 fields
 
 These config fields are live on `main` today:
 
 - route-level `retry`
 - top-level `circuit_breaker`
+- top-level `metrics`
 
 ### Future fields already parsed
 
 These fields exist in config structs today but are not live features yet:
 
-- `metrics`
 - `logging`
 
 Rules on `main`:
 
 - Keeping these fields in the struct is allowed
-- Retry and circuit-breaker settings are runtime-supported and validated on load
-- Future observability fields are currently parsed but inert until later phases land
+- Retry, circuit-breaker, and metrics settings are runtime-supported and validated on load
+- Logging config is still parsed but inert until a later phase lands
 - `gateway-internal` routes may omit targets
 
 ---
@@ -379,9 +385,26 @@ Upstreams currently see:
 - no forwarded `Authorization` header on protected routes after gateway auth succeeds
 - `X-Served-By` on the response back to the client
 
+## 8. Observability on `main`
+
+- `/metrics` is mounted directly in [`cmd/gateway/main.go`](./cmd/gateway/main.go). It does not flow through router auth, rate limiting, or proxy logic.
+- The metrics endpoint strips `X-User-ID`, `X-User-Role`, and `X-Request-ID` before handling the request and only serves loopback or private-network clients.
+- Every gateway-exported application metric uses only the `{service}` label.
+- Exported application series on `main`:
+  - `gateway_requests_total`
+  - `gateway_request_failures_total`
+  - `gateway_request_duration_seconds`
+  - `gateway_rate_limit_rejections_total`
+  - `gateway_retries_total`
+  - `gateway_retry_delay_seconds`
+  - `gateway_circuit_opens_total`
+  - `gateway_open_circuits`
+  - `gateway_upstream_duration_seconds`
+  - `gateway_in_flight_requests`
+
 ---
 
-## 8. Verification
+## 9. Verification
 
 Current repo verification commands:
 
@@ -409,7 +432,7 @@ Key test coverage lives in:
 
 ---
 
-## 9. Planned Extensions
+## 10. Planned Extensions
 
 The live runtime still uses the same architectural split:
 

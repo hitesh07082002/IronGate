@@ -13,7 +13,7 @@
 
 IronGate is being built as a configurable API gateway in Go using a two-tier middleware pipeline — the same pattern production gateways like Traefik use. The target outer chain (`http.Handler`) handles request-level concerns (tracing, routing, auth, rate limiting), while the target inner chain (`http.RoundTripper`) handles transport-level concerns (retry, load balancing, circuit breaking). This separation is what makes retry-aware load balancing and per-target circuit breaking possible.
 
-Current status on `main`: the two-tier split already exists, and tracing, routing, auth, Redis-backed rate limiting, proxy, retry, load balancing, and circuit breaking are live. Metrics remain planned.
+Current status on `main`: the two-tier split already exists, and tracing, routing, auth, Redis-backed rate limiting, proxy, retry, load balancing, circuit breaking, and Prometheus-backed observability are live.
 
 This document covers the target architecture, algorithms, failure modes, and key tradeoffs. Section 8 links to the ADR set that captures those decisions.
 
@@ -153,8 +153,10 @@ Full walk-through: `GET /api/orders/42` with a valid Bearer token.
 | 11 | CircuitBreaker | Records success for `order-service-2:8092`. |
 | 12 | Retry | Success on first attempt. No retries needed. |
 | 13 | Proxy | Streams response back through outer chain. |
-| 14 | Metrics | Records: `request_total{service="order-service", status="200"}`, `request_duration=0.023s`, `circuit_state="closed"` |
+| 14 | Metrics | Records service-level series such as `gateway_requests_total{service="order-service"}`, `gateway_request_duration_seconds`, `gateway_upstream_duration_seconds`, and `gateway_open_circuits`. |
 | 15 | Client | Receives `200 OK` with `X-Request-ID`, `X-RateLimit-Remaining: 5`, `X-Retry-Count: 0` |
+
+The shipped observability contract is intentionally narrow: every application metric uses only the `{service}` label. Target, path, method, status, user, and client labels stay out of the exported series so the gateway can expose stable cardinality as traffic scales.
 
 ---
 
@@ -383,7 +385,7 @@ See [ADR-003: Fail-Open Rate Limiting](./ADR/003-fail-open-rate-limiting.md).
 | Auth | `golang-jwt/jwt/v5` | Standard JWT library for Go. |
 | Hot Reload | `fsnotify` | Filesystem event-based, no polling. |
 | Load Testing | k6 | JavaScript-based, excellent reporting, open source. |
-| Containerization | Docker + Docker Compose | `docker-compose up` = local system (current `main` requires `JWT_SECRET` in the environment). Reproducible. |
+| Containerization | Docker + Docker Compose | `docker-compose up` = local system (current `main` requires `JWT_SECRET`, `GRAFANA_ADMIN_USER`, and `GRAFANA_ADMIN_PASSWORD` in the environment). Reproducible. |
 | TLS (prod) | Caddy | Auto Let's Encrypt. Zero-config HTTPS. |
 
 ---

@@ -81,12 +81,13 @@
 ## Phase 6: Observability (Week 5-6)
 - [x] Structured JSON logging for every request
 - [x] X-Request-ID generation and propagation (tracing middleware)
-- [ ] Prometheus Go client integration
-- [ ] `/metrics` endpoint with all gateway metrics
-- [ ] Prometheus in Docker Compose with scrape config
-- [ ] Grafana in Docker Compose with Prometheus data source
-- [ ] Grafana dashboard: RPS, latency percentiles, error rates, circuit states, rate limit rejections
-- [ ] Export dashboard JSON for version control
+- [x] Lock the metrics contract to service-only labels
+- [x] Prometheus Go client integration
+- [x] `/metrics` endpoint with service-level gateway metrics
+- [x] Prometheus in Docker Compose with scrape config
+- [x] Grafana in Docker Compose with Prometheus data source
+- [x] Grafana dashboard: RPS, latency percentiles, error rates, circuit activity, rate limit rejections
+- [x] Export dashboard JSON for version control
 
 ## Phase 7: Polish & Production Readiness (Week 6-7)
 - [ ] Refactor Config to `atomic.Pointer[Config]` for hot-reload

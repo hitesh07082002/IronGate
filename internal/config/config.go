@@ -125,6 +125,7 @@ func Load(path string) (*Config, error) {
 
 func (c *Config) Validate() []error {
 	var errs []error
+	routePaths := make(map[string]struct{}, len(c.Routes))
 
 	if c.Server.Port <= 0 || c.Server.Port > 65535 {
 		errs = append(errs, errors.New("server.port must be between 1 and 65535"))
@@ -156,9 +157,12 @@ func (c *Config) Validate() []error {
 	for index := range c.Routes {
 		route := &c.Routes[index]
 		routeName := fmt.Sprintf("routes[%d] (%q)", index, route.Path)
+		normalizedRoutePath := strings.TrimSpace(route.Path)
 
-		if strings.TrimSpace(route.Path) == "" {
+		if normalizedRoutePath == "" {
 			errs = append(errs, fmt.Errorf("%s path must not be empty", routeName))
+		} else {
+			routePaths[normalizedRoutePath] = struct{}{}
 		}
 		if strings.TrimSpace(route.Service) == "" {
 			errs = append(errs, fmt.Errorf("%s service must not be empty", routeName))
@@ -239,6 +243,24 @@ func (c *Config) Validate() []error {
 	}
 	if c.Redis.DB < 0 {
 		errs = append(errs, errors.New("redis.db must not be negative"))
+	}
+	if c.Metrics.Enabled {
+		metricsPath := strings.TrimSpace(c.Metrics.Path)
+		switch {
+		case metricsPath == "":
+			errs = append(errs, errors.New("metrics.path is required when metrics.enabled is true"))
+		case !strings.HasPrefix(metricsPath, "/"):
+			errs = append(errs, errors.New("metrics.path must start with /"))
+		case metricsPath == "/":
+			errs = append(errs, errors.New("metrics.path must not be /"))
+		default:
+			for routePath := range routePaths {
+				if strings.HasPrefix(metricsPath, routePath) || strings.HasPrefix(routePath, metricsPath) {
+					errs = append(errs, fmt.Errorf("metrics.path %q must not overlap configured route path %q", metricsPath, routePath))
+					break
+				}
+			}
+		}
 	}
 
 	return errs

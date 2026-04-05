@@ -13,9 +13,9 @@
 
 **IronGate** is a lightweight, configurable API gateway built in Go. The target end-state handles routing, authentication, rate limiting, load balancing, circuit breaking, retry with exponential backoff, and observability through a single YAML config file.
 
-Current status on `main`: Phase 1 foundation, Phase 2 load balancing, Phase 3 JWT authentication, Phase 4 Redis-backed rate limiting, and Phase 5 retry plus circuit breaking are shipped. Prometheus and Grafana remain planned work.
+Current status on `main`: Phase 1 foundation, Phase 2 load balancing, Phase 3 JWT authentication, Phase 4 Redis-backed rate limiting, Phase 5 retry plus circuit breaking, and Phase 6 observability are shipped.
 
-Target end-state: a single `docker-compose up` brings up the gateway, backend services, Redis, Prometheus, and Grafana. Current `main` brings up the gateway, Redis, and five mock upstream service instances for the shipped auth plus load-balancing plus rate-limiting plus resilience flow, with `JWT_SECRET` supplied through the environment.
+Target end-state: a single `docker-compose up` brings up the gateway, backend services, Redis, Prometheus, and Grafana. Current `main` does that for the shipped auth plus load-balancing plus rate-limiting plus resilience plus observability flow, with `JWT_SECRET`, `GRAFANA_ADMIN_USER`, and `GRAFANA_ADMIN_PASSWORD` supplied through the environment.
 
 ---
 
@@ -183,20 +183,25 @@ Three strategies, selectable per route:
 
 | Category | Metrics |
 |----------|---------|
-| Requests | `gateway_requests_total{service, method, status}`, `gateway_request_duration_seconds{service, method}` (histogram) |
-| Rate Limiting | `gateway_rate_limit_hits_total{service, client}` |
-| Circuit Breaker | `gateway_circuit_state{service, target}`, `gateway_circuit_opens_total{service}` |
-| Retries | `gateway_retries_total{service, attempt, outcome}`, `gateway_retry_latency_seconds{service}` |
-| Upstream | `gateway_upstream_response_time_seconds{service, target}`, `gateway_active_connections{service, target}` |
+| Requests | `gateway_requests_total{service}`, `gateway_request_failures_total{service}`, `gateway_request_duration_seconds{service}` (histogram), `gateway_in_flight_requests{service}` |
+| Rate Limiting | `gateway_rate_limit_rejections_total{service}` |
+| Circuit Breaker | `gateway_circuit_opens_total{service}`, `gateway_open_circuits{service}` |
+| Retries | `gateway_retries_total{service}`, `gateway_retry_delay_seconds{service}` (histogram) |
+| Upstream | `gateway_upstream_duration_seconds{service}` (histogram) |
+
+**Label Contract:** Every gateway-exported application series uses only the `{service}` label. The shipped runtime does not export path, user, method, status, client, or target labels.
 
 **Grafana Dashboard Panels:**
 
-- Requests per second (by service, by status code)
-- P50 / P95 / P99 latency (by service)
-- Error rate percentage
-- Circuit breaker state timeline
-- Rate limit rejections over time
-- Active connections per upstream target
+- Requests per second by service
+- P50 / P95 / P99 request latency by service
+- 5xx error rate percentage by service
+- Retry activity by service
+- Circuit opens and currently open circuits by service
+- Rate-limit rejections over time by service
+- Upstream P95 latency by service
+
+The default checked-in dashboard intentionally focuses on the primary service trend panels above. `gateway_in_flight_requests{service}` and `gateway_retry_delay_seconds{service}` are exported in Prometheus for ad hoc queries and future dashboard expansion, but they are not visualized by default on `main`.
 
 ### 4.8 Distributed Tracing
 

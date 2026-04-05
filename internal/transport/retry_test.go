@@ -125,6 +125,7 @@ func TestRetryTransportStopsWhenContextCancelsDuringBackoff(t *testing.T) {
 			return ctx.Err()
 		},
 		rand.New(rand.NewSource(1)),
+		nil,
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -173,6 +174,7 @@ func TestRetryTransportPrefersContextCancellationOverOpenCircuitFailover(t *test
 		}),
 		sleepWithContext,
 		rand.New(rand.NewSource(1)),
+		nil,
 	)
 
 	req, err := http.NewRequest(http.MethodGet, "http://gateway/api/orders", nil)
