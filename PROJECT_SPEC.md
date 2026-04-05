@@ -1,6 +1,6 @@
 # IronGate — Project Specification
 
-> **Status:** In Progress
+> **Status:** Core scope shipped, stretch goals pending
 > **Author:** Hitesh Sadhwani
 > **Last Updated:** April 2026
 >
@@ -13,9 +13,9 @@
 
 **IronGate** is a lightweight, configurable API gateway built in Go. The target end-state handles routing, authentication, rate limiting, load balancing, circuit breaking, retry with exponential backoff, and observability through a single YAML config file.
 
-Current branch status: Phase 1 foundation, Phase 2 load balancing, Phase 3 JWT authentication, Phase 4 Redis-backed rate limiting, Phase 5 retry plus circuit breaking, Phase 6 observability, Phase 7 runtime-readiness management, and Phase 8 documentation plus benchmark artifacts are shipped in this checkout.
+The current repo ships Phase 1 foundation, Phase 2 load balancing, Phase 3 JWT authentication, Phase 4 Redis-backed rate limiting, Phase 5 retry plus circuit breaking, Phase 6 observability, Phase 7 runtime-readiness management, and Phase 8 documentation plus benchmark artifacts.
 
-Target end-state: a single `docker-compose up` brings up the gateway, backend services, Redis, Prometheus, and Grafana. The current branch does that for the shipped auth plus load-balancing plus rate-limiting plus resilience plus observability plus readiness flow, with `JWT_SECRET`, `GRAFANA_ADMIN_USER`, and `GRAFANA_ADMIN_PASSWORD` supplied through the environment.
+Target end-state: a single `docker-compose up` brings up the gateway, backend services, Redis, Prometheus, and Grafana. The shipped repo already does that for the current auth plus load-balancing plus rate-limiting plus resilience plus observability plus readiness flow, with `JWT_SECRET`, `GRAFANA_ADMIN_USER`, and `GRAFANA_ADMIN_PASSWORD` supplied through the environment.
 
 ---
 
@@ -531,7 +531,7 @@ Phase 8 reconciliation note:
 
 - The committed benchmark bundle lives in [`benchmarks/results/20260406-033854-d1edb38/`](./benchmarks/results/20260406-033854-d1edb38/README.md).
 - The committed run was captured on local Apple M4 hardware, not the planned 2-vCPU VPS target, so the explicit 2-vCPU success criterion remains a post-deploy validation item.
-- The README, benchmark suite, recorded graphs, architecture docs, and demo-capture workflow are now present in this branch.
+- The README, benchmark suite, recorded graphs, architecture docs, and demo-capture workflow are present in this repo.
 
 ## GSTACK REVIEW REPORT
 

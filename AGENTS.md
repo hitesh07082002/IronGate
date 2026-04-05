@@ -2,10 +2,11 @@
 
 ## Project Overview
 
-IronGate is a reverse-proxy API gateway built from scratch using Go's `net/http` standard library. The current repo ships the foundation, tracing, routing, load balancing, JWT authentication, Redis-backed sliding-window rate limiting, retry, circuit breaking, Prometheus-backed observability, hot reload, readiness, and graceful shutdown.
+IronGate is a reverse-proxy API gateway built from scratch using Go's `net/http` standard library. The current repo ships tracing, routing, load balancing, JWT authentication, Redis-backed sliding-window rate limiting, retry, circuit breaking, Prometheus-backed observability, hot reload, readiness, graceful shutdown, a benchmark harness, and recorded benchmark artifacts.
 
 ## Key Documentation
 
+- [README.md](./README.md) — Quick start, verification commands, benchmark summary, demo flow
 - [PROJECT_SPEC.md](./PROJECT_SPEC.md) — Requirements, scope, feature specs, deployment plan, success criteria
 - [DESIGN_DOC.md](./DESIGN_DOC.md) — Algorithms, data flows, failure modes, pseudocode
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — Implementation reference: interfaces, rules, directory structure, config schema
@@ -48,11 +49,14 @@ Router stores the matched `RouteConfig` in `context.Context`. All downstream mid
 IRONGATE_TEST_REDIS_ADDR=127.0.0.1:6379 make test       # run all tests, including Redis integration coverage
 IRONGATE_TEST_REDIS_ADDR=127.0.0.1:6379 make coverage   # enforce the 70% statement coverage gate
 IRONGATE_TEST_REDIS_ADDR=127.0.0.1:6379 make test-race  # run race-enabled tests
+make benchmark-test                                     # exercise the Python benchmark runner contract
+mise x k6@1.7.1 -- make benchmark                       # run the full benchmark suite
 make lint       # gofmt check + go vet
 make all        # alias to build
 make build      # compile gateway binary
 make clean      # remove generated binaries and coverage artifacts
 make run        # start gateway on :8080
+./demo.sh       # local under-five-minute demo flow
 ```
 
 `make test`, `make coverage`, and `make test-race` require a running Redis instance when you want the Redis-backed integration tests to execute locally. Without `IRONGATE_TEST_REDIS_ADDR`, those Redis integration tests are skipped.

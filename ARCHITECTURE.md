@@ -1,16 +1,16 @@
 # IronGate — Implementation Reference
 
-> This is the implementation reference for the current branch.
+> This file is the runtime reference for the code currently checked into the repo.
 >
-> Project status: Phase 1 through Phase 8 are present in this branch. The gateway runtime, observability stack, benchmark harness, recorded benchmark artifacts, README, ADRs, and demo-capture workflow are all checked in here.
+> Phase 1 through Phase 8 are shipped here, including the gateway runtime, observability stack, benchmark harness, recorded benchmark artifacts, ADRs, and demo-capture workflow.
 >
-> For target end-state scope and design, see [`PROJECT_SPEC.md`](./PROJECT_SPEC.md) and [`DESIGN_DOC.md`](./DESIGN_DOC.md). If either conflicts with this file, this file wins for the current runtime.
+> For quick start and benchmark highlights, start with [`README.md`](./README.md). For target end-state scope and design, see [`PROJECT_SPEC.md`](./PROJECT_SPEC.md) and [`DESIGN_DOC.md`](./DESIGN_DOC.md). If either conflicts with this file, this file wins for the current runtime.
 
 ---
 
 ## Current Runtime
 
-This file documents the architecture that is actually shipped in the current branch:
+This file documents the architecture that is actually shipped in this repo:
 
 - live middleware and transport ordering
 - runtime-reference config contract and supported behavior
@@ -28,7 +28,7 @@ The complete end-state and future-phase architecture lives in:
 
 ## 1. Current Main Snapshot
 
-### Shipped in the current branch
+### Shipped in this repo
 
 - Reverse proxy gateway built with `net/http` and `httputil.ReverseProxy`
 - Outer middleware chain: `Tracing -> Router -> Metrics -> Auth -> RateLimiter -> Proxy`
@@ -92,6 +92,7 @@ irongate/
 │   ├── route.js
 │   ├── runner.py
 │   ├── scenarios.json
+│   ├── test_runner.py
 │   └── smoke.js
 ├── configs/
 │   └── gateway.yaml
@@ -147,7 +148,7 @@ irongate/
     └── capture-demo.sh
 ```
 
-Only list files here that exist in the current branch.
+Only list files here that exist in this checkout.
 
 ---
 

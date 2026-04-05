@@ -1,6 +1,8 @@
 # IronGate Build Progress
 
-> This tracker reflects what is actually shipped in the current branch. If work from a later phase lands early, mark the box based on reality rather than the original week label.
+> This tracker reflects what is actually shipped in the repo. If work from a later phase lands early, mark the box based on reality rather than the original week label.
+>
+> Phases 1 through 8 are complete in this checkout. Stretch goals remain open until they land.
 
 ## Phase 1: Foundation (Week 1-2)
 - [x] Initialize Git repo, Go modules
@@ -99,7 +101,7 @@
 - [x] Makefile: `make load-test` (`make build`, `make test`, `make run`, and `make docker-up` were already shipped earlier)
 - [x] `demo.sh` automated demo script
 
-## Phase 8: Documentation & Benchmarks (Week 7-8) -- NON-NEGOTIABLE
+## Phase 8: Documentation & Benchmarks (Week 7-8)
 - [x] ADRs for all architectural decisions (see `ADR/`)
 - [x] k6 benchmarks: baseline, with rate limiting, full pipeline, during CB transitions
 - [x] Benchmark results with graphs in `benchmarks/results/`

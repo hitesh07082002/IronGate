@@ -2,7 +2,7 @@
 
 IronGate is a production-style API gateway built from scratch in Go with the standard `net/http` stack. It routes traffic from a single YAML config file and layers in JWT authentication, Redis-backed sliding-window rate limiting, retry, load balancing, circuit breaking, Prometheus metrics, hot reload, readiness draining, and graceful shutdown.
 
-This branch closes out the documentation-and-evidence phase. The repo now includes a runnable benchmark suite, recorded benchmark artifacts, a polished quick-start path, ADRs, and a reproducible demo-capture workflow.
+The repo includes a runnable benchmark suite, recorded benchmark artifacts, ADRs, and a reproducible demo-capture workflow alongside the gateway runtime.
 
 ## Feature Overview
 
@@ -114,12 +114,13 @@ Circuit-breaker proof artifact:
 
 Benchmark note: the local benchmark stack sets `IRONGATE_TRUSTED_PROXIES=0.0.0.0/0,::/0` so one host can emulate many client IPs through `X-Forwarded-For`. That is a benchmark-only local setting. The default runtime still trusts no proxies unless explicitly configured.
 
-## Docs And ADRs
+## Docs
 
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md): current-runtime source of truth
 - [`PROJECT_SPEC.md`](./PROJECT_SPEC.md): full project scope, success criteria, and deployment plan
 - [`DESIGN_DOC.md`](./DESIGN_DOC.md): target architecture, algorithms, and failure-mode reasoning
-- [`PROGRESS.md`](./PROGRESS.md): phase tracker reconciled to the current branch
+- [`PROGRESS.md`](./PROGRESS.md): shipped phases and still-open stretch goals
+- [`CLAUDE.md`](./CLAUDE.md): agent-facing repo map, command contract, and architecture guardrails
 - [`ADR/001-two-tier-pipeline.md`](./ADR/001-two-tier-pipeline.md)
 - [`ADR/002-auth-before-rate-limiting.md`](./ADR/002-auth-before-rate-limiting.md)
 - [`ADR/003-fail-open-rate-limiting.md`](./ADR/003-fail-open-rate-limiting.md)
