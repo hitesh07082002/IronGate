@@ -10,7 +10,6 @@ IronGate is a reverse-proxy API gateway built from scratch using Go's `net/http`
 - [DESIGN_DOC.md](./DESIGN_DOC.md) — Algorithms, data flows, failure modes, pseudocode
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — Implementation reference: interfaces, rules, directory structure, config schema
 - [PROGRESS.md](./PROGRESS.md) — Phase-by-phase build tracker with test requirements
-- [INTERVIEW_GUIDE.md](./INTERVIEW_GUIDE.md) — Talking points and "why" rationale for each design decision
 - [ADR/](./ADR/) — Architecture Decision Records (8 total)
 
 ## Source Of Truth
