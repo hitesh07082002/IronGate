@@ -33,6 +33,11 @@ func Router(routes []config.RouteConfig) Middleware {
 				response.WriteError(w, req, http.StatusNotFound, "route not found")
 				return
 			}
+			if !methodAllowed(route.Methods, req.Method) {
+				w.Header().Set("Allow", strings.Join(route.Methods, ", "))
+				response.WriteError(w, req, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
 
 			ctx := context.WithValue(req.Context(), RouteConfigKey, route)
 			next.ServeHTTP(w, req.WithContext(ctx))
@@ -54,4 +59,18 @@ func (r *router) match(path string) *config.RouteConfig {
 	}
 
 	return nil
+}
+
+func methodAllowed(allowedMethods []string, method string) bool {
+	if len(allowedMethods) == 0 {
+		return true
+	}
+
+	for _, allowedMethod := range allowedMethods {
+		if strings.EqualFold(allowedMethod, method) {
+			return true
+		}
+	}
+
+	return false
 }

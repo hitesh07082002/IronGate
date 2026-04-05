@@ -198,6 +198,47 @@ func TestServedByHeaderMatchesSelectedTarget(t *testing.T) {
 	}
 }
 
+func TestMethodRestrictionsAreEnforcedAtGateway(t *testing.T) {
+	var upstreamHits int
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamHits++
+		writeTestJSON(w, http.StatusOK, map[string]string{
+			"method": r.Method,
+		})
+	}))
+	defer upstream.Close()
+
+	route := routeForServer(t, "/api/users/login", "/api", "user-service", upstream.URL)
+	route.Methods = []string{http.MethodPost}
+
+	gateway := httptest.NewServer(buildHandler(testConfig(route), testLogger()))
+	defer gateway.Close()
+
+	req, err := http.NewRequest(http.MethodGet, gateway.URL+"/api/users/login", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d with body %s", resp.StatusCode, readBody(t, resp.Body))
+	}
+	if upstreamHits != 0 {
+		t.Fatalf("expected gateway to block request before upstream, got %d upstream hits", upstreamHits)
+	}
+
+	allow := resp.Header.Get("Allow")
+	if allow != http.MethodPost {
+		t.Fatalf("expected Allow header %q, got %q", http.MethodPost, allow)
+	}
+}
+
 func TestUnknownRouteReturnsStandard404JSON(t *testing.T) {
 	upstream := httptest.NewServer(http.NotFoundHandler())
 	defer upstream.Close()
