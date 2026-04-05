@@ -138,6 +138,27 @@ func TestAuthPublicRoutesRemainPublic(t *testing.T) {
 	}
 }
 
+func TestAuthRejectsWhitespaceOnlySecret(t *testing.T) {
+	handler := Auth(config.AuthConfig{
+		JWTSecret:    "   ",
+		JWTAlgorithm: "HS256",
+	})(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Fatal("expected whitespace-only secret to fail closed")
+	}))
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, protectedRequest(t, bearerAuthorization(t, "test-secret", jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub":  "u-42",
+		"role": "admin",
+		"iat":  time.Now().Add(-time.Minute).Unix(),
+		"exp":  time.Now().Add(time.Hour).Unix(),
+	})))
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", recorder.Code)
+	}
+}
+
 func TestAuthValidTokenInjectsIdentityHeaders(t *testing.T) {
 	token := bearerAuthorization(t, "test-secret", jwt.SigningMethodHS256, jwt.MapClaims{
 		"sub":  "u-42",
@@ -155,6 +176,9 @@ func TestAuthValidTokenInjectsIdentityHeaders(t *testing.T) {
 		}
 		if got := req.Header.Get(HeaderUserRole); got != "admin" {
 			t.Fatalf("expected X-User-Role %q, got %q", "admin", got)
+		}
+		if got := req.Header.Get("Authorization"); got != "" {
+			t.Fatalf("expected Authorization header to be stripped before upstream, got %q", got)
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}))

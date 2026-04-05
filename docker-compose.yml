@@ -12,14 +12,14 @@ services:
     ports:
       - "8080:8080"
     environment:
-      JWT_SECRET: "${JWT_SECRET}"
+      JWT_SECRET: "${JWT_SECRET:?JWT_SECRET must be set}"
 
   user-service-1:
     build:
       context: .
       dockerfile: services/user-service/Dockerfile
     environment:
-      JWT_SECRET: "${JWT_SECRET}"
+      JWT_SECRET: "${JWT_SECRET:?JWT_SECRET must be set}"
 
   user-service-2:
     build:
@@ -27,7 +27,7 @@ services:
       dockerfile: services/user-service/Dockerfile
     environment:
       PORT: 8091
-      JWT_SECRET: "${JWT_SECRET}"
+      JWT_SECRET: "${JWT_SECRET:?JWT_SECRET must be set}"
 
   order-service-1:
     build:

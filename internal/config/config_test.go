@@ -161,11 +161,15 @@ func TestValidateRejectsPortsOutsideTCPRange(t *testing.T) {
 }
 
 func TestGatewayConfigPhaseThreeEnablesAuthWithoutLaterPhaseFeatures(t *testing.T) {
-	t.Setenv("JWT_SECRET", "")
+	t.Setenv("JWT_SECRET", "test-secret")
 
 	cfg, err := Load(repoPathFromThisFile("configs", "gateway.yaml"))
 	if err != nil {
 		t.Fatalf("load gateway config: %v", err)
+	}
+
+	if errs := cfg.Validate(); len(errs) != 0 {
+		t.Fatalf("expected checked-in Phase 3 config to validate, got %v", errs)
 	}
 
 	loginRoute := findRouteByPath(cfg.Routes, "/api/users/login")
@@ -202,8 +206,8 @@ func TestGatewayConfigPhaseThreeEnablesAuthWithoutLaterPhaseFeatures(t *testing.
 		}
 	}
 
-	if cfg.Auth.JWTSecret != "" {
-		t.Fatalf("expected JWT secret to stay environment-backed in checked-in config, got %q", cfg.Auth.JWTSecret)
+	if cfg.Auth.JWTSecret != "test-secret" {
+		t.Fatalf("expected JWT secret to expand from environment, got %q", cfg.Auth.JWTSecret)
 	}
 	if cfg.Auth.JWTAlgorithm != "HS256" {
 		t.Fatalf("expected auth.jwt_algorithm %q, got %q", "HS256", cfg.Auth.JWTAlgorithm)

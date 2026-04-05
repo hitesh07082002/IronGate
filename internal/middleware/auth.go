@@ -28,7 +28,8 @@ type authClaims struct {
 
 func Auth(authCfg config.AuthConfig) Middleware {
 	algorithm := strings.TrimSpace(authCfg.JWTAlgorithm)
-	secret := []byte(authCfg.JWTSecret)
+	secretValue := strings.TrimSpace(authCfg.JWTSecret)
+	secret := []byte(secretValue)
 	parser := jwt.NewParser(
 		jwt.WithValidMethods([]string{algorithm}),
 		jwt.WithExpirationRequired(),
@@ -48,7 +49,7 @@ func Auth(authCfg config.AuthConfig) Middleware {
 				return
 			}
 
-			if len(secret) == 0 || !signingMethodMatches(algorithm, jwt.SigningMethodHS256.Alg()) {
+			if secretValue == "" || !signingMethodMatches(algorithm, jwt.SigningMethodHS256.Alg()) {
 				response.WriteError(w, req, http.StatusInternalServerError, authConfigErrorMessage)
 				return
 			}
@@ -88,6 +89,7 @@ func Auth(authCfg config.AuthConfig) Middleware {
 
 			req.Header.Set(HeaderUserID, claims.Subject)
 			req.Header.Set(HeaderUserRole, claims.Role)
+			req.Header.Del("Authorization")
 			next.ServeHTTP(w, req)
 		})
 	}

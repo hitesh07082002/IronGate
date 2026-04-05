@@ -489,11 +489,13 @@ func TestProtectedRoutesForwardJWTIdentityAndOverrideSpoofedHeaders(t *testing.T
 	var forwardedRequestID string
 	var forwardedUserID string
 	var forwardedUserRole string
+	var forwardedAuthorization string
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		forwardedRequestID = r.Header.Get("X-Request-ID")
 		forwardedUserID = r.Header.Get("X-User-ID")
 		forwardedUserRole = r.Header.Get("X-User-Role")
+		forwardedAuthorization = r.Header.Get("Authorization")
 		writeTestJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	}))
 	defer upstream.Close()
@@ -543,6 +545,9 @@ func TestProtectedRoutesForwardJWTIdentityAndOverrideSpoofedHeaders(t *testing.T
 	}
 	if forwardedUserRole != "support" {
 		t.Fatalf("expected forwarded X-User-Role %q, got %q", "support", forwardedUserRole)
+	}
+	if forwardedAuthorization != "" {
+		t.Fatalf("expected Authorization header stripped before proxying, got %q", forwardedAuthorization)
 	}
 }
 
