@@ -15,7 +15,7 @@ test:
 	go test ./... -v $(GO_TEST_FLAGS)
 
 test-race:
-	go test ./... -v -race
+	go test ./... -v -race $(GO_TEST_FLAGS)
 
 coverage:
 	go test ./... -covermode=atomic -coverprofile=coverage.out -coverpkg=./... $(GO_TEST_FLAGS)

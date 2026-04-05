@@ -27,7 +27,7 @@ IronGate uses two distinct middleware layers with different Go interfaces.
 
 **Current `main` snapshot:**
 
-```
+```text
 Outer: [Tracing] -> [Router] -> [Auth] -> [RateLimiter] -> [UnsupportedFeatures] -> [Proxy]
 Inner: [LoadBalancer] -> [Base HTTP Transport]
 ```
@@ -38,7 +38,7 @@ The sections below describe the target end-state ordering after later phases lan
 
 Each middleware wraps the next handler. Applied in reverse order so the first-listed is outermost:
 
-```
+```text
 Request → [Tracing] → [Router] → [Auth] → [RateLimiter] → [UnsupportedFeatures] → [Proxy] → Response
 ```
 
@@ -89,7 +89,7 @@ See [ADR-002: Auth Before Rate Limiting](./ADR/002-auth-before-rate-limiting.md)
 
 ### 2.4 System Diagram
 
-```
+```text
                      ┌─────────────────────────────────────────────┐
                      │                DOCKER NETWORK                │
                      │                                              │
@@ -98,7 +98,8 @@ See [ADR-002: Auth Before Rate Limiting](./ADR/002-auth-before-rate-limiting.md)
                    │                                             │  │
                    │  ┌── OUTER CHAIN (http.Handler) ──────────┐ │  │
                    │  │  [Tracing] → [Router] → [Auth]         │ │  │
-                   │  │  → [RateLimiter] → [Proxy]             │ │  │
+                   │  │  → [RateLimiter] → [UnsupportedFeatures]│ │  │
+                   │  │  → [Proxy]                             │ │  │
                    │  └────────────────────────────────────────┘ │  │
                    │                    │                         │  │
                    │  ┌── INNER CHAIN (http.RoundTripper) ─────┐ │  │
@@ -188,7 +189,7 @@ Count requests in the last N seconds. If count ≥ limit, reject with 429.
 
 **Implementation using Redis Sorted Sets + Lua script:**
 
-```
+```text
 Key: rate_limit:{client_key}:{route.Path}
 
 1. ZREMRANGEBYSCORE key  0  (now - window)    — remove expired entries
@@ -213,7 +214,7 @@ See [ADR-005: Sliding Window Over Token Bucket](./ADR/005-sliding-window-over-to
 
 ### 4.3 Circuit Breaker — State Machine
 
-```
+```text
          failures >= threshold
 CLOSED ──────────────────────────→ OPEN
   ↑                                  │
@@ -289,7 +290,7 @@ If `timeout` is not set on a route, the proxy still applies an upstream deadline
 
 **Backoff formula:**
 
-```
+```text
 delay = random(0, min(base_delay × 2^attempt, max_delay))
 ```
 
@@ -315,7 +316,7 @@ Go's `RoundTrip` contract requires that `RoundTrip` must not mutate the original
 
 ### 4.7 JWT Validation Flow
 
-```
+```text
 1. Extract token from Authorization: Bearer <token>
 2. Decode header → verify algorithm matches config (prevent alg-switching attack)
 3. Verify signature using configured secret

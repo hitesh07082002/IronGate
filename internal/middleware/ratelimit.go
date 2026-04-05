@@ -1,6 +1,9 @@
 package middleware
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"log/slog"
 	"math"
 	"net"
@@ -25,6 +28,8 @@ const (
 	rateLimitMetadataMissingMessage     = "rate limit metadata missing"
 	rateLimitStrategyUnsupportedMessage = "route rate limit strategy is not implemented yet"
 	defaultRateLimitStrategy            = "sliding_window"
+	rateLimitStoreTimeout               = 250 * time.Millisecond
+	rateLimitBucketHashBytes            = 6
 )
 
 type RateLimiterOptions struct {
@@ -77,11 +82,13 @@ func RateLimiter(store ratelimit.Store, logger *slog.Logger, options RateLimiter
 			}
 
 			if store == nil {
+				bucketKind, bucketKeyHash := rateLimitBucketLogFields(clientKey)
 				logger.Warn("rate limit store unavailable; allowing request",
 					"path", req.URL.Path,
 					"route", route.Path,
 					"request_id", response.RequestID(req),
-					"client_key", clientKey,
+					"bucket_kind", bucketKind,
+					"bucket_key_hash", bucketKeyHash,
 					"reason", "store not configured",
 				)
 				next.ServeHTTP(w, req)
@@ -89,7 +96,8 @@ func RateLimiter(store ratelimit.Store, logger *slog.Logger, options RateLimiter
 			}
 
 			now := time.Now()
-			decision, err := store.Allow(req.Context(), ratelimit.Request{
+			storeCtx, cancel := context.WithTimeout(req.Context(), rateLimitStoreTimeout)
+			decision, err := store.Allow(storeCtx, ratelimit.Request{
 				Key:      ratelimit.Key(clientKey, route.Path),
 				Limit:    route.RateLimit.Requests,
 				Window:   route.RateLimit.Window,
@@ -97,12 +105,15 @@ func RateLimiter(store ratelimit.Store, logger *slog.Logger, options RateLimiter
 				Member:   requestID,
 				Now:      now,
 			})
+			cancel()
 			if err != nil {
+				bucketKind, bucketKeyHash := rateLimitBucketLogFields(clientKey)
 				logger.Warn("rate limit store unavailable; allowing request",
 					"path", req.URL.Path,
 					"route", route.Path,
 					"request_id", response.RequestID(req),
-					"client_key", clientKey,
+					"bucket_kind", bucketKind,
+					"bucket_key_hash", bucketKeyHash,
 					"error", err,
 				)
 				next.ServeHTTP(w, req)
@@ -165,32 +176,45 @@ func parseRemoteIP(remoteAddr string) (netip.Addr, bool) {
 	return parseIP(remoteAddr)
 }
 
-func parseForwardedForChain(value string) ([]netip.Addr, bool) {
+type forwardedHop struct {
+	addr  netip.Addr
+	valid bool
+}
+
+func parseForwardedForChain(value string) ([]forwardedHop, bool) {
 	if strings.TrimSpace(value) == "" {
 		return nil, false
 	}
 
 	parts := strings.Split(value, ",")
-	forwarded := make([]netip.Addr, 0, len(parts))
+	forwarded := make([]forwardedHop, 0, len(parts))
 	for _, part := range parts {
 		addr, ok := parseIP(part)
-		if !ok {
-			return nil, false
-		}
-		forwarded = append(forwarded, addr)
+		forwarded = append(forwarded, forwardedHop{
+			addr:  addr,
+			valid: ok,
+		})
 	}
 
 	return forwarded, len(forwarded) > 0
 }
 
-func forwardedClientIP(remoteIP netip.Addr, forwarded []netip.Addr, trustedProxies []netip.Prefix) netip.Addr {
+// Walk from the trusted edge toward the client and stop once the chain becomes unverifiable.
+func forwardedClientIP(remoteIP netip.Addr, forwarded []forwardedHop, trustedProxies []netip.Prefix) netip.Addr {
 	downstreamHop := remoteIP
 	for index := len(forwarded) - 1; index >= 0; index-- {
-		candidate := forwarded[index]
-		if !trustedProxy(candidate, trustedProxies) {
-			return candidate
+		if !trustedProxy(downstreamHop, trustedProxies) {
+			return downstreamHop
 		}
-		downstreamHop = candidate
+
+		candidate := forwarded[index]
+		if !candidate.valid {
+			return downstreamHop
+		}
+		if !trustedProxy(candidate.addr, trustedProxies) {
+			return candidate.addr
+		}
+		downstreamHop = candidate.addr
 	}
 
 	return downstreamHop
@@ -213,6 +237,16 @@ func trustedProxy(remoteIP netip.Addr, trustedProxies []netip.Prefix) bool {
 	}
 
 	return false
+}
+
+func rateLimitBucketLogFields(clientKey string) (string, string) {
+	bucketKind, _, ok := strings.Cut(clientKey, ":")
+	if !ok || strings.TrimSpace(bucketKind) == "" {
+		bucketKind = "unknown"
+	}
+
+	sum := sha256.Sum256([]byte(clientKey))
+	return bucketKind, hex.EncodeToString(sum[:rateLimitBucketHashBytes])
 }
 
 func setRateLimitHeaders(header http.Header, limit int, decision ratelimit.Decision) {

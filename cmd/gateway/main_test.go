@@ -366,6 +366,23 @@ func TestUnsupportedRateLimitStrategyFailsClosed(t *testing.T) {
 	if resp.StatusCode != http.StatusNotImplemented {
 		t.Fatalf("expected 501, got %d with body %s", resp.StatusCode, readBody(t, resp.Body))
 	}
+	var payload struct {
+		Error     string `json:"error"`
+		Code      int    `json:"code"`
+		RequestID string `json:"request_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode unsupported strategy response: %v", err)
+	}
+	if payload.Error == "" {
+		t.Fatalf("expected non-empty error message, got %+v", payload)
+	}
+	if payload.Code != http.StatusNotImplemented {
+		t.Fatalf("expected error code 501, got %+v", payload)
+	}
+	if _, err := uuid.Parse(payload.RequestID); err != nil {
+		t.Fatalf("expected valid request id, got %q", payload.RequestID)
+	}
 	if upstreamHits != 0 {
 		t.Fatalf("expected unsupported strategy to fail before upstream, got %d hits", upstreamHits)
 	}
@@ -628,8 +645,15 @@ func TestRateLimiterFailsOpenWhenRedisIsDown(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected fail-open request to succeed, got %d with body %s", resp.StatusCode, readBody(t, resp.Body))
 	}
-	if got := resp.Header.Get(middleware.HeaderRateLimitLimit); got != "" {
-		t.Fatalf("expected no authoritative rate-limit headers on fail-open, got %q", got)
+	for _, header := range []string{
+		middleware.HeaderRateLimitLimit,
+		middleware.HeaderRateLimitRemaining,
+		middleware.HeaderRateLimitReset,
+		middleware.HeaderRetryAfter,
+	} {
+		if got := resp.Header.Get(header); got != "" {
+			t.Fatalf("expected %s omitted on fail-open, got %q", header, got)
+		}
 	}
 	if !strings.Contains(logBuffer.String(), "rate limit store unavailable; allowing request") {
 		t.Fatalf("expected warning log when Redis is down, got %q", logBuffer.String())
