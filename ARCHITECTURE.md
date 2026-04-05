@@ -50,6 +50,7 @@ The complete end-state and future-phase architecture lives in:
 - Gateway-exposed payment routes: `POST /api/payments` for creation and `GET /api/payments/{id}` for status lookup
 - `make load-test` backed by [`benchmarks/smoke.js`](./benchmarks/smoke.js)
 - `make benchmark` backed by [`benchmarks/scenarios.json`](./benchmarks/scenarios.json), [`benchmarks/route.js`](./benchmarks/route.js), and [`benchmarks/runner.py`](./benchmarks/runner.py)
+- `make benchmark-test` backed by [`benchmarks/test_runner.py`](./benchmarks/test_runner.py) to keep the benchmark artifact contract regression-tested
 - Recorded benchmark bundle under [`benchmarks/results/20260406-033854-d1edb38/`](./benchmarks/results/20260406-033854-d1edb38/README.md)
 - Top-level [`README.md`](./README.md) with quick start, architecture diagram, benchmark summary, and doc links
 - [`demo.sh`](./demo.sh) for an end-to-end local stack smoke run
@@ -479,6 +480,7 @@ make build
 IRONGATE_TEST_REDIS_ADDR=127.0.0.1:6379 make test
 IRONGATE_TEST_REDIS_ADDR=127.0.0.1:6379 make coverage
 IRONGATE_TEST_REDIS_ADDR=127.0.0.1:6379 make test-race
+make benchmark-test
 make load-test
 mise x k6@1.7.1 -- make benchmark
 ```
@@ -486,6 +488,7 @@ mise x k6@1.7.1 -- make benchmark
 `make test`, `make coverage`, and `make test-race` require a running Redis instance when you want the Redis-backed integration tests to execute locally. Without `IRONGATE_TEST_REDIS_ADDR`, those Redis integration tests are skipped.
 
 `make coverage` enforces a repo-wide statement coverage floor of 70%.
+`make benchmark-test` exercises the Python benchmark runner without requiring a live stack.
 `make load-test` requires `k6` plus a reachable gateway, defaulting to `http://127.0.0.1:8080`.
 `make benchmark` requires `k6`, boots the benchmark contract from [`benchmarks/scenarios.json`](./benchmarks/scenarios.json), and records machine-readable bundles under [`benchmarks/results/`](./benchmarks/results/README.md).
 [`demo.sh`](./demo.sh) boots the local Compose stack, waits for `/ready`, exercises protected routes, samples `/metrics`, and then runs the k6 smoke test.

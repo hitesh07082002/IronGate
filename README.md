@@ -66,10 +66,12 @@ make build
 IRONGATE_TEST_REDIS_ADDR=127.0.0.1:6379 make test
 IRONGATE_TEST_REDIS_ADDR=127.0.0.1:6379 make test-race
 IRONGATE_TEST_REDIS_ADDR=127.0.0.1:6379 make coverage
+make benchmark-test
 mise x k6@1.7.1 -- make benchmark
 ```
 
 `make benchmark` writes a timestamped result bundle under `benchmarks/results/`.
+`make benchmark-test` covers the Python benchmark runner's artifact-rendering and dependency-check contract without needing k6 or Docker.
 
 ## Demo Flow
 

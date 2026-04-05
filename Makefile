@@ -1,4 +1,4 @@
-.PHONY: all clean lint build test test-race coverage run docker-up docker-down load-test benchmark benchmark-scenario benchmark-render
+.PHONY: all clean lint build test test-race coverage run docker-up docker-down load-test benchmark benchmark-scenario benchmark-render benchmark-test
 
 GO_TEST_FLAGS ?=
 COVERAGE_MIN ?= 70
@@ -45,6 +45,9 @@ load-test:
 
 benchmark:
 	python3 benchmarks/runner.py run --scenario all
+
+benchmark-test:
+	python3 -m unittest discover -s benchmarks -p 'test_*.py' -v
 
 benchmark-scenario:
 	@test -n "$${SCENARIO:-}" || (echo "SCENARIO is required"; exit 1)
