@@ -4,6 +4,54 @@ server:
   write_timeout: 30s
 
 routes:
+  - path: "/api/users/login"
+    strip_prefix: "/api"
+    service: "user-service"
+    methods: ["POST"]
+    auth_required: false
+    timeout: 30s
+    rate_limit:
+      requests: 100
+      window: 60s
+      strategy: "sliding_window"
+    retry:
+      max_attempts: 3
+      base_delay: 100ms
+      max_delay: 2s
+      jitter: "full"
+    targets:
+      - host: "user-service-1"
+        port: 8081
+        weight: 3
+      - host: "user-service-2"
+        port: 8091
+        weight: 1
+    load_balancer: "weighted"
+
+  - path: "/api/users/register"
+    strip_prefix: "/api"
+    service: "user-service"
+    methods: ["POST"]
+    auth_required: false
+    timeout: 30s
+    rate_limit:
+      requests: 100
+      window: 60s
+      strategy: "sliding_window"
+    retry:
+      max_attempts: 3
+      base_delay: 100ms
+      max_delay: 2s
+      jitter: "full"
+    targets:
+      - host: "user-service-1"
+        port: 8081
+        weight: 3
+      - host: "user-service-2"
+        port: 8091
+        weight: 1
+    load_balancer: "weighted"
+
   - path: "/api/users"
     strip_prefix: "/api"
     service: "user-service"

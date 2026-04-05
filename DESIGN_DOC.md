@@ -258,18 +258,20 @@ See [ADR-006: In-Memory Least Connections](./ADR/006-in-memory-least-connections
 
 ### 4.5 Per-Route Timeout
 
-Each route can specify a `timeout` (e.g., `timeout: 30s`). The Proxy middleware wraps the request context with `context.WithTimeout` before calling `Transport.RoundTrip`. If the upstream doesn't respond within the timeout, the context cancels, aborting the in-flight request and any pending retries (no point retrying if the client's deadline has passed).
+Each route can specify a `timeout` (e.g., `timeout: 30s`). The Proxy middleware wraps the request context with `context.WithTimeout` before calling `Transport.RoundTrip`. If the upstream doesn't respond within the timeout, the context cancels, aborting the in-flight request and any pending retries (no point retrying if the client's deadline has passed). When a route omits `timeout`, the gateway falls back to the server `write_timeout`, which is 30s in the default config.
 
 ```go
 // In proxy.go, before calling ReverseProxy.ServeHTTP:
-if routeCfg.Timeout > 0 {
-    ctx, cancel := context.WithTimeout(req.Context(), routeCfg.Timeout)
-    defer cancel()
-    req = req.WithContext(ctx)
+routeTimeout := routeCfg.Timeout
+if routeTimeout <= 0 {
+    routeTimeout = cfg.Server.WriteTimeout
 }
+ctx, cancel := context.WithTimeout(req.Context(), routeTimeout)
+defer cancel()
+req = req.WithContext(ctx)
 ```
 
-If `timeout` is not set on a route, the server-level `read_timeout`/`write_timeout` apply as the backstop.
+If `timeout` is not set on a route, the proxy still applies an upstream deadline by reusing the server `write_timeout`.
 
 ### 4.6 Retry & Exponential Backoff
 

@@ -123,6 +123,32 @@ func TestValidateAllowsGatewayInternalRouteWithoutTargets(t *testing.T) {
 	}
 }
 
+func TestGatewayConfigKeepsUserAuthEndpointsPublic(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+
+	cfg, err := Load(filepath.Join("..", "..", "configs", "gateway.yaml"))
+	if err != nil {
+		t.Fatalf("load gateway config: %v", err)
+	}
+
+	loginRoute := findRouteByPath(cfg.Routes, "/api/users/login")
+	registerRoute := findRouteByPath(cfg.Routes, "/api/users/register")
+	usersRoute := findRouteByPath(cfg.Routes, "/api/users")
+
+	if loginRoute == nil || registerRoute == nil || usersRoute == nil {
+		t.Fatalf("expected login, register, and users routes to exist")
+	}
+	if loginRoute.AuthRequired {
+		t.Fatal("expected /api/users/login to remain public")
+	}
+	if registerRoute.AuthRequired {
+		t.Fatal("expected /api/users/register to remain public")
+	}
+	if !usersRoute.AuthRequired {
+		t.Fatal("expected /api/users to remain protected")
+	}
+}
+
 func joinErrors(errs []error) string {
 	parts := make([]string, 0, len(errs))
 	for _, err := range errs {
@@ -136,4 +162,14 @@ func assertContains(t *testing.T, got, want string) {
 	if !strings.Contains(got, want) {
 		t.Fatalf("expected %q to contain %q", got, want)
 	}
+}
+
+func findRouteByPath(routes []RouteConfig, path string) *RouteConfig {
+	for index := range routes {
+		if routes[index].Path == path {
+			return &routes[index]
+		}
+	}
+
+	return nil
 }
