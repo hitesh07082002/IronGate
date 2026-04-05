@@ -16,13 +16,13 @@
 - [ ] Test: overlapping routes (/api/users vs /api/users/login) resolve to the more specific match
 
 ## Phase 2: Load Balancing (Week 2-3)
-- [ ] Load balancer interface in `internal/transport/loadbalancer/`
-- [ ] Round-robin implementation
-- [ ] Weighted round-robin implementation
-- [ ] Least-connections implementation (in-memory atomic counter)
-- [ ] Second instance of user-service in Docker Compose
-- [ ] `X-Served-By` response header
-- [ ] Tests: even distribution, weighted distribution, concurrent safety
+- [x] Load balancer interface in `internal/transport/loadbalancer/`
+- [x] Round-robin implementation
+- [x] Weighted round-robin implementation
+- [x] Least-connections implementation (in-memory atomic counter)
+- [x] Second instances of user-service and order-service in Docker Compose
+- [x] `X-Served-By` response header
+- [x] Tests: even distribution, weighted distribution, concurrent safety
 
 ## Phase 3: Authentication (Week 3)
 - [ ] JWT parsing and signature verification (`golang-jwt/jwt/v5`)
