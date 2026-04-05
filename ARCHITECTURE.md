@@ -291,7 +291,7 @@ type RouteConfig struct {
     Service      string
     Methods      []string
     AuthRequired bool
-    Timeout      time.Duration     // per-route timeout; 0 = use server defaults
+    Timeout      time.Duration     // per-route timeout; 0 = use server write_timeout
     RateLimit    *RateLimitConfig  // nil = no rate limiting
     Retry        RetryConfig
     Targets      []Target
@@ -360,7 +360,7 @@ Set this from Phase 1. It's one line of config but the difference between 200 re
 
 8. **Idempotent retries only:** Default retryable methods: GET, HEAD, PUT, DELETE, OPTIONS. POST is excluded to prevent duplicate resource creation.
 
-9. **Per-route timeout:** Proxy applies `context.WithTimeout(req.Context(), route.Timeout)` before calling the inner transport. Default: 30s. This prevents a hanging upstream from accumulating goroutines.
+9. **Per-route timeout:** Proxy applies `context.WithTimeout(req.Context(), route.Timeout)` before calling the inner transport. If the route omits `timeout`, fall back to the server `write_timeout` (30s in the default config). This prevents a hanging upstream from accumulating goroutines.
 
 10. **Metrics label cardinality:** Never use request path, user ID, or any unbounded value as a Prometheus label. Use `{service}` (from route config, bounded by config file). 10,000 unique paths = 10,000 time series = Prometheus OOM.
 

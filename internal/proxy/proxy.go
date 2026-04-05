@@ -15,16 +15,23 @@ import (
 	"github.com/hitesh07082002/irongate/internal/response"
 )
 
-const gatewayInternalService = "gateway-internal"
+const (
+	gatewayInternalService = "gateway-internal"
+	fallbackRouteTimeout   = 30 * time.Second
+)
 
 type Handler struct {
-	logger *slog.Logger
-	proxy  *httputil.ReverseProxy
+	logger         *slog.Logger
+	proxy          *httputil.ReverseProxy
+	defaultTimeout time.Duration
 }
 
-func New(logger *slog.Logger) http.Handler {
+func New(logger *slog.Logger, defaultTimeout time.Duration) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
+	}
+	if defaultTimeout <= 0 {
+		defaultTimeout = fallbackRouteTimeout
 	}
 
 	reverseProxy := &httputil.ReverseProxy{
@@ -73,8 +80,9 @@ func New(logger *slog.Logger) http.Handler {
 	}
 
 	return &Handler{
-		logger: logger,
-		proxy:  reverseProxy,
+		logger:         logger,
+		proxy:          reverseProxy,
+		defaultTimeout: defaultTimeout,
 	}
 }
 
@@ -98,11 +106,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	if route.Timeout > 0 {
-		ctx, cancel := context.WithTimeout(req.Context(), route.Timeout)
-		defer cancel()
-		req = req.WithContext(ctx)
+	routeTimeout := route.Timeout
+	if routeTimeout <= 0 {
+		routeTimeout = h.defaultTimeout
 	}
+
+	ctx, cancel := context.WithTimeout(req.Context(), routeTimeout)
+	defer cancel()
+	req = req.WithContext(ctx)
 
 	h.proxy.ServeHTTP(w, req)
 }

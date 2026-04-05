@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -181,6 +182,114 @@ func TestTracingAddsRequestIDAndSanitizesIncomingHeaders(t *testing.T) {
 	}
 	if forwardedRequestID != responseRequestID {
 		t.Fatalf("expected forwarded request id %q to match response %q", forwardedRequestID, responseRequestID)
+	}
+}
+
+func TestStreamingResponsesFlushThroughGateway(t *testing.T) {
+	firstChunkFlushed := make(chan struct{})
+	allowSecondChunk := make(chan struct{})
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: first\n\n")
+		flusher.Flush()
+		close(firstChunkFlushed)
+
+		<-allowSecondChunk
+
+		_, _ = io.WriteString(w, "data: second\n\n")
+		flusher.Flush()
+	}))
+	defer upstream.Close()
+
+	gateway := httptest.NewServer(buildHandler(testConfig(routeForServer(t, "/api/users", "/api", "user-service", upstream.URL)), testLogger()))
+	defer gateway.Close()
+
+	resp, err := http.Get(gateway.URL + "/api/users/stream")
+	if err != nil {
+		t.Fatalf("get streaming route: %v", err)
+	}
+	defer resp.Body.Close()
+
+	<-firstChunkFlushed
+
+	reader := bufio.NewReader(resp.Body)
+	type readResult struct {
+		line string
+		err  error
+	}
+	resultCh := make(chan readResult, 1)
+	go func() {
+		line, err := reader.ReadString('\n')
+		resultCh <- readResult{line: line, err: err}
+	}()
+
+	select {
+	case result := <-resultCh:
+		if result.err != nil {
+			t.Fatalf("read first streamed chunk: %v", result.err)
+		}
+		if result.line != "data: first\n" {
+			t.Fatalf("expected first streamed chunk, got %q", result.line)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("expected first streamed chunk before upstream completed")
+	}
+
+	close(allowSecondChunk)
+
+	body := readBody(t, reader)
+	if !strings.Contains(body, "data: second") {
+		t.Fatalf("expected second streamed chunk, got %q", body)
+	}
+}
+
+func TestRouteWithoutTimeoutUsesServerWriteTimeout(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-time.After(200 * time.Millisecond):
+			writeTestJSON(w, http.StatusOK, map[string]string{"status": "late"})
+		case <-r.Context().Done():
+		}
+	}))
+	defer upstream.Close()
+
+	cfg := testConfig(routeForServer(t, "/api/users", "/api", "user-service", upstream.URL))
+	cfg.Server.WriteTimeout = 50 * time.Millisecond
+	cfg.Routes[0].Timeout = 0
+
+	gateway := httptest.NewServer(buildHandler(cfg, testLogger()))
+	defer gateway.Close()
+
+	start := time.Now()
+	resp, err := http.Get(gateway.URL + "/api/users/1")
+	if err != nil {
+		t.Fatalf("get timeout route: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusGatewayTimeout {
+		t.Fatalf("expected 504, got %d with body %s", resp.StatusCode, readBody(t, resp.Body))
+	}
+
+	if elapsed := time.Since(start); elapsed > 150*time.Millisecond {
+		t.Fatalf("expected default timeout to trigger quickly, took %s", elapsed)
+	}
+
+	var payload struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode timeout response: %v", err)
+	}
+	if payload.Error != "upstream request timed out" {
+		t.Fatalf("unexpected timeout payload: %+v", payload)
 	}
 }
 

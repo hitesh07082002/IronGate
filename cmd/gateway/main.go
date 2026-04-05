@@ -48,7 +48,7 @@ func main() {
 }
 
 func buildHandler(cfg *config.Config, logger *slog.Logger) http.Handler {
-	proxyHandler := proxy.New(logger)
+	proxyHandler := proxy.New(logger, cfg.Server.WriteTimeout)
 	return middleware.Chain(
 		proxyHandler,
 		middleware.Tracing(logger),

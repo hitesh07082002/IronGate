@@ -60,6 +60,10 @@ type statusRecorder struct {
 	wroteHeader bool
 }
 
+func (r *statusRecorder) Unwrap() http.ResponseWriter {
+	return r.ResponseWriter
+}
+
 func (r *statusRecorder) WriteHeader(statusCode int) {
 	if r.wroteHeader {
 		return
