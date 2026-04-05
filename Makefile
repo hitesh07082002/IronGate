@@ -7,6 +7,7 @@ lint:
 	go vet ./...
 
 build:
+	mkdir -p bin
 	go build -o bin/gateway ./cmd/gateway
 
 test:

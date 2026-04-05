@@ -1,11 +1,11 @@
-# ADR-005: Sliding Window as Core Rate Limiting Algorithm
+# ADR-005: Sliding Window as Core Rate-Limiting Algorithm
 
 **Status:** Accepted
 **Date:** April 2026
 
 ## Context
 
-Two common rate limiting algorithms: sliding window and token bucket. Both are well-understood, both can be implemented atomically with Redis Lua scripts.
+Two common rate-limiting algorithms: sliding window and token bucket. Both are well-understood, both can be implemented atomically with Redis Lua scripts.
 
 - **Sliding window:** "100 requests per 60 seconds" means exactly that. Count requests in a moving time window using a Redis sorted set.
 - **Token bucket:** Bucket fills at a steady rate, allows bursts up to bucket size. More complex mental model, more config parameters (`requests_per_second` + `burst`).
@@ -25,6 +25,7 @@ Config uses `requests` (max count) + `window` (duration) + `strategy: "sliding_w
 - Focus implementation time on getting the Redis Lua script right, testing edge cases, and handling Redis failures.
 - Token bucket can be added later as a second strategy behind the same `strategy:` config field.
 - The `strategy` field exists from day 1 so adding token bucket later is just a new implementation, not a config schema change.
+- Rate limiting is accepted by design but not yet enabled in runtime. Current middleware still returns `501` for `rate_limit` until Phase 4 wires the implementation into the request flow.
 
 ## Alternatives Considered
 

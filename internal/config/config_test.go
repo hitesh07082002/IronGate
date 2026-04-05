@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -123,8 +124,42 @@ func TestValidateAllowsGatewayInternalRouteWithoutTargets(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsPortsOutsideTCPRange(t *testing.T) {
+	cfg := &Config{
+		Server: ServerConfig{
+			Port:         70000,
+			ReadTimeout:  30 * time.Second,
+			WriteTimeout: 30 * time.Second,
+		},
+		Routes: []RouteConfig{
+			{
+				Path:         "/api/users",
+				Service:      "user-service",
+				LoadBalancer: "round_robin",
+				Targets: []Target{
+					{
+						Host: "user-service-1",
+						Port: 70001,
+					},
+				},
+			},
+		},
+		CircuitBreaker: CBConfig{
+			FailureThreshold:    5,
+			SuccessThreshold:    3,
+			Timeout:             30 * time.Second,
+			WindowSize:          60 * time.Second,
+			HalfOpenMaxRequests: 3,
+		},
+	}
+
+	joined := joinErrors(cfg.Validate())
+	assertContains(t, joined, "server.port must be between 1 and 65535")
+	assertContains(t, joined, `targets[0] port must be between 1 and 65535`)
+}
+
 func TestGatewayConfigPhaseTwoAvoidsUnsupportedRouteFeatures(t *testing.T) {
-	cfg, err := Load(filepath.Join("..", "..", "configs", "gateway.yaml"))
+	cfg, err := Load(repoPathFromThisFile("configs", "gateway.yaml"))
 	if err != nil {
 		t.Fatalf("load gateway config: %v", err)
 	}
@@ -175,4 +210,15 @@ func findRouteByPath(routes []RouteConfig, path string) *RouteConfig {
 	}
 
 	return nil
+}
+
+func repoPathFromThisFile(parts ...string) string {
+	_, filename, _, ok := runtime.Caller(0)
+	if !ok {
+		panic("runtime.Caller failed")
+	}
+
+	base := filepath.Dir(filename)
+	pathParts := append([]string{base, "..", ".."}, parts...)
+	return filepath.Join(pathParts...)
 }

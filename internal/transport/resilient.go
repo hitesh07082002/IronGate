@@ -35,9 +35,10 @@ func NewResilientTransport(base http.RoundTripper) http.RoundTripper {
 
 func NewBaseTransport() http.RoundTripper {
 	return &http.Transport{
-		MaxIdleConnsPerHost: 100,
-		MaxConnsPerHost:     100,
-		IdleConnTimeout:     90 * time.Second,
+		MaxIdleConnsPerHost:   100,
+		MaxConnsPerHost:       100,
+		IdleConnTimeout:       90 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second,
 	}
 }
 
@@ -73,6 +74,9 @@ func (lt *LoadBalancerTransport) RoundTrip(req *http.Request) (*http.Response, e
 	if resp == nil {
 		selection.Done()
 		return nil, fmt.Errorf("upstream transport returned nil response")
+	}
+	if resp.Header == nil {
+		resp.Header = make(http.Header)
 	}
 
 	resp.Header.Set(servedByHeader, outbound.URL.Host)

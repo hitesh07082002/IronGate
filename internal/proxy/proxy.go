@@ -114,11 +114,21 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 }
 
 func stripPrefix(prefix, path string) string {
-	if prefix == "" || !strings.HasPrefix(path, prefix) {
+	normalizedPrefix := strings.TrimSuffix(prefix, "/")
+	if normalizedPrefix == "" {
+		normalizedPrefix = prefix
+	}
+	if normalizedPrefix == "" {
+		return path
+	}
+	if path == normalizedPrefix {
+		return "/"
+	}
+	if !strings.HasPrefix(path, normalizedPrefix+"/") {
 		return path
 	}
 
-	trimmed := strings.TrimPrefix(path, prefix)
+	trimmed := strings.TrimPrefix(path, normalizedPrefix)
 	if trimmed == "" {
 		return "/"
 	}

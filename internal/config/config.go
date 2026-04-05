@@ -122,8 +122,8 @@ func Load(path string) (*Config, error) {
 func (c *Config) Validate() []error {
 	var errs []error
 
-	if c.Server.Port <= 0 {
-		errs = append(errs, errors.New("server.port must be greater than 0"))
+	if c.Server.Port <= 0 || c.Server.Port > 65535 {
+		errs = append(errs, errors.New("server.port must be between 1 and 65535"))
 	}
 	if c.Server.ReadTimeout <= 0 {
 		errs = append(errs, errors.New("server.read_timeout must be greater than 0"))
@@ -207,8 +207,8 @@ func (c *Config) Validate() []error {
 			if strings.TrimSpace(target.Host) == "" {
 				errs = append(errs, fmt.Errorf("%s host must not be empty", targetName))
 			}
-			if target.Port <= 0 {
-				errs = append(errs, fmt.Errorf("%s port must be greater than 0", targetName))
+			if target.Port <= 0 || target.Port > 65535 {
+				errs = append(errs, fmt.Errorf("%s port must be between 1 and 65535", targetName))
 			}
 			if target.Weight < 0 {
 				errs = append(errs, fmt.Errorf("%s weight must not be negative", targetName))

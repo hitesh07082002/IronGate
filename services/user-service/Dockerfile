@@ -9,8 +9,10 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o /out/user-service ./services/user-service
 
 FROM alpine:3.20
+RUN addgroup -S irongate && adduser -S -G irongate irongate
 
 COPY --from=builder /out/user-service /usr/local/bin/user-service
+USER irongate
 
 EXPOSE 8081
 

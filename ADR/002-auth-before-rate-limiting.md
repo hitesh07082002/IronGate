@@ -24,7 +24,7 @@ Rate limiting uses the authenticated user ID (`X-User-ID` from JWT claims) as th
 - Unauthenticated requests get rejected at the auth layer (401) before touching the rate limiter.
 - Rate limits are per-user, not per-IP. More accurate, less collateral damage.
 - Routes with `auth_required: false` (like `/health`) still get rate-limited by IP.
-- Auth middleware must be fast. A slow JWT validation adds latency to every request. HMAC-SHA256 verification is <1ms, so this is fine.
+- Auth middleware must be fast. A slow JWT validation adds latency to every request. HMAC-SHA256 verification is typically under 1ms on modern hardware, so this is fine for this design.
 
 ## Alternatives Considered
 
