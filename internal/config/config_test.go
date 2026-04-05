@@ -235,7 +235,7 @@ func TestValidateRejectsMetricsPathConflictingWithRoute(t *testing.T) {
 	}
 
 	joined := joinErrors(cfg.Validate())
-	assertContains(t, joined, "metrics.path must not overlap a configured route path prefix")
+	assertContains(t, joined, `metrics.path "/metrics" must not overlap configured route path "/metrics"`)
 }
 
 func TestValidateRejectsMetricsPathNestedUnderRoutePrefix(t *testing.T) {
@@ -258,7 +258,7 @@ func TestValidateRejectsMetricsPathNestedUnderRoutePrefix(t *testing.T) {
 	}
 
 	joined := joinErrors(cfg.Validate())
-	assertContains(t, joined, "metrics.path must not overlap a configured route path prefix")
+	assertContains(t, joined, `metrics.path "/api/metrics" must not overlap configured route path "/api"`)
 }
 
 func TestValidateRejectsMetricsPathThatPrefixesRoute(t *testing.T) {
@@ -281,7 +281,7 @@ func TestValidateRejectsMetricsPathThatPrefixesRoute(t *testing.T) {
 	}
 
 	joined := joinErrors(cfg.Validate())
-	assertContains(t, joined, "metrics.path must not overlap a configured route path prefix")
+	assertContains(t, joined, `metrics.path "/metrics" must not overlap configured route path "/metrics/users"`)
 }
 
 func TestValidateTrimsRoutePathBeforeMetricsConflictChecks(t *testing.T) {
@@ -304,7 +304,7 @@ func TestValidateTrimsRoutePathBeforeMetricsConflictChecks(t *testing.T) {
 	}
 
 	joined := joinErrors(cfg.Validate())
-	assertContains(t, joined, "metrics.path must not overlap a configured route path prefix")
+	assertContains(t, joined, `metrics.path "/metrics" must not overlap configured route path "/metrics"`)
 }
 
 func TestGatewayConfigPhaseSixEnablesRetryCircuitBreakingAndMetrics(t *testing.T) {

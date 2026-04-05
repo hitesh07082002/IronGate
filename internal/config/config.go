@@ -256,7 +256,7 @@ func (c *Config) Validate() []error {
 		default:
 			for routePath := range routePaths {
 				if strings.HasPrefix(metricsPath, routePath) || strings.HasPrefix(routePath, metricsPath) {
-					errs = append(errs, errors.New("metrics.path must not overlap a configured route path prefix"))
+					errs = append(errs, fmt.Errorf("metrics.path %q must not overlap configured route path %q", metricsPath, routePath))
 					break
 				}
 			}

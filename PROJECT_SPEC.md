@@ -201,6 +201,8 @@ Three strategies, selectable per route:
 - Rate-limit rejections over time by service
 - Upstream P95 latency by service
 
+The default checked-in dashboard intentionally focuses on the primary service trend panels above. `gateway_in_flight_requests{service}` and `gateway_retry_delay_seconds{service}` are exported in Prometheus for ad hoc queries and future dashboard expansion, but they are not visualized by default on `main`.
+
 ### 4.8 Distributed Tracing
 
 - Gateway sanitizes incoming `X-Request-ID` and generates a fresh request ID on `main`
