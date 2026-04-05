@@ -1,6 +1,6 @@
 # IronGate — Technical Design Document
 
-> **Status:** Approved target design, implementation in progress
+> **Status:** Approved target design with current-main annotations
 > **Author:** Hitesh Sadhwani
 > **Last Updated:** April 2026
 >
@@ -28,22 +28,23 @@ IronGate uses two distinct middleware layers with different Go interfaces.
 **Current `main` snapshot:**
 
 ```text
-Outer: [Tracing] -> [Router] -> [Auth] -> [RateLimiter] -> [Proxy]
+Outer: [Tracing] -> [Router] -> [Metrics] -> [Auth] -> [RateLimiter] -> [Proxy]
 Inner: [Retry] -> [LoadBalancer] -> [CircuitBreaker] -> [Base HTTP Transport]
 ```
 
-The sections below now describe the live Phase 5 steady-state ordering. Later phases add observability and operational tooling around the same request and transport split.
+The sections below use the live steady-state ordering as the baseline. Later planned work extends the same request and transport split.
 
 **Outer chain — `http.Handler` middleware (request-level):**
 
 Each middleware wraps the next handler. Applied in reverse order so the first-listed is outermost:
 
 ```text
-Request → [Tracing] → [Router] → [Auth] → [RateLimiter] → [Proxy] → Response
+Request → [Tracing] → [Router] → [Metrics] → [Auth] → [RateLimiter] → [Proxy] → Response
 ```
 
 - **Tracing** sanitizes any incoming request ID and generates the `X-Request-ID` used for the request lifecycle.
 - **Router** matches path to route config, stores config in `context.Context`.
+- **Metrics** records service-only Prometheus metrics for matched routes and bypasses auth and rate limiting on gateway-owned `/metrics` traffic.
 - **Auth** reads `auth_required` from context, validates JWT, injects `X-User-ID`/`X-User-Role`, and strips the bearer token before proxying protected requests.
 - **RateLimiter** reads rate limit config from context, checks Redis sliding window.
 - **Proxy** is `httputil.ReverseProxy` with a custom `Transport` (the inner chain).
@@ -174,7 +175,7 @@ ctx := context.WithValue(req.Context(), RouteConfigKey, route)
 req = req.WithContext(ctx)
 ```
 
-Every downstream middleware reads config from context, never from a global lookup. This is:
+Every downstream middleware reads config from context, never from a global lookup. In Phase 7, a runtime snapshot manager atomically swaps the whole application handler plus its derived dependencies, so each new request captures the latest route/auth/rate-limit/transport state while in-flight requests keep the snapshot they started with. This is:
 - **Thread-safe** — context is immutable and passed per-request.
 - **Testable** — unit tests create a context with test config, no global state to reset.
 - **Hot-reload ready** — when config changes, new requests get the new config via context. In-flight requests keep their original config.
@@ -383,7 +384,7 @@ See [ADR-003: Fail-Open Rate Limiting](./ADR/003-fail-open-rate-limiting.md).
 | Metrics | Prometheus (`client_golang`) | Pull-based metrics. First-class Go client. |
 | Dashboards | Grafana | Connects to Prometheus. Dashboard JSON is version-controllable. |
 | Auth | `golang-jwt/jwt/v5` | Standard JWT library for Go. |
-| Hot Reload | `fsnotify` | Filesystem event-based, no polling. |
+| Hot Reload | `fsnotify` + `atomic.Pointer[RuntimeSnapshot]` | Filesystem event-based reloads that swap fully-built runtime snapshots without mutating live middleware. |
 | Load Testing | k6 | JavaScript-based, excellent reporting, open source. |
 | Containerization | Docker + Docker Compose | `docker-compose up` = local system (current `main` requires `JWT_SECRET`, `GRAFANA_ADMIN_USER`, and `GRAFANA_ADMIN_PASSWORD` in the environment). Reproducible. |
 | TLS (prod) | Caddy | Auto Let's Encrypt. Zero-config HTTPS. |
@@ -439,6 +440,6 @@ What separates IronGate: it's a learning project that demonstrates understanding
 | Question | Resolution | Reasoning |
 |----------|-----------|-----------|
 | Dummy services: Go or Node.js? | **Go** | Keeps the stack homogeneous. The project is about demonstrating Go proficiency. |
-| Config access pattern? | **Plain struct (Phase 1–6) → `atomic.Pointer[Config]` (Phase 7)** | Middleware reads per-request route config from `context.Context`, not from a global. The Phase 7 refactor is minimal because middleware already reads from context. |
+| Config access pattern? | **Plain startup struct (Phase 1–6) → `atomic.Pointer[RuntimeSnapshot]` (Phase 7)** | Hot reload must swap config plus derived runtime dependencies together. Middleware still reads per-request route config from `context.Context`, so in-flight requests keep their captured snapshot. |
 | Deployment timing? | **Post-completion** | Don't let deployment block the core build. DigitalOcean VPS setup happens after Phase 8. |
 | Rate limit algorithm? | **Sliding window (core), token bucket (stretch)** | Sliding window is simpler and more intuitive. Token bucket adds burst tolerance but isn't needed for the core demo. |

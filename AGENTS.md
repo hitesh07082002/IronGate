@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-IronGate is a reverse-proxy API gateway built from scratch using Go's `net/http` standard library. The current repo ships the foundation, tracing, routing, load balancing, JWT authentication, Redis-backed sliding-window rate limiting, retry, and circuit breaking. Richer observability remains planned.
+IronGate is a reverse-proxy API gateway built from scratch using Go's `net/http` standard library. The current repo ships the foundation, tracing, routing, load balancing, JWT authentication, Redis-backed sliding-window rate limiting, retry, circuit breaking, Prometheus-backed observability, hot reload, readiness, and graceful shutdown.
 
 ## Key Documentation
 
@@ -21,11 +21,11 @@ IronGate is a reverse-proxy API gateway built from scratch using Go's `net/http`
 
 ## Architecture (Two-Tier Pipeline)
 
-**Current outer chain** (`http.Handler` middleware): Tracing → Router → Auth → RateLimiter → Proxy
+**Current outer chain** (`http.Handler` middleware): Tracing → Router → Metrics → Auth → RateLimiter → Proxy
 
 **Current inner chain** (`http.RoundTripper` transport): Retry → Load Balancer → Circuit Breaker → Base Transport
 
-Future-phase target architecture lives in [`DESIGN_DOC.md`](./DESIGN_DOC.md) and [`PROJECT_SPEC.md`](./PROJECT_SPEC.md). Later phases add observability and operational tooling on top of this Phase 5 transport chain.
+Future-phase target architecture lives in [`DESIGN_DOC.md`](./DESIGN_DOC.md) and [`PROJECT_SPEC.md`](./PROJECT_SPEC.md). Later work should continue to preserve this request/transport split unless the runtime contract is intentionally changed.
 
 Router stores the matched `RouteConfig` in `context.Context`. All downstream middleware reads config from context, not globals.
 

@@ -139,6 +139,27 @@ func (b *Breaker) State() State {
 	return b.state
 }
 
+func (b *Breaker) cloneWithConfig(cfg config.CBConfig) *Breaker {
+	if b == nil {
+		return New(cfg)
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	clone := &Breaker{
+		config:            normalizeConfig(cfg),
+		clock:             b.clock,
+		state:             b.state,
+		openUntil:         b.openUntil,
+		failures:          append([]time.Time(nil), b.failures...),
+		halfOpenSuccesses: b.halfOpenSuccesses,
+		halfOpenInFlight:  b.halfOpenInFlight,
+	}
+	clone.reconcileLocked(b.config)
+	return clone
+}
+
 func (b *Breaker) openLocked(now time.Time) {
 	b.state = StateOpen
 	b.openUntil = now.Add(b.config.Timeout)
@@ -169,6 +190,31 @@ func (b *Breaker) pruneFailuresLocked(now time.Time) {
 		trimmed = append(trimmed, failureAt)
 	}
 	b.failures = trimmed
+}
+
+func (b *Breaker) reconcileLocked(previousConfig config.CBConfig) {
+	now := b.clock.Now()
+	b.pruneFailuresLocked(now)
+
+	switch b.state {
+	case StateClosed:
+		if len(b.failures) >= b.config.FailureThreshold {
+			b.openLocked(now)
+		}
+	case StateOpen:
+		previous := normalizeConfig(previousConfig)
+		if !b.openUntil.IsZero() {
+			openedAt := b.openUntil.Add(-previous.Timeout)
+			b.openUntil = openedAt.Add(b.config.Timeout)
+		}
+	case StateHalfOpen:
+		if b.halfOpenInFlight > b.config.HalfOpenMaxRequests {
+			b.halfOpenInFlight = b.config.HalfOpenMaxRequests
+		}
+		if b.halfOpenSuccesses >= b.config.SuccessThreshold && b.halfOpenInFlight == 0 {
+			b.closeLocked()
+		}
+	}
 }
 
 func normalizeConfig(cfg config.CBConfig) config.CBConfig {

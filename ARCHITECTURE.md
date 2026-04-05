@@ -2,7 +2,7 @@
 
 > This is the implementation reference for the current `main` branch.
 >
-> Project status: in progress. `main` has shipped Phase 1 foundation, Phase 2 load balancing, Phase 3 JWT authentication, Phase 4 Redis-backed rate limiting, and Phase 5 retry plus circuit breaking. Later phases remain planned.
+> Project status: in progress. `main` has shipped Phase 1 foundation, Phase 2 load balancing, Phase 3 JWT authentication, Phase 4 Redis-backed rate limiting, Phase 5 retry plus circuit breaking, Phase 6 observability, and Phase 7 production-readiness runtime management. Later documentation and benchmark work remains planned.
 >
 > For target end-state scope and design, see [`PROJECT_SPEC.md`](./PROJECT_SPEC.md) and [`DESIGN_DOC.md`](./DESIGN_DOC.md). If either conflicts with this file, this file wins for the current runtime.
 
@@ -31,7 +31,7 @@ The complete end-state and future-phase architecture lives in:
 ### Shipped on `main`
 
 - Reverse proxy gateway built with `net/http` and `httputil.ReverseProxy`
-- Outer middleware chain: `Tracing -> Router -> Auth -> RateLimiter -> Proxy`
+- Outer middleware chain: `Tracing -> Router -> Metrics -> Auth -> RateLimiter -> Proxy`
 - Inner transport chain: `Retry -> LoadBalancer -> CircuitBreaker -> BaseTransport`
 - Load-balancing strategies:
   - `round_robin` via atomic counter
@@ -42,9 +42,14 @@ The complete end-state and future-phase architecture lives in:
 - `X-Forwarded-*` propagation through proxy rewrite
 - `X-Served-By` reporting the actual selected upstream
 - `X-Retry-Count` and `X-Retry-Target` reporting retry outcomes
-- Gateway-served `/health` route via `gateway-internal`
+- Atomic runtime snapshot manager backed by `atomic.Pointer[*runtime.Snapshot]`
+- fsnotify-based config hot reload with debounce and fail-safe rollback to the last valid snapshot
+- Direct gateway-served `/health`, `/ready`, and `/metrics` handling
+- Graceful shutdown that flips `/ready` to `503` before draining in-flight requests
 - Direct `/metrics` Prometheus handler with service-only labels
 - Gateway-exposed payment routes: `POST /api/payments` for creation and `GET /api/payments/{id}` for status lookup
+- `make load-test` backed by [`benchmarks/smoke.js`](./benchmarks/smoke.js)
+- [`demo.sh`](./demo.sh) for an end-to-end local stack smoke run
 - Docker Compose with:
   - `gateway`
   - `redis`
@@ -58,11 +63,6 @@ The complete end-state and future-phase architecture lives in:
   - Redis kept internal-only on the Compose network
   - Prometheus and Grafana bound to `127.0.0.1` on the host for local-only access
 
-### Planned, not shipped yet
-
-- Config hot reload
-- Graceful shutdown and readiness endpoints
-
 The codebase still contains some future-facing config fields so later phases can plug into the same route model. On `main`, unsupported later-phase features such as non-sliding-window rate limiting still fail closed instead of being silently ignored.
 
 ---
@@ -74,9 +74,13 @@ irongate/
 ├── cmd/
 │   └── gateway/
 │       ├── main.go
-│       └── main_test.go
+│       ├── main_test.go
+│       └── phase7_test.go
+├── benchmarks/
+│   └── smoke.js
 ├── configs/
 │   └── gateway.yaml
+├── demo.sh
 ├── internal/
 │   ├── config/
 │   │   ├── config.go
@@ -97,6 +101,9 @@ irongate/
 │   │   └── store_test.go
 │   ├── response/
 │   │   └── response.go
+│   ├── runtime/
+│   │   ├── manager.go
+│   │   └── watcher.go
 │   ├── testutil/
 │   │   └── redis.go
 │   └── transport/
@@ -123,7 +130,7 @@ irongate/
 └── PROGRESS.md
 ```
 
-Only list files here that exist on `main`. Future files belong in the design docs until they are added to the repo.
+Only list files here that exist on `main`.
 
 ---
 
@@ -131,23 +138,35 @@ Only list files here that exist on `main`. Future files belong in the design doc
 
 ### Outer Chain
 
-`buildHandler` in [`cmd/gateway/main.go`](./cmd/gateway/main.go) wires:
+`newRuntimeManager` in [`cmd/gateway/main.go`](./cmd/gateway/main.go) builds a [`runtime.Manager`](./internal/runtime/manager.go) that serves:
+
+- `/health` directly as a liveness check
+- `/ready` directly as a readiness/drain check (`200` only when a valid snapshot is loaded and shutdown has not begun)
+- the current snapshot's `metrics.path` directly, with the existing internal-only guard
+- all other paths through the current runtime snapshot's application handler
+
+Each incoming request loads the current snapshot once from the atomic pointer. In-flight requests keep the snapshot they started with even if a reload swaps in a newer one.
+
+Each snapshot wires the application chain as:
 
 ```go
 return middleware.Chain(
     proxyHandler,
     middleware.Tracing(logger),
     middleware.Router(cfg.Routes),
+    middleware.Metrics(metricsRegistry),
     middleware.Auth(cfg.Auth),
-    middleware.RateLimiter(rateLimitStore, logger, ...),
+    middleware.RateLimiterWithMetrics(rateLimitStore, logger, metricsRegistry, ...),
 )
 ```
 
-Because `Chain` applies middleware in reverse order, the live request flow is:
+Because `Chain` applies middleware in reverse order, service traffic still flows as:
 
 ```text
-Request -> [Tracing] -> [Router] -> [Auth] -> [RateLimiter] -> [Proxy] -> Response
+Service Request -> [Tracing] -> [Router] -> [Metrics] -> [Auth] -> [RateLimiter] -> [Proxy] -> Response
 ```
+
+Direct internal paths bypass the service middleware chain entirely.
 
 #### `Tracing`
 
@@ -157,6 +176,8 @@ Request -> [Tracing] -> [Router] -> [Auth] -> [RateLimiter] -> [Proxy] -> Respon
 - Logs request start and completion with status and latency
 
 This is a deliberate sanitization boundary. Client-supplied request IDs are not trusted on `main`.
+
+The direct `/health`, `/ready`, and `/metrics` handlers also strip `X-Request-ID`, `X-User-ID`, and `X-User-Role`, then issue a fresh gateway request ID before responding.
 
 #### `Router`
 
@@ -198,12 +219,12 @@ This is a deliberate sanitization boundary. Client-supplied request IDs are not 
 
 #### `UnsupportedFeatures`
 
-- No longer participates in the live Phase 5 handler chain
+- No longer participates in the live handler chain
 - Retained only as a compatibility shim for legacy references and tests
 
 #### `Proxy`
 
-- Serves `gateway-internal` routes directly
+- Still handles `gateway-internal` routes defensively if they reach the proxy, but `/health` and `/ready` are intercepted earlier by the runtime manager
 - Applies per-route timeout with fallback to server `WriteTimeout`
 - Delegates all upstream selection to the transport layer
 - Uses `httputil.ReverseProxy` `Rewrite`, not `Director`
@@ -214,7 +235,7 @@ This is a deliberate sanitization boundary. Client-supplied request IDs are not 
 
 ## 4. Current Transport Pipeline
 
-`transport.NewResilientTransport(nil, cfg.CircuitBreaker)` currently returns:
+`transport.NewResilientTransport(nil, cfg.Routes, cfg.CircuitBreaker, metricsRegistry, breakerRegistry)` currently returns:
 
 ```text
 [RetryTransport] -> [LoadBalancerTransport] -> [CircuitBreakerTransport] -> [Base http.Transport]
@@ -314,6 +335,8 @@ The checked-in [`configs/gateway.yaml`](./configs/gateway.yaml) only uses fields
 - `targets`
 - `load_balancer`
 
+The checked-in config also declares the gateway-internal `/health` and `/ready` routes for completeness. Those paths are reserved for the gateway: validation rejects upstream services or auth/rate-limit settings there, and the runtime manager serves them directly before proxying logic is reached.
+
 ### Default shipped top-level config fields
 
 The checked-in config also actively uses:
@@ -328,13 +351,22 @@ environment and validates `jwt_algorithm: HS256` when any route requires auth. T
 checked-in Compose stack also expects `GRAFANA_ADMIN_USER` and `GRAFANA_ADMIN_PASSWORD`
 for the local Grafana instance.
 
-### Runtime-supported Phase 6 fields
+### Runtime-supported live fields
 
 These config fields are live on `main` today:
 
 - route-level `retry`
 - top-level `circuit_breaker`
 - top-level `metrics`
+- runtime hot reload for routes, auth, Redis, circuit breaker, and metrics settings
+
+### Startup-only server fields
+
+These settings are validated on reload but do not change the live `http.Server` after startup:
+
+- `server.port`
+- `server.read_timeout`
+- `server.write_timeout`
 
 ### Future fields already parsed
 
@@ -414,11 +446,14 @@ IRONGATE_TEST_REDIS_ADDR=127.0.0.1:6379 make test
 IRONGATE_TEST_REDIS_ADDR=127.0.0.1:6379 make coverage
 IRONGATE_TEST_REDIS_ADDR=127.0.0.1:6379 make test-race
 make build
+make load-test
 ```
 
 `make test`, `make coverage`, and `make test-race` require a running Redis instance when you want the Redis-backed integration tests to execute locally. Without `IRONGATE_TEST_REDIS_ADDR`, those Redis integration tests are skipped.
 
 `make coverage` enforces a repo-wide statement coverage floor of 70%.
+`make load-test` requires `k6` plus a reachable gateway, defaulting to `http://127.0.0.1:8080`.
+[`demo.sh`](./demo.sh) boots the local Compose stack, waits for `/ready`, exercises protected routes, samples `/metrics`, and then runs the k6 smoke test.
 
 Key test coverage lives in:
 
@@ -442,8 +477,8 @@ The live runtime still uses the same architectural split:
 Current steady-state order:
 
 ```text
-Outer: [Tracing] -> [Router] -> [Auth] -> [RateLimiter] -> [Proxy]
+Outer: [Tracing] -> [Router] -> [Metrics] -> [Auth] -> [RateLimiter] -> [Proxy]
 Inner: [Retry] -> [LoadBalancer] -> [CircuitBreaker] -> [BaseTransport]
 ```
 
-Treat that ordering as the current runtime. Later phases add observability and operational tooling without changing the core request/transport split.
+Treat that ordering as the current runtime. Later planned extensions should preserve the core request/transport split unless the runtime contract is intentionally revised.

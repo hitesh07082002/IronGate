@@ -30,19 +30,22 @@ type CircuitBreakerTransport struct {
 	serviceTargets map[string][]config.Target
 }
 
-func NewResilientTransport(base http.RoundTripper, routes []config.RouteConfig, breakerConfig config.CBConfig, registry *gatewaymetrics.Registry) http.RoundTripper {
+func NewResilientTransport(base http.RoundTripper, routes []config.RouteConfig, breakerConfig config.CBConfig, registry *gatewaymetrics.Registry, breakers *circuitbreaker.Registry) http.RoundTripper {
 	if base == nil {
 		base = NewBaseTransport()
 	}
+	if breakers == nil {
+		breakers = circuitbreaker.NewRegistry(breakerConfig)
+	}
 
-	breakers := &CircuitBreakerTransport{
+	breakerTransport := &CircuitBreakerTransport{
 		next:           base,
-		registry:       circuitbreaker.NewRegistry(breakerConfig),
+		registry:       breakers,
 		metrics:        registry,
 		serviceTargets: serviceTargetSets(routes),
 	}
 	loadBalancing := &LoadBalancerTransport{
-		next:     breakers,
+		next:     breakerTransport,
 		registry: &balancerRegistry{},
 	}
 

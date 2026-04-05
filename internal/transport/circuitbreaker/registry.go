@@ -24,3 +24,17 @@ func (r *Registry) Breaker(target string) *Breaker {
 	actual, _ := r.breakers.LoadOrStore(target, breaker)
 	return actual.(*Breaker)
 }
+
+func (r *Registry) CloneWithConfig(cfg config.CBConfig) *Registry {
+	clone := NewRegistry(cfg)
+	if r == nil {
+		return clone
+	}
+
+	r.breakers.Range(func(key, value any) bool {
+		clone.breakers.Store(key, value.(*Breaker).cloneWithConfig(cfg))
+		return true
+	})
+
+	return clone
+}

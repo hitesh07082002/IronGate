@@ -1,4 +1,4 @@
-# Phase 6 runtime config includes the shipped observability endpoint on /metrics.
+# Phase 7 runtime config includes observability plus readiness and hot-reload support.
 server:
   port: 8080
   read_timeout: 30s
@@ -107,6 +107,10 @@ routes:
     load_balancer: "round_robin"
 
   - path: "/health"
+    service: "gateway-internal"
+    auth_required: false
+
+  - path: "/ready"
     service: "gateway-internal"
     auth_required: false
 

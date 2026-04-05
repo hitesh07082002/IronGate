@@ -10,7 +10,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const gatewayInternalService = "gateway-internal"
+const (
+	gatewayInternalService = "gateway-internal"
+	gatewayHealthPath      = "/health"
+	gatewayReadyPath       = "/ready"
+)
 
 var (
 	validLoadBalancers = map[string]struct{}{
@@ -105,6 +109,22 @@ type LoggingConfig struct {
 	Format string `yaml:"format"`
 }
 
+func (c *Config) Clone() *Config {
+	if c == nil {
+		return nil
+	}
+
+	clone := *c
+	if len(c.Routes) > 0 {
+		clone.Routes = make([]RouteConfig, len(c.Routes))
+		for index := range c.Routes {
+			clone.Routes[index] = cloneRouteConfig(c.Routes[index])
+		}
+	}
+
+	return &clone
+}
+
 func Load(path string) (*Config, error) {
 	rawConfig, err := os.ReadFile(path)
 	if err != nil {
@@ -173,6 +193,17 @@ func (c *Config) Validate() []error {
 
 		if route.AuthRequired {
 			authRequired = true
+		}
+		if isGatewayReservedPath(normalizedRoutePath) {
+			if route.Service != gatewayInternalService {
+				errs = append(errs, fmt.Errorf("%s path is reserved for the gateway and must use service %q", routeName, gatewayInternalService))
+			}
+			if route.AuthRequired {
+				errs = append(errs, fmt.Errorf("%s path is reserved for the gateway and must keep auth_required false", routeName))
+			}
+			if route.RateLimit != nil {
+				errs = append(errs, fmt.Errorf("%s path is reserved for the gateway and must not configure rate_limit", routeName))
+			}
 		}
 
 		if route.RateLimit != nil {
@@ -264,4 +295,24 @@ func (c *Config) Validate() []error {
 	}
 
 	return errs
+}
+
+func cloneRouteConfig(route RouteConfig) RouteConfig {
+	clone := route
+	if len(route.Methods) > 0 {
+		clone.Methods = append([]string(nil), route.Methods...)
+	}
+	if len(route.Targets) > 0 {
+		clone.Targets = append([]Target(nil), route.Targets...)
+	}
+	if route.RateLimit != nil {
+		rateLimitClone := *route.RateLimit
+		clone.RateLimit = &rateLimitClone
+	}
+
+	return clone
+}
+
+func isGatewayReservedPath(path string) bool {
+	return path == gatewayHealthPath || path == gatewayReadyPath
 }

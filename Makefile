@@ -1,4 +1,4 @@
-.PHONY: all clean lint build test test-race coverage run docker-up docker-down
+.PHONY: all clean lint build test test-race coverage run docker-up docker-down load-test
 
 GO_TEST_FLAGS ?=
 COVERAGE_MIN ?= 70
@@ -38,3 +38,7 @@ docker-up:
 
 docker-down:
 	docker-compose down
+
+load-test:
+	@command -v k6 >/dev/null 2>&1 || (echo "k6 is required for load-test"; exit 1)
+	IRONGATE_BASE_URL="$${IRONGATE_BASE_URL:-http://127.0.0.1:8080}" k6 run benchmarks/smoke.js
