@@ -27,15 +27,15 @@
 - [x] Tests: even distribution, weighted distribution, concurrent safety
 
 ## Phase 3: Authentication (Week 3)
-- [ ] JWT parsing and signature verification (`golang-jwt/jwt/v5`)
-- [ ] Claims extraction (sub, role, exp, iat)
-- [ ] Auth middleware reads `auth_required` from `context.Context`
-- [ ] Routes with `auth_required: false` skip auth (no global `public_paths`)
-- [ ] `/login` endpoint on user-service returns test JWTs
-- [ ] Inject `X-User-ID`, `X-User-Role` headers
-- [ ] Proper 401 responses with clear error messages
-- [ ] Tests: valid token, expired, malformed, missing, wrong algorithm
-- [ ] Test: X-User-ID, X-User-Role, X-Request-ID headers stripped from incoming client requests before proxying
+- [x] JWT parsing and signature verification (`golang-jwt/jwt/v5`)
+- [x] Claims extraction (sub, role, exp, iat)
+- [x] Auth middleware reads `auth_required` from `context.Context`
+- [x] Routes with `auth_required: false` skip auth (no global `public_paths`)
+- [x] `/login` endpoint on user-service returns test JWTs
+- [x] Inject `X-User-ID`, `X-User-Role` headers
+- [x] Proper 401 responses with clear error messages
+- [x] Tests: valid token, expired, malformed, missing, wrong algorithm
+- [x] Test: X-User-ID, X-User-Role, X-Request-ID headers stripped from incoming client requests before proxying
 
 ## Phase 4: Rate Limiting (Week 3-4)
 - [ ] Redis in Docker Compose

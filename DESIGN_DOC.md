@@ -13,7 +13,7 @@
 
 IronGate is being built as a configurable API gateway in Go using a two-tier middleware pipeline — the same pattern production gateways like Traefik use. The target outer chain (`http.Handler`) handles request-level concerns (tracing, routing, auth, rate limiting), while the target inner chain (`http.RoundTripper`) handles transport-level concerns (retry, load balancing, circuit breaking). This separation is what makes retry-aware load balancing and per-target circuit breaking possible.
 
-Current status on `main`: the two-tier split already exists, but only the tracing, routing, proxy, unsupported-feature guard, and load-balancing pieces are live. Auth, rate limiting, retry, circuit breaker, and metrics remain planned.
+Current status on `main`: the two-tier split already exists, and tracing, routing, auth, proxy, unsupported-feature guards, and load balancing are live. Rate limiting, retry, circuit breaker, and metrics remain planned.
 
 This document covers the target architecture, algorithms, failure modes, and key tradeoffs. Section 8 links to the ADR set that captures those decisions.
 
@@ -28,7 +28,7 @@ IronGate uses two distinct middleware layers with different Go interfaces.
 **Current `main` snapshot:**
 
 ```
-Outer: [Tracing] -> [Router] -> [UnsupportedFeatures] -> [Proxy]
+Outer: [Tracing] -> [Router] -> [Auth] -> [UnsupportedFeatures] -> [Proxy]
 Inner: [LoadBalancer] -> [Base HTTP Transport]
 ```
 

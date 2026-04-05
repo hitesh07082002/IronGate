@@ -13,9 +13,9 @@
 
 **IronGate** is a lightweight, configurable API gateway built in Go. The target end-state handles routing, authentication, rate limiting, load balancing, circuit breaking, retry with exponential backoff, and observability through a single YAML config file.
 
-Current status on `main`: Phase 1 foundation and Phase 2 load balancing are shipped. Authentication, rate limiting, retry, circuit breaker, Redis, Prometheus, and Grafana remain planned work.
+Current status on `main`: Phase 1 foundation, Phase 2 load balancing, and Phase 3 JWT authentication are shipped. Rate limiting, retry, circuit breaker, Redis, Prometheus, and Grafana remain planned work.
 
-Target end-state: a single `docker-compose up` brings up the gateway, backend services, Redis, Prometheus, and Grafana. Current `main` brings up the gateway plus five mock upstream service instances for the shipped Phase 2 load-balancing flow.
+Target end-state: a single `docker-compose up` brings up the gateway, backend services, Redis, Prometheus, and Grafana. Current `main` brings up the gateway plus five mock upstream service instances for the shipped Phase 3 auth plus load-balancing flow.
 
 ---
 

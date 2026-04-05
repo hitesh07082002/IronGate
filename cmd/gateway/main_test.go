@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 
 	"github.com/hitesh07082002/irongate/internal/config"
@@ -109,6 +110,8 @@ func TestStripPrefixForwardsExpectedPath(t *testing.T) {
 }
 
 func TestPaymentStatusRouteIsReachableThroughGateway(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+
 	cfg, err := config.Load(repoPathFromThisFile("configs", "gateway.yaml"))
 	if err != nil {
 		t.Fatalf("load gateway config: %v", err)
@@ -136,7 +139,18 @@ func TestPaymentStatusRouteIsReachableThroughGateway(t *testing.T) {
 	gateway := httptest.NewServer(buildHandler(cfg, testLogger()))
 	defer gateway.Close()
 
-	resp, err := http.Get(gateway.URL + "/api/payments/p-1")
+	req, err := http.NewRequest(http.MethodGet, gateway.URL+"/api/payments/p-1", nil)
+	if err != nil {
+		t.Fatalf("new payment status request: %v", err)
+	}
+	req.Header.Set("Authorization", gatewayBearerToken(t, "test-secret", jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub":  "u-1",
+		"role": "admin",
+		"iat":  time.Now().Add(-time.Minute).Unix(),
+		"exp":  time.Now().Add(time.Hour).Unix(),
+	}))
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("get payment status route: %v", err)
 	}
@@ -281,14 +295,6 @@ func TestUnsupportedRouteFeaturesFailClosed(t *testing.T) {
 		wantError   string
 	}{
 		{
-			name: "auth",
-			mutateRoute: func(route *config.RouteConfig) {
-				route.AuthRequired = true
-			},
-			wantStatus: http.StatusNotImplemented,
-			wantError:  "route auth is not implemented yet",
-		},
-		{
 			name: "rate_limit",
 			mutateRoute: func(route *config.RouteConfig) {
 				route.RateLimit = &config.RateLimitConfig{
@@ -354,6 +360,260 @@ func TestUnsupportedRouteFeaturesFailClosed(t *testing.T) {
 				t.Fatalf("expected error %q, got %q", testCase.wantError, payload.Error)
 			}
 		})
+	}
+}
+
+func TestProtectedRoutesReturn401WithoutToken(t *testing.T) {
+	var upstreamHits int
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		upstreamHits++
+		writeTestJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	}))
+	defer upstream.Close()
+
+	route := routeForServer(t, "/api/users", "/api", "user-service", upstream.URL)
+	route.AuthRequired = true
+
+	gateway := httptest.NewServer(buildHandler(testConfig(route), testLogger()))
+	defer gateway.Close()
+
+	resp, err := http.Get(gateway.URL + "/api/users")
+	if err != nil {
+		t.Fatalf("get protected route: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d with body %s", resp.StatusCode, readBody(t, resp.Body))
+	}
+	if upstreamHits != 0 {
+		t.Fatalf("expected gateway auth to block request before upstream, got %d hits", upstreamHits)
+	}
+
+	var payload struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode auth error response: %v", err)
+	}
+	if payload.Error != "missing authorization header" {
+		t.Fatalf("expected missing header error, got %q", payload.Error)
+	}
+}
+
+func TestPublicRoutesRemainPublicInPhaseThree(t *testing.T) {
+	testCases := []struct {
+		name      string
+		build     func(t *testing.T) *httptest.Server
+		method    string
+		path      string
+		wantCode  int
+		wantError string
+	}{
+		{
+			name: "login remains public",
+			build: func(t *testing.T) *httptest.Server {
+				upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					writeTestJSON(w, http.StatusOK, map[string]string{"token": "public-login"})
+				}))
+				t.Cleanup(upstream.Close)
+
+				route := routeForServer(t, "/api/users/login", "/api", "user-service", upstream.URL)
+				route.Methods = []string{http.MethodPost}
+				route.AuthRequired = false
+
+				return httptest.NewServer(buildHandler(testConfig(route), testLogger()))
+			},
+			method:   http.MethodPost,
+			path:     "/api/users/login",
+			wantCode: http.StatusOK,
+		},
+		{
+			name: "register remains public",
+			build: func(t *testing.T) *httptest.Server {
+				upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					writeTestJSON(w, http.StatusCreated, map[string]string{"status": "registered"})
+				}))
+				t.Cleanup(upstream.Close)
+
+				route := routeForServer(t, "/api/users/register", "/api", "user-service", upstream.URL)
+				route.Methods = []string{http.MethodPost}
+				route.AuthRequired = false
+
+				return httptest.NewServer(buildHandler(testConfig(route), testLogger()))
+			},
+			method:   http.MethodPost,
+			path:     "/api/users/register",
+			wantCode: http.StatusCreated,
+		},
+		{
+			name: "health remains public",
+			build: func(t *testing.T) *httptest.Server {
+				return httptest.NewServer(buildHandler(testConfig(config.RouteConfig{
+					Path:         "/health",
+					Service:      "gateway-internal",
+					AuthRequired: false,
+				}), testLogger()))
+			},
+			method:   http.MethodGet,
+			path:     "/health",
+			wantCode: http.StatusOK,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			gateway := testCase.build(t)
+			defer gateway.Close()
+
+			req, err := http.NewRequest(testCase.method, gateway.URL+testCase.path, nil)
+			if err != nil {
+				t.Fatalf("new request: %v", err)
+			}
+
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("do request: %v", err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != testCase.wantCode {
+				t.Fatalf("expected %d, got %d with body %s", testCase.wantCode, resp.StatusCode, readBody(t, resp.Body))
+			}
+		})
+	}
+}
+
+func TestProtectedRoutesForwardJWTIdentityAndOverrideSpoofedHeaders(t *testing.T) {
+	var forwardedRequestID string
+	var forwardedUserID string
+	var forwardedUserRole string
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		forwardedRequestID = r.Header.Get("X-Request-ID")
+		forwardedUserID = r.Header.Get("X-User-ID")
+		forwardedUserRole = r.Header.Get("X-User-Role")
+		writeTestJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	}))
+	defer upstream.Close()
+
+	route := routeForServer(t, "/api/users", "/api", "user-service", upstream.URL)
+	route.AuthRequired = true
+
+	gateway := httptest.NewServer(buildHandler(testConfig(route), testLogger()))
+	defer gateway.Close()
+
+	req, err := http.NewRequest(http.MethodGet, gateway.URL+"/api/users", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Authorization", gatewayBearerToken(t, "test-secret", jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub":  "u-77",
+		"role": "support",
+		"iat":  time.Now().Add(-time.Minute).Unix(),
+		"exp":  time.Now().Add(time.Hour).Unix(),
+	}))
+	req.Header.Set("X-Request-ID", "spoofed-request-id")
+	req.Header.Set("X-User-ID", "attacker")
+	req.Header.Set("X-User-Role", "owner")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do protected request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d with body %s", resp.StatusCode, readBody(t, resp.Body))
+	}
+
+	responseRequestID := resp.Header.Get("X-Request-ID")
+	if _, err := uuid.Parse(responseRequestID); err != nil {
+		t.Fatalf("expected valid gateway request id, got %q", responseRequestID)
+	}
+	if responseRequestID == "spoofed-request-id" {
+		t.Fatalf("expected gateway to replace spoofed request id")
+	}
+	if forwardedRequestID != responseRequestID {
+		t.Fatalf("expected forwarded request id %q to match response %q", forwardedRequestID, responseRequestID)
+	}
+	if forwardedUserID != "u-77" {
+		t.Fatalf("expected forwarded X-User-ID %q, got %q", "u-77", forwardedUserID)
+	}
+	if forwardedUserRole != "support" {
+		t.Fatalf("expected forwarded X-User-Role %q, got %q", "support", forwardedUserRole)
+	}
+}
+
+func TestLoginToProtectedRouteSuccess(t *testing.T) {
+	loginUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeTestJSON(w, http.StatusOK, map[string]string{
+			"token": gatewayBearerTokenValue(t, "test-secret", jwt.SigningMethodHS256, jwt.MapClaims{
+				"sub":  "u-1",
+				"role": "admin",
+				"iat":  time.Now().Add(-time.Minute).Unix(),
+				"exp":  time.Now().Add(time.Hour).Unix(),
+			}),
+		})
+	}))
+	defer loginUpstream.Close()
+
+	protectedUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("X-User-ID"); got != "u-1" {
+			t.Fatalf("expected protected upstream X-User-ID %q, got %q", "u-1", got)
+		}
+		if got := r.Header.Get("X-User-Role"); got != "admin" {
+			t.Fatalf("expected protected upstream X-User-Role %q, got %q", "admin", got)
+		}
+		writeTestJSON(w, http.StatusOK, map[string]string{"status": "authorized"})
+	}))
+	defer protectedUpstream.Close()
+
+	loginRoute := routeForServer(t, "/api/users/login", "/api", "user-login-service", loginUpstream.URL)
+	loginRoute.Methods = []string{http.MethodPost}
+	loginRoute.AuthRequired = false
+
+	protectedRoute := routeForServer(t, "/api/users", "/api", "user-service", protectedUpstream.URL)
+	protectedRoute.AuthRequired = true
+
+	gateway := httptest.NewServer(buildHandler(testConfig(loginRoute, protectedRoute), testLogger()))
+	defer gateway.Close()
+
+	loginResp, err := http.Post(gateway.URL+"/api/users/login", "application/json", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatalf("post login route: %v", err)
+	}
+	defer loginResp.Body.Close()
+
+	if loginResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from login, got %d with body %s", loginResp.StatusCode, readBody(t, loginResp.Body))
+	}
+
+	var loginPayload struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(loginResp.Body).Decode(&loginPayload); err != nil {
+		t.Fatalf("decode login response: %v", err)
+	}
+	if loginPayload.Token == "" {
+		t.Fatal("expected login response to return a token")
+	}
+
+	protectedReq, err := http.NewRequest(http.MethodGet, gateway.URL+"/api/users", nil)
+	if err != nil {
+		t.Fatalf("new protected request: %v", err)
+	}
+	protectedReq.Header.Set("Authorization", "Bearer "+loginPayload.Token)
+
+	protectedResp, err := http.DefaultClient.Do(protectedReq)
+	if err != nil {
+		t.Fatalf("do protected request: %v", err)
+	}
+	defer protectedResp.Body.Close()
+
+	if protectedResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from protected route, got %d with body %s", protectedResp.StatusCode, readBody(t, protectedResp.Body))
 	}
 }
 
@@ -719,6 +979,23 @@ func responseInstance(t *testing.T, body io.ReadCloser) string {
 	}
 
 	return payload.Instance
+}
+
+func gatewayBearerToken(t *testing.T, secret string, method jwt.SigningMethod, claims jwt.MapClaims) string {
+	t.Helper()
+	return "Bearer " + gatewayBearerTokenValue(t, secret, method, claims)
+}
+
+func gatewayBearerTokenValue(t *testing.T, secret string, method jwt.SigningMethod, claims jwt.MapClaims) string {
+	t.Helper()
+
+	token := jwt.NewWithClaims(method, claims)
+	signedToken, err := token.SignedString([]byte(secret))
+	if err != nil {
+		t.Fatalf("sign token: %v", err)
+	}
+
+	return signedToken
 }
 
 func testLogger() *slog.Logger {

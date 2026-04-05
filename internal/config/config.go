@@ -219,6 +219,12 @@ func (c *Config) Validate() []error {
 	if authRequired && strings.TrimSpace(c.Auth.JWTSecret) == "" {
 		errs = append(errs, errors.New("auth.jwt_secret is required when any route has auth_required: true"))
 	}
+	if authRequired && strings.TrimSpace(c.Auth.JWTAlgorithm) == "" {
+		errs = append(errs, errors.New("auth.jwt_algorithm is required when any route has auth_required: true"))
+	}
+	if algorithm := strings.TrimSpace(c.Auth.JWTAlgorithm); algorithm != "" && algorithm != "HS256" {
+		errs = append(errs, fmt.Errorf("auth.jwt_algorithm %q is invalid", c.Auth.JWTAlgorithm))
+	}
 
 	return errs
 }

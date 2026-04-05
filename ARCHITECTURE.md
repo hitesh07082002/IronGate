@@ -2,7 +2,7 @@
 
 > This is the implementation reference for the current `main` branch.
 >
-> Project status: in progress. `main` has shipped Phase 1 foundation and Phase 2 load balancing. Later phases remain planned, not implemented yet.
+> Project status: in progress. `main` has shipped Phase 1 foundation, Phase 2 load balancing, and Phase 3 JWT authentication. Later phases remain planned.
 >
 > For target end-state scope and design, see [`PROJECT_SPEC.md`](./PROJECT_SPEC.md) and [`DESIGN_DOC.md`](./DESIGN_DOC.md). If either conflicts with this file, this file wins for the current runtime.
 
@@ -13,7 +13,7 @@
 ### Shipped on `main`
 
 - Reverse proxy gateway built with `net/http` and `httputil.ReverseProxy`
-- Outer middleware chain: `Tracing -> Router -> UnsupportedFeatures -> Proxy`
+- Outer middleware chain: `Tracing -> Router -> Auth -> UnsupportedFeatures -> Proxy`
 - Inner transport chain: `LoadBalancer -> BaseTransport`
 - Load-balancing strategies:
   - `round_robin` via atomic counter
@@ -33,7 +33,6 @@
 
 ### Planned, not shipped yet
 
-- JWT auth middleware
 - Redis-backed rate limiting
 - Retry transport
 - Circuit breaker transport
@@ -41,7 +40,7 @@
 - Config hot reload
 - Graceful shutdown and readiness endpoints
 
-The codebase already contains some future-facing config fields so later phases can plug into the same route model. On `main`, unsupported route features fail closed instead of being silently ignored.
+The codebase already contains some future-facing config fields so later phases can plug into the same route model. On `main`, unsupported later-phase route features fail closed instead of being silently ignored.
 
 ---
 
@@ -61,6 +60,8 @@ irongate/
 │   │   └── config_test.go
 │   ├── middleware/
 │   │   ├── chain.go
+│   │   ├── auth.go
+│   │   ├── auth_test.go
 │   │   ├── router.go
 │   │   ├── tracing.go
 │   │   └── unsupported.go
@@ -107,6 +108,7 @@ return middleware.Chain(
     proxyHandler,
     middleware.Tracing(logger),
     middleware.Router(cfg.Routes),
+    middleware.Auth(cfg.Auth),
     middleware.UnsupportedFeatures(),
 )
 ```
@@ -114,7 +116,7 @@ return middleware.Chain(
 Because `Chain` applies middleware in reverse order, the live request flow is:
 
 ```text
-Request -> [Tracing] -> [Router] -> [UnsupportedFeatures] -> [Proxy] -> Response
+Request -> [Tracing] -> [Router] -> [Auth] -> [UnsupportedFeatures] -> [Proxy] -> Response
 ```
 
 #### `Tracing`
@@ -135,11 +137,22 @@ This is a deliberate sanitization boundary. Client-supplied request IDs are not 
 - Returns `405` plus `Allow` for disallowed methods
 - Stores the matched `RouteConfig` in request context
 
+#### `Auth`
+
+- Reads the matched `RouteConfig` from context
+- Skips routes with `auth_required: false`
+- Requires `Authorization: Bearer <token>` on protected routes
+- Explicitly enforces `HS256` from config
+- Verifies signature with the configured shared secret
+- Validates `exp` and `iat`
+- Injects `X-User-ID` from JWT `sub`
+- Injects `X-User-Role` from JWT `role`
+- Fails closed with `500` if JWT auth is misconfigured
+
 #### `UnsupportedFeatures`
 
 - Fails closed for route features that are planned but not implemented
 - Returns `501 Not Implemented` when a matched route uses:
-  - `auth_required: true`
   - non-nil `rate_limit`
   - retry config with `max_attempts > 1`
 
@@ -231,19 +244,26 @@ The checked-in [`configs/gateway.yaml`](./configs/gateway.yaml) only uses fields
 - `strip_prefix`
 - `service`
 - `methods`
+- `auth_required`
 - `timeout`
 - `targets`
 - `load_balancer`
+
+### Default shipped top-level config fields
+
+The checked-in config also actively uses:
+
+- `server`
+- `routes`
+- `auth`
 
 ### Future fields already parsed
 
 These fields exist in config structs today but are not live features yet:
 
-- `auth_required`
 - `rate_limit`
 - `retry`
 - `circuit_breaker`
-- `auth`
 - `redis`
 - `metrics`
 - `logging`
@@ -286,9 +306,8 @@ Upstreams currently see:
 
 - a fresh gateway-generated `X-Request-ID`
 - `X-Forwarded-*` headers from the proxy
+- `X-User-ID` and `X-User-Role` on authenticated routes
 - `X-Served-By` on the response back to the client
-
-They do **not** yet see authenticated identity headers populated by gateway auth, because auth is not implemented on `main`.
 
 ---
 

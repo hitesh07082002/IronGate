@@ -96,6 +96,7 @@ func TestValidateCollectsMultipleErrors(t *testing.T) {
 	assertContains(t, joined, `load_balancer "random" is invalid`)
 	assertContains(t, joined, `rate_limit.requests must not be negative`)
 	assertContains(t, joined, `auth.jwt_secret is required when any route has auth_required: true`)
+	assertContains(t, joined, `auth.jwt_algorithm is required when any route has auth_required: true`)
 }
 
 func TestValidateAllowsGatewayInternalRouteWithoutTargets(t *testing.T) {
@@ -159,7 +160,9 @@ func TestValidateRejectsPortsOutsideTCPRange(t *testing.T) {
 	assertContains(t, joined, `targets[0] port must be between 1 and 65535`)
 }
 
-func TestGatewayConfigPhaseTwoAvoidsUnsupportedRouteFeatures(t *testing.T) {
+func TestGatewayConfigPhaseThreeEnablesAuthWithoutLaterPhaseFeatures(t *testing.T) {
+	t.Setenv("JWT_SECRET", "")
+
 	cfg, err := Load(repoPathFromThisFile("configs", "gateway.yaml"))
 	if err != nil {
 		t.Fatalf("load gateway config: %v", err)
@@ -175,9 +178,9 @@ func TestGatewayConfigPhaseTwoAvoidsUnsupportedRouteFeatures(t *testing.T) {
 		t.Fatalf("expected login, register, users, orders, and payments routes to exist")
 	}
 
-	for _, route := range []*RouteConfig{loginRoute, registerRoute, usersRoute, ordersRoute, paymentsRoute} {
+	for _, route := range []*RouteConfig{loginRoute, registerRoute} {
 		if route.AuthRequired {
-			t.Fatalf("expected %s to avoid auth config until Phase 3", route.Path)
+			t.Fatalf("expected %s to remain public in Phase 3", route.Path)
 		}
 		if route.RateLimit != nil {
 			t.Fatalf("expected %s to avoid rate-limit config until Phase 4", route.Path)
@@ -185,6 +188,25 @@ func TestGatewayConfigPhaseTwoAvoidsUnsupportedRouteFeatures(t *testing.T) {
 		if route.Retry.MaxAttempts > 1 {
 			t.Fatalf("expected %s to avoid retry config until Phase 5", route.Path)
 		}
+	}
+
+	for _, route := range []*RouteConfig{usersRoute, ordersRoute, paymentsRoute} {
+		if !route.AuthRequired {
+			t.Fatalf("expected %s to require auth in Phase 3", route.Path)
+		}
+		if route.RateLimit != nil {
+			t.Fatalf("expected %s to avoid rate-limit config until Phase 4", route.Path)
+		}
+		if route.Retry.MaxAttempts > 1 {
+			t.Fatalf("expected %s to avoid retry config until Phase 5", route.Path)
+		}
+	}
+
+	if cfg.Auth.JWTSecret != "" {
+		t.Fatalf("expected JWT secret to stay environment-backed in checked-in config, got %q", cfg.Auth.JWTSecret)
+	}
+	if cfg.Auth.JWTAlgorithm != "HS256" {
+		t.Fatalf("expected auth.jwt_algorithm %q, got %q", "HS256", cfg.Auth.JWTAlgorithm)
 	}
 
 	assertRouteMethods(t, paymentsRoute, "GET", "POST")
