@@ -123,9 +123,7 @@ func TestValidateAllowsGatewayInternalRouteWithoutTargets(t *testing.T) {
 	}
 }
 
-func TestGatewayConfigKeepsUserAuthEndpointsPublic(t *testing.T) {
-	t.Setenv("JWT_SECRET", "test-secret")
-
+func TestGatewayConfigPhaseTwoAvoidsUnsupportedRouteFeatures(t *testing.T) {
 	cfg, err := Load(filepath.Join("..", "..", "configs", "gateway.yaml"))
 	if err != nil {
 		t.Fatalf("load gateway config: %v", err)
@@ -134,18 +132,23 @@ func TestGatewayConfigKeepsUserAuthEndpointsPublic(t *testing.T) {
 	loginRoute := findRouteByPath(cfg.Routes, "/api/users/login")
 	registerRoute := findRouteByPath(cfg.Routes, "/api/users/register")
 	usersRoute := findRouteByPath(cfg.Routes, "/api/users")
+	ordersRoute := findRouteByPath(cfg.Routes, "/api/orders")
+	paymentsRoute := findRouteByPath(cfg.Routes, "/api/payments")
 
-	if loginRoute == nil || registerRoute == nil || usersRoute == nil {
-		t.Fatalf("expected login, register, and users routes to exist")
+	if loginRoute == nil || registerRoute == nil || usersRoute == nil || ordersRoute == nil || paymentsRoute == nil {
+		t.Fatalf("expected login, register, users, orders, and payments routes to exist")
 	}
-	if loginRoute.AuthRequired {
-		t.Fatal("expected /api/users/login to remain public")
-	}
-	if registerRoute.AuthRequired {
-		t.Fatal("expected /api/users/register to remain public")
-	}
-	if !usersRoute.AuthRequired {
-		t.Fatal("expected /api/users to remain protected")
+
+	for _, route := range []*RouteConfig{loginRoute, registerRoute, usersRoute, ordersRoute, paymentsRoute} {
+		if route.AuthRequired {
+			t.Fatalf("expected %s to avoid auth config until Phase 3", route.Path)
+		}
+		if route.RateLimit != nil {
+			t.Fatalf("expected %s to avoid rate-limit config until Phase 4", route.Path)
+		}
+		if route.Retry.MaxAttempts > 1 {
+			t.Fatalf("expected %s to avoid retry config until Phase 5", route.Path)
+		}
 	}
 }
 

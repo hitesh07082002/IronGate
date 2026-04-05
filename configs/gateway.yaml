@@ -1,3 +1,4 @@
+# Phase 2 runtime config only includes behavior implemented on main.
 server:
   port: 8080
   read_timeout: 30s
@@ -8,17 +9,7 @@ routes:
     strip_prefix: "/api"
     service: "user-service"
     methods: ["POST"]
-    auth_required: false
     timeout: 30s
-    rate_limit:
-      requests: 100
-      window: 60s
-      strategy: "sliding_window"
-    retry:
-      max_attempts: 3
-      base_delay: 100ms
-      max_delay: 2s
-      jitter: "full"
     targets:
       - host: "user-service-1"
         port: 8081
@@ -32,17 +23,7 @@ routes:
     strip_prefix: "/api"
     service: "user-service"
     methods: ["POST"]
-    auth_required: false
     timeout: 30s
-    rate_limit:
-      requests: 100
-      window: 60s
-      strategy: "sliding_window"
-    retry:
-      max_attempts: 3
-      base_delay: 100ms
-      max_delay: 2s
-      jitter: "full"
     targets:
       - host: "user-service-1"
         port: 8081
@@ -56,17 +37,7 @@ routes:
     strip_prefix: "/api"
     service: "user-service"
     methods: ["GET", "POST", "PUT", "DELETE"]
-    auth_required: true
     timeout: 30s
-    rate_limit:
-      requests: 100
-      window: 60s
-      strategy: "sliding_window"
-    retry:
-      max_attempts: 3
-      base_delay: 100ms
-      max_delay: 2s
-      jitter: "full"
     targets:
       - host: "user-service-1"
         port: 8081
@@ -80,16 +51,7 @@ routes:
     strip_prefix: "/api"
     service: "order-service"
     methods: ["GET", "POST"]
-    auth_required: true
-    rate_limit:
-      requests: 50
-      window: 60s
-      strategy: "sliding_window"
-    retry:
-      max_attempts: 3
-      base_delay: 100ms
-      max_delay: 2s
-      jitter: "full"
+    timeout: 30s
     targets:
       - host: "order-service-1"
         port: 8082
@@ -101,13 +63,7 @@ routes:
     strip_prefix: "/api"
     service: "payment-service"
     methods: ["POST"]
-    auth_required: true
-    rate_limit:
-      requests: 20
-      window: 60s
-      strategy: "sliding_window"
-    retry:
-      max_attempts: 1
+    timeout: 30s
     targets:
       - host: "payment-service-1"
         port: 8083
@@ -115,29 +71,3 @@ routes:
 
   - path: "/health"
     service: "gateway-internal"
-    auth_required: false
-    rate_limit: null
-
-circuit_breaker:
-  failure_threshold: 5
-  success_threshold: 3
-  timeout: 30s
-  window_size: 60s
-  half_open_max_requests: 3
-
-auth:
-  jwt_secret: "${JWT_SECRET}"
-  jwt_algorithm: "HS256"
-
-redis:
-  address: "redis:6379"
-  password: ""
-  db: 0
-
-metrics:
-  enabled: true
-  path: "/metrics"
-
-logging:
-  level: "info"
-  format: "json"

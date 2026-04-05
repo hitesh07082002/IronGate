@@ -36,17 +36,18 @@ func New(logger *slog.Logger, defaultTimeout time.Duration, upstreamTransport ht
 	}
 
 	reverseProxy := &httputil.ReverseProxy{
-		Director: func(req *http.Request) {
-			route := middleware.GetRouteConfig(req)
+		Rewrite: func(proxyReq *httputil.ProxyRequest) {
+			route := middleware.GetRouteConfig(proxyReq.In)
 			if route == nil {
 				return
 			}
 
-			req.URL.Scheme = "http"
-			req.URL.Path = stripPrefix(route.StripPrefix, req.URL.Path)
-			if req.URL.RawPath != "" {
-				req.URL.RawPath = stripPrefix(route.StripPrefix, req.URL.RawPath)
+			proxyReq.Out.URL.Scheme = "http"
+			proxyReq.Out.URL.Path = stripPrefix(route.StripPrefix, proxyReq.Out.URL.Path)
+			if proxyReq.Out.URL.RawPath != "" {
+				proxyReq.Out.URL.RawPath = stripPrefix(route.StripPrefix, proxyReq.Out.URL.RawPath)
 			}
+			proxyReq.SetXForwarded()
 		},
 		Transport: upstreamTransport,
 		ModifyResponse: func(resp *http.Response) error {

@@ -198,6 +198,119 @@ func TestServedByHeaderMatchesSelectedTarget(t *testing.T) {
 	}
 }
 
+func TestProxyForwardsOriginalHostInXForwardedHost(t *testing.T) {
+	var forwardedHost string
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		forwardedHost = r.Header.Get("X-Forwarded-Host")
+		writeTestJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	}))
+	defer upstream.Close()
+
+	gateway := httptest.NewServer(buildHandler(testConfig(routeForServer(t, "/api/users", "/api", "user-service", upstream.URL)), testLogger()))
+	defer gateway.Close()
+
+	req, err := http.NewRequest(http.MethodGet, gateway.URL+"/api/users", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Host = "api.example.com"
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do request: %v", err)
+	}
+	resp.Body.Close()
+
+	if forwardedHost != "api.example.com" {
+		t.Fatalf("expected X-Forwarded-Host %q, got %q", "api.example.com", forwardedHost)
+	}
+}
+
+func TestUnsupportedRouteFeaturesFailClosed(t *testing.T) {
+	testCases := []struct {
+		name        string
+		mutateRoute func(*config.RouteConfig)
+		wantStatus  int
+		wantError   string
+	}{
+		{
+			name: "auth",
+			mutateRoute: func(route *config.RouteConfig) {
+				route.AuthRequired = true
+			},
+			wantStatus: http.StatusNotImplemented,
+			wantError:  "route auth is not implemented yet",
+		},
+		{
+			name: "rate_limit",
+			mutateRoute: func(route *config.RouteConfig) {
+				route.RateLimit = &config.RateLimitConfig{
+					Requests: 10,
+					Window:   time.Minute,
+					Strategy: "sliding_window",
+				}
+			},
+			wantStatus: http.StatusNotImplemented,
+			wantError:  "route rate limiting is not implemented yet",
+		},
+		{
+			name: "retry",
+			mutateRoute: func(route *config.RouteConfig) {
+				route.Retry = config.RetryConfig{
+					MaxAttempts: 3,
+					BaseDelay:   100 * time.Millisecond,
+					MaxDelay:    time.Second,
+					Jitter:      "full",
+				}
+			},
+			wantStatus: http.StatusNotImplemented,
+			wantError:  "route retries are not implemented yet",
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			var upstreamHits int
+
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				upstreamHits++
+				writeTestJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+			}))
+			defer upstream.Close()
+
+			route := routeForServer(t, "/api/users", "/api", "user-service", upstream.URL)
+			testCase.mutateRoute(&route)
+
+			gateway := httptest.NewServer(buildHandler(testConfig(route), testLogger()))
+			defer gateway.Close()
+
+			resp, err := http.Get(gateway.URL + "/api/users")
+			if err != nil {
+				t.Fatalf("get route: %v", err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != testCase.wantStatus {
+				t.Fatalf("expected %d, got %d with body %s", testCase.wantStatus, resp.StatusCode, readBody(t, resp.Body))
+			}
+			if upstreamHits != 0 {
+				t.Fatalf("expected unsupported feature to fail before upstream, got %d hits", upstreamHits)
+			}
+
+			var payload struct {
+				Error string `json:"error"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+				t.Fatalf("decode error response: %v", err)
+			}
+			if payload.Error != testCase.wantError {
+				t.Fatalf("expected error %q, got %q", testCase.wantError, payload.Error)
+			}
+		})
+	}
+}
+
 func TestMethodRestrictionsAreEnforcedAtGateway(t *testing.T) {
 	var upstreamHits int
 
