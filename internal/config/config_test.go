@@ -87,7 +87,7 @@ func TestValidateCollectsMultipleErrors(t *testing.T) {
 	}
 
 	errs := cfg.Validate()
-	if len(errs) < 4 {
+	if len(errs) < 5 {
 		t.Fatalf("expected multiple validation errors, got %d: %v", len(errs), errs)
 	}
 
@@ -95,6 +95,7 @@ func TestValidateCollectsMultipleErrors(t *testing.T) {
 	assertContains(t, joined, `must define at least one target`)
 	assertContains(t, joined, `load_balancer "random" is invalid`)
 	assertContains(t, joined, `rate_limit.requests must not be negative`)
+	assertContains(t, joined, `redis.address is required when any route has rate_limit configured`)
 	assertContains(t, joined, `auth.jwt_secret is required when any route has auth_required: true`)
 	assertContains(t, joined, `auth.jwt_algorithm is required when any route has auth_required: true`)
 }
@@ -160,7 +161,7 @@ func TestValidateRejectsPortsOutsideTCPRange(t *testing.T) {
 	assertContains(t, joined, `targets[0] port must be between 1 and 65535`)
 }
 
-func TestGatewayConfigPhaseThreeEnablesAuthWithoutLaterPhaseFeatures(t *testing.T) {
+func TestGatewayConfigPhaseFourEnablesRateLimitingWithoutLaterPhaseFeatures(t *testing.T) {
 	t.Setenv("JWT_SECRET", "test-secret")
 
 	cfg, err := Load(repoPathFromThisFile("configs", "gateway.yaml"))
@@ -169,7 +170,7 @@ func TestGatewayConfigPhaseThreeEnablesAuthWithoutLaterPhaseFeatures(t *testing.
 	}
 
 	if errs := cfg.Validate(); len(errs) != 0 {
-		t.Fatalf("expected checked-in Phase 3 config to validate, got %v", errs)
+		t.Fatalf("expected checked-in Phase 4 config to validate, got %v", errs)
 	}
 
 	loginRoute := findRouteByPath(cfg.Routes, "/api/users/login")
@@ -177,17 +178,21 @@ func TestGatewayConfigPhaseThreeEnablesAuthWithoutLaterPhaseFeatures(t *testing.
 	usersRoute := findRouteByPath(cfg.Routes, "/api/users")
 	ordersRoute := findRouteByPath(cfg.Routes, "/api/orders")
 	paymentsRoute := findRouteByPath(cfg.Routes, "/api/payments")
+	healthRoute := findRouteByPath(cfg.Routes, "/health")
 
-	if loginRoute == nil || registerRoute == nil || usersRoute == nil || ordersRoute == nil || paymentsRoute == nil {
-		t.Fatalf("expected login, register, users, orders, and payments routes to exist")
+	if loginRoute == nil || registerRoute == nil || usersRoute == nil || ordersRoute == nil || paymentsRoute == nil || healthRoute == nil {
+		t.Fatalf("expected login, register, users, orders, payments, and health routes to exist")
 	}
 
 	for _, route := range []*RouteConfig{loginRoute, registerRoute} {
 		if route.AuthRequired {
-			t.Fatalf("expected %s to remain public in Phase 3", route.Path)
+			t.Fatalf("expected %s to remain public in Phase 4", route.Path)
 		}
-		if route.RateLimit != nil {
-			t.Fatalf("expected %s to avoid rate-limit config until Phase 4", route.Path)
+		if route.RateLimit == nil {
+			t.Fatalf("expected %s to have a Phase 4 rate limit", route.Path)
+		}
+		if route.RateLimit.Strategy != "sliding_window" {
+			t.Fatalf("expected %s rate limit strategy %q, got %q", route.Path, "sliding_window", route.RateLimit.Strategy)
 		}
 		if route.Retry.MaxAttempts > 1 {
 			t.Fatalf("expected %s to avoid retry config until Phase 5", route.Path)
@@ -196,10 +201,16 @@ func TestGatewayConfigPhaseThreeEnablesAuthWithoutLaterPhaseFeatures(t *testing.
 
 	for _, route := range []*RouteConfig{usersRoute, ordersRoute, paymentsRoute} {
 		if !route.AuthRequired {
-			t.Fatalf("expected %s to require auth in Phase 3", route.Path)
+			t.Fatalf("expected %s to require auth in Phase 4", route.Path)
 		}
-		if route.RateLimit != nil {
-			t.Fatalf("expected %s to avoid rate-limit config until Phase 4", route.Path)
+		if route.Path == "/health" {
+			continue
+		}
+		if route.RateLimit == nil {
+			t.Fatalf("expected %s to have a Phase 4 rate limit", route.Path)
+		}
+		if route.RateLimit.Strategy != "sliding_window" {
+			t.Fatalf("expected %s rate limit strategy %q, got %q", route.Path, "sliding_window", route.RateLimit.Strategy)
 		}
 		if route.Retry.MaxAttempts > 1 {
 			t.Fatalf("expected %s to avoid retry config until Phase 5", route.Path)
@@ -211,6 +222,12 @@ func TestGatewayConfigPhaseThreeEnablesAuthWithoutLaterPhaseFeatures(t *testing.
 	}
 	if cfg.Auth.JWTAlgorithm != "HS256" {
 		t.Fatalf("expected auth.jwt_algorithm %q, got %q", "HS256", cfg.Auth.JWTAlgorithm)
+	}
+	if cfg.Redis.Address != "redis:6379" {
+		t.Fatalf("expected redis.address %q, got %q", "redis:6379", cfg.Redis.Address)
+	}
+	if healthRoute.RateLimit != nil {
+		t.Fatalf("expected /health to remain exempt from rate limiting")
 	}
 
 	assertRouteMethods(t, paymentsRoute, "GET", "POST")

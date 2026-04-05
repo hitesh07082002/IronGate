@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-IronGate is a reverse-proxy API gateway built from scratch using Go's `net/http` standard library. The current repo ships the foundation, tracing, routing, load balancing, and JWT authentication. Rate limiting, retry, circuit breaking, and richer observability remain planned.
+IronGate is a reverse-proxy API gateway built from scratch using Go's `net/http` standard library. The current repo ships the foundation, tracing, routing, load balancing, JWT authentication, and Redis-backed sliding-window rate limiting. Retry, circuit breaking, and richer observability remain planned.
 
 ## Key Documentation
 
@@ -21,11 +21,11 @@ IronGate is a reverse-proxy API gateway built from scratch using Go's `net/http`
 
 ## Architecture (Two-Tier Pipeline)
 
-**Current outer chain** (`http.Handler` middleware): Tracing → Router → Auth → UnsupportedFeatures → Proxy
+**Current outer chain** (`http.Handler` middleware): Tracing → Router → Auth → RateLimiter → UnsupportedFeatures → Proxy
 
 **Current inner chain** (`http.RoundTripper` transport): Load Balancer → Base Transport
 
-Future-phase target architecture lives in [`DESIGN_DOC.md`](./DESIGN_DOC.md) and [`PROJECT_SPEC.md`](./PROJECT_SPEC.md). Later phases add rate limiting to the outer chain and retry plus circuit breaker to the inner chain.
+Future-phase target architecture lives in [`DESIGN_DOC.md`](./DESIGN_DOC.md) and [`PROJECT_SPEC.md`](./PROJECT_SPEC.md). Later phases add retry plus circuit breaker to the inner chain and remove the remaining unsupported-feature guard once those behaviors land.
 
 Router stores the matched `RouteConfig` in `context.Context`. All downstream middleware reads config from context, not globals.
 
@@ -54,7 +54,7 @@ make run        # start gateway on :8080
 
 ## Config
 
-Gateway runtime config lives in `configs/gateway.yaml`. Shipped route-level settings on `main` include `auth_required`, `timeout`, `load_balancer`, and `targets`. Future-facing fields like `rate_limit` and `retry` are parsed but fail closed until those phases land.
+Gateway runtime config lives in `configs/gateway.yaml`. Shipped route-level settings on `main` include `auth_required`, `timeout`, `rate_limit`, `load_balancer`, and `targets`. Top-level `redis` config is also live. Future-facing fields like `retry` are parsed but fail closed until those phases land.
 
 ## Skill Routing
 

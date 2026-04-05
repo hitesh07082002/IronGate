@@ -7,6 +7,18 @@ on:
 jobs:
   go-ci:
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      IRONGATE_TEST_REDIS_ADDR: 127.0.0.1:6379
 
     steps:
       - name: Checkout
@@ -20,6 +32,9 @@ jobs:
 
       - name: Run make lint
         run: make lint
+
+      - name: Run make test
+        run: make test
 
       - name: Run make test -race
         run: make test-race

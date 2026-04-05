@@ -2,15 +2,18 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +22,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/hitesh07082002/irongate/internal/config"
+	"github.com/hitesh07082002/irongate/internal/middleware"
+	"github.com/hitesh07082002/irongate/internal/testutil"
 )
 
 func TestRoutingReachesConfiguredService(t *testing.T) {
@@ -288,78 +293,81 @@ func TestProxyForwardsOriginalHostInXForwardedHost(t *testing.T) {
 }
 
 func TestUnsupportedRouteFeaturesFailClosed(t *testing.T) {
-	testCases := []struct {
-		name        string
-		mutateRoute func(*config.RouteConfig)
-		wantStatus  int
-		wantError   string
-	}{
-		{
-			name: "rate_limit",
-			mutateRoute: func(route *config.RouteConfig) {
-				route.RateLimit = &config.RateLimitConfig{
-					Requests: 10,
-					Window:   time.Minute,
-					Strategy: "sliding_window",
-				}
-			},
-			wantStatus: http.StatusNotImplemented,
-			wantError:  "route rate limiting is not implemented yet",
-		},
-		{
-			name: "retry",
-			mutateRoute: func(route *config.RouteConfig) {
-				route.Retry = config.RetryConfig{
-					MaxAttempts: 3,
-					BaseDelay:   100 * time.Millisecond,
-					MaxDelay:    time.Second,
-					Jitter:      "full",
-				}
-			},
-			wantStatus: http.StatusNotImplemented,
-			wantError:  "route retries are not implemented yet",
-		},
+	var upstreamHits int
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		upstreamHits++
+		writeTestJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	}))
+	defer upstream.Close()
+
+	route := routeForServer(t, "/api/users", "/api", "user-service", upstream.URL)
+	route.Retry = config.RetryConfig{
+		MaxAttempts: 3,
+		BaseDelay:   100 * time.Millisecond,
+		MaxDelay:    time.Second,
+		Jitter:      "full",
 	}
 
-	for _, testCase := range testCases {
-		t.Run(testCase.name, func(t *testing.T) {
-			var upstreamHits int
+	gateway := httptest.NewServer(buildHandler(testConfig(route), testLogger()))
+	defer gateway.Close()
 
-			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				upstreamHits++
-				writeTestJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-			}))
-			defer upstream.Close()
+	resp, err := http.Get(gateway.URL + "/api/users")
+	if err != nil {
+		t.Fatalf("get route: %v", err)
+	}
+	defer resp.Body.Close()
 
-			route := routeForServer(t, "/api/users", "/api", "user-service", upstream.URL)
-			testCase.mutateRoute(&route)
+	if resp.StatusCode != http.StatusNotImplemented {
+		t.Fatalf("expected %d, got %d with body %s", http.StatusNotImplemented, resp.StatusCode, readBody(t, resp.Body))
+	}
+	if upstreamHits != 0 {
+		t.Fatalf("expected unsupported feature to fail before upstream, got %d hits", upstreamHits)
+	}
 
-			gateway := httptest.NewServer(buildHandler(testConfig(route), testLogger()))
-			defer gateway.Close()
+	var payload struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if payload.Error != "route retries are not implemented yet" {
+		t.Fatalf("expected retry error, got %q", payload.Error)
+	}
+}
 
-			resp, err := http.Get(gateway.URL + "/api/users")
-			if err != nil {
-				t.Fatalf("get route: %v", err)
-			}
-			defer resp.Body.Close()
+func TestUnsupportedRateLimitStrategyFailsClosed(t *testing.T) {
+	var upstreamHits int
 
-			if resp.StatusCode != testCase.wantStatus {
-				t.Fatalf("expected %d, got %d with body %s", testCase.wantStatus, resp.StatusCode, readBody(t, resp.Body))
-			}
-			if upstreamHits != 0 {
-				t.Fatalf("expected unsupported feature to fail before upstream, got %d hits", upstreamHits)
-			}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		upstreamHits++
+		writeTestJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	}))
+	defer upstream.Close()
 
-			var payload struct {
-				Error string `json:"error"`
-			}
-			if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-				t.Fatalf("decode error response: %v", err)
-			}
-			if payload.Error != testCase.wantError {
-				t.Fatalf("expected error %q, got %q", testCase.wantError, payload.Error)
-			}
-		})
+	route := routeForServer(t, "/api/users", "/api", "user-service", upstream.URL)
+	route.RateLimit = &config.RateLimitConfig{
+		Requests: 10,
+		Window:   time.Minute,
+		Strategy: "token_bucket",
+	}
+	cfg := testConfig(route)
+	cfg.Redis.Address = "redis:6379"
+
+	gateway := httptest.NewServer(buildHandler(cfg, testLogger()))
+	defer gateway.Close()
+
+	resp, err := http.Get(gateway.URL + "/api/users")
+	if err != nil {
+		t.Fatalf("get route: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotImplemented {
+		t.Fatalf("expected 501, got %d with body %s", resp.StatusCode, readBody(t, resp.Body))
+	}
+	if upstreamHits != 0 {
+		t.Fatalf("expected unsupported strategy to fail before upstream, got %d hits", upstreamHits)
 	}
 }
 
@@ -402,7 +410,7 @@ func TestProtectedRoutesReturn401WithoutToken(t *testing.T) {
 	}
 }
 
-func TestPublicRoutesRemainPublicInPhaseThree(t *testing.T) {
+func TestPublicRoutesRemainPublicInPhaseFour(t *testing.T) {
 	testCases := []struct {
 		name      string
 		build     func(t *testing.T) *httptest.Server
@@ -482,6 +490,195 @@ func TestPublicRoutesRemainPublicInPhaseThree(t *testing.T) {
 				t.Fatalf("expected %d, got %d with body %s", testCase.wantCode, resp.StatusCode, readBody(t, resp.Body))
 			}
 		})
+	}
+}
+
+func TestRateLimitingReturnsHeadersAnd429(t *testing.T) {
+	client := testutil.RedisClient(t)
+	testutil.FlushRedis(t, client)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeTestJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	}))
+	defer upstream.Close()
+
+	route := routeForServer(t, "/api/orders", "/api", "order-service", upstream.URL)
+	route.RateLimit = &config.RateLimitConfig{
+		Requests: 2,
+		Window:   time.Second,
+		Strategy: "sliding_window",
+	}
+	cfg := testConfig(route)
+	cfg.Redis.Address = testutil.RedisAddr(t)
+
+	gateway := httptest.NewServer(buildHandler(cfg, testLogger()))
+	defer gateway.Close()
+
+	firstResp := doGatewayRequest(t, gateway, http.MethodGet, "/api/orders", "")
+	defer firstResp.Body.Close()
+	if firstResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for first request, got %d with body %s", firstResp.StatusCode, readBody(t, firstResp.Body))
+	}
+	assertRateLimitHeaders(t, firstResp, "2", "1")
+
+	secondResp := doGatewayRequest(t, gateway, http.MethodGet, "/api/orders", "")
+	defer secondResp.Body.Close()
+	if secondResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for second request, got %d with body %s", secondResp.StatusCode, readBody(t, secondResp.Body))
+	}
+	assertRateLimitHeaders(t, secondResp, "2", "0")
+
+	thirdResp := doGatewayRequest(t, gateway, http.MethodGet, "/api/orders", "")
+	defer thirdResp.Body.Close()
+	if thirdResp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 for third request, got %d with body %s", thirdResp.StatusCode, readBody(t, thirdResp.Body))
+	}
+	assertRateLimitHeaders(t, thirdResp, "2", "0")
+	if got := thirdResp.Header.Get(middleware.HeaderRetryAfter); got == "" || got == "0" {
+		t.Fatalf("expected Retry-After header on 429, got %q", got)
+	}
+}
+
+func TestRateLimitingUsesAuthenticatedUserIDAndAuthRunsFirst(t *testing.T) {
+	client := testutil.RedisClient(t)
+	testutil.FlushRedis(t, client)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeTestJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	}))
+	defer upstream.Close()
+
+	route := routeForServer(t, "/api/users", "/api", "user-service", upstream.URL)
+	route.AuthRequired = true
+	route.RateLimit = &config.RateLimitConfig{
+		Requests: 1,
+		Window:   time.Second,
+		Strategy: "sliding_window",
+	}
+	cfg := testConfig(route)
+	cfg.Redis.Address = testutil.RedisAddr(t)
+
+	gateway := httptest.NewServer(buildHandler(cfg, testLogger()))
+	defer gateway.Close()
+
+	unauthorizedFirst := doGatewayRequest(t, gateway, http.MethodGet, "/api/users", "")
+	defer unauthorizedFirst.Body.Close()
+	if unauthorizedFirst.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected first unauthorized request to stay 401, got %d", unauthorizedFirst.StatusCode)
+	}
+
+	unauthorizedSecond := doGatewayRequest(t, gateway, http.MethodGet, "/api/users", "")
+	defer unauthorizedSecond.Body.Close()
+	if unauthorizedSecond.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected second unauthorized request to stay 401, got %d", unauthorizedSecond.StatusCode)
+	}
+
+	userAToken := gatewayBearerToken(t, "test-secret", jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub":  "u-1",
+		"role": "admin",
+		"iat":  time.Now().Add(-time.Minute).Unix(),
+		"exp":  time.Now().Add(time.Hour).Unix(),
+	})
+	userBToken := gatewayBearerToken(t, "test-secret", jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub":  "u-2",
+		"role": "admin",
+		"iat":  time.Now().Add(-time.Minute).Unix(),
+		"exp":  time.Now().Add(time.Hour).Unix(),
+	})
+
+	userAFirst := doGatewayRequest(t, gateway, http.MethodGet, "/api/users", userAToken)
+	defer userAFirst.Body.Close()
+	if userAFirst.StatusCode != http.StatusOK {
+		t.Fatalf("expected first user A request allowed, got %d with body %s", userAFirst.StatusCode, readBody(t, userAFirst.Body))
+	}
+
+	userASecond := doGatewayRequest(t, gateway, http.MethodGet, "/api/users", userAToken)
+	defer userASecond.Body.Close()
+	if userASecond.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("expected second user A request rate-limited, got %d with body %s", userASecond.StatusCode, readBody(t, userASecond.Body))
+	}
+
+	userBFirst := doGatewayRequest(t, gateway, http.MethodGet, "/api/users", userBToken)
+	defer userBFirst.Body.Close()
+	if userBFirst.StatusCode != http.StatusOK {
+		t.Fatalf("expected user B to have an independent quota, got %d with body %s", userBFirst.StatusCode, readBody(t, userBFirst.Body))
+	}
+}
+
+func TestRateLimiterFailsOpenWhenRedisIsDown(t *testing.T) {
+	var logBuffer bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logBuffer, nil))
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeTestJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	}))
+	defer upstream.Close()
+
+	route := routeForServer(t, "/api/orders", "/api", "order-service", upstream.URL)
+	route.RateLimit = &config.RateLimitConfig{
+		Requests: 1,
+		Window:   time.Second,
+		Strategy: "sliding_window",
+	}
+	cfg := testConfig(route)
+	cfg.Redis.Address = "127.0.0.1:1"
+
+	gateway := httptest.NewServer(buildHandler(cfg, logger))
+	defer gateway.Close()
+
+	resp := doGatewayRequest(t, gateway, http.MethodGet, "/api/orders", "")
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected fail-open request to succeed, got %d with body %s", resp.StatusCode, readBody(t, resp.Body))
+	}
+	if got := resp.Header.Get(middleware.HeaderRateLimitLimit); got != "" {
+		t.Fatalf("expected no authoritative rate-limit headers on fail-open, got %q", got)
+	}
+	if !strings.Contains(logBuffer.String(), "rate limit store unavailable; allowing request") {
+		t.Fatalf("expected warning log when Redis is down, got %q", logBuffer.String())
+	}
+}
+
+func TestRateLimitingHonorsTrustedProxyXForwardedFor(t *testing.T) {
+	client := testutil.RedisClient(t)
+	testutil.FlushRedis(t, client)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeTestJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	}))
+	defer upstream.Close()
+
+	route := routeForServer(t, "/api/orders", "/api", "order-service", upstream.URL)
+	route.RateLimit = &config.RateLimitConfig{
+		Requests: 1,
+		Window:   time.Second,
+		Strategy: "sliding_window",
+	}
+	cfg := testConfig(route)
+	cfg.Redis.Address = testutil.RedisAddr(t)
+
+	gateway := httptest.NewServer(buildHandlerWithOptions(cfg, testLogger(), buildHandlerOptions{
+		trustedProxies: []netip.Prefix{netip.MustParsePrefix("127.0.0.1/32")},
+	}))
+	defer gateway.Close()
+
+	first := doGatewayRequestWithForwardedFor(t, gateway, "/api/orders", "198.51.100.10")
+	defer first.Body.Close()
+	if first.StatusCode != http.StatusOK {
+		t.Fatalf("expected first forwarded client allowed, got %d", first.StatusCode)
+	}
+
+	second := doGatewayRequestWithForwardedFor(t, gateway, "/api/orders", "203.0.113.20")
+	defer second.Body.Close()
+	if second.StatusCode != http.StatusOK {
+		t.Fatalf("expected second forwarded client allowed, got %d with body %s", second.StatusCode, readBody(t, second.Body))
+	}
+
+	third := doGatewayRequestWithForwardedFor(t, gateway, "/api/orders", "198.51.100.10")
+	defer third.Body.Close()
+	if third.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("expected repeated forwarded client to be rate-limited, got %d with body %s", third.StatusCode, readBody(t, third.Body))
 	}
 }
 
@@ -892,6 +1089,10 @@ func testConfig(routes ...config.RouteConfig) *config.Config {
 			JWTSecret:    "test-secret",
 			JWTAlgorithm: "HS256",
 		},
+		Redis: config.RedisConfig{
+			Password: "",
+			DB:       0,
+		},
 		Metrics: config.MetricsConfig{
 			Enabled: true,
 			Path:    "/metrics",
@@ -900,6 +1101,61 @@ func testConfig(routes ...config.RouteConfig) *config.Config {
 			Level:  "info",
 			Format: "json",
 		},
+	}
+}
+
+func doGatewayRequest(t *testing.T, gateway *httptest.Server, method, path, authorization string) *http.Response {
+	t.Helper()
+
+	req, err := http.NewRequest(method, gateway.URL+path, nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	if authorization != "" {
+		req.Header.Set("Authorization", authorization)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do request: %v", err)
+	}
+
+	return resp
+}
+
+func doGatewayRequestWithForwardedFor(t *testing.T, gateway *httptest.Server, path, forwardedFor string) *http.Response {
+	t.Helper()
+
+	req, err := http.NewRequest(http.MethodGet, gateway.URL+path, nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("X-Forwarded-For", forwardedFor)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do forwarded-for request: %v", err)
+	}
+
+	return resp
+}
+
+func assertRateLimitHeaders(t *testing.T, resp *http.Response, wantLimit, wantRemaining string) {
+	t.Helper()
+
+	if got := resp.Header.Get(middleware.HeaderRateLimitLimit); got != wantLimit {
+		t.Fatalf("expected %s=%q, got %q", middleware.HeaderRateLimitLimit, wantLimit, got)
+	}
+	if got := resp.Header.Get(middleware.HeaderRateLimitRemaining); got != wantRemaining {
+		t.Fatalf("expected %s=%q, got %q", middleware.HeaderRateLimitRemaining, wantRemaining, got)
+	}
+
+	reset := resp.Header.Get(middleware.HeaderRateLimitReset)
+	if reset == "" {
+		t.Fatalf("expected %s header to be set", middleware.HeaderRateLimitReset)
+	}
+	if _, err := strconv.ParseInt(reset, 10, 64); err != nil {
+		t.Fatalf("expected reset header to be a Unix timestamp, got %q: %v", reset, err)
 	}
 }
 
