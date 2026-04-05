@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -23,7 +24,9 @@ import (
 
 	"github.com/hitesh07082002/irongate/internal/config"
 	"github.com/hitesh07082002/irongate/internal/middleware"
+	"github.com/hitesh07082002/irongate/internal/ratelimit"
 	"github.com/hitesh07082002/irongate/internal/testutil"
+	"github.com/hitesh07082002/irongate/internal/transport"
 )
 
 func TestRoutingReachesConfiguredService(t *testing.T) {
@@ -292,47 +295,286 @@ func TestProxyForwardsOriginalHostInXForwardedHost(t *testing.T) {
 	}
 }
 
-func TestUnsupportedRouteFeaturesFailClosed(t *testing.T) {
-	var upstreamHits int
+func TestRetryConfiguredProtectedRouteExercisesPhaseFivePipeline(t *testing.T) {
+	var firstHits int
+	var secondHits int
+	var forwardedRequestID string
+	var forwardedUserID string
+	var forwardedUserRole string
+	var forwardedAuthorization string
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		upstreamHits++
-		writeTestJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		firstHits++
+		writeTestJSON(w, http.StatusServiceUnavailable, map[string]string{"instance": "retry-me"})
 	}))
-	defer upstream.Close()
+	defer first.Close()
 
-	route := routeForServer(t, "/api/users", "/api", "user-service", upstream.URL)
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		secondHits++
+		forwardedRequestID = r.Header.Get(middleware.HeaderRequestID)
+		forwardedUserID = r.Header.Get(middleware.HeaderUserID)
+		forwardedUserRole = r.Header.Get(middleware.HeaderUserRole)
+		forwardedAuthorization = r.Header.Get("Authorization")
+		writeTestJSON(w, http.StatusOK, map[string]string{"instance": "healthy"})
+	}))
+	defer second.Close()
+
+	routePath := uniqueRoutePath("/api/users/retry")
+	route := routeForTargets(t, routePath, "/api", "user-service", "round_robin", targetsForServers(t, first.URL, second.URL))
+	route.AuthRequired = true
+	route.RateLimit = &config.RateLimitConfig{
+		Requests: 5,
+		Window:   time.Minute,
+		Strategy: "sliding_window",
+	}
 	route.Retry = config.RetryConfig{
-		MaxAttempts: 3,
-		BaseDelay:   100 * time.Millisecond,
-		MaxDelay:    time.Second,
+		MaxAttempts: 2,
+		BaseDelay:   time.Millisecond,
+		MaxDelay:    5 * time.Millisecond,
+		Jitter:      "full",
+	}
+
+	gateway := httptest.NewServer(buildHandlerWithOptions(testConfig(route), testLogger(), buildHandlerOptions{
+		rateLimitStore: allowAllRateLimitStore{},
+	}))
+	defer gateway.Close()
+
+	req, err := http.NewRequest(http.MethodGet, gateway.URL+routePath, nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Authorization", gatewayBearerToken(t, "test-secret", jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub":  "u-42",
+		"role": "admin",
+		"exp":  time.Now().Add(time.Hour).Unix(),
+		"iat":  time.Now().Unix(),
+	}))
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d with body %s", resp.StatusCode, readBody(t, resp.Body))
+	}
+	if firstHits != 1 || secondHits != 1 {
+		t.Fatalf("expected retry across both targets, got first=%d second=%d", firstHits, secondHits)
+	}
+	if got := responseInstance(t, resp.Body); got != "healthy" {
+		t.Fatalf("expected healthy upstream response, got %q", got)
+	}
+	assertRateLimitHeaders(t, resp, "5", "4")
+	if got := resp.Header.Get(transport.HeaderRetryCount); got != "1" {
+		t.Fatalf("expected %s=1, got %q", transport.HeaderRetryCount, got)
+	}
+	if got := resp.Header.Get(transport.HeaderRetryTarget); got != targetHost(t, second.URL) {
+		t.Fatalf("expected %s=%q, got %q", transport.HeaderRetryTarget, targetHost(t, second.URL), got)
+	}
+	if got := resp.Header.Get(transport.HeaderServedBy); got != targetHost(t, second.URL) {
+		t.Fatalf("expected %s=%q, got %q", transport.HeaderServedBy, targetHost(t, second.URL), got)
+	}
+	if _, err := uuid.Parse(forwardedRequestID); err != nil {
+		t.Fatalf("expected forwarded request id, got %q", forwardedRequestID)
+	}
+	if forwardedUserID != "u-42" {
+		t.Fatalf("expected forwarded user id u-42, got %q", forwardedUserID)
+	}
+	if forwardedUserRole != "admin" {
+		t.Fatalf("expected forwarded user role admin, got %q", forwardedUserRole)
+	}
+	if forwardedAuthorization != "" {
+		t.Fatalf("expected Authorization header stripped before proxying, got %q", forwardedAuthorization)
+	}
+}
+
+func TestCircuitOpenFailsOverToHealthyTarget(t *testing.T) {
+	var firstHits int
+	var secondHits int
+
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		firstHits++
+		writeTestJSON(w, http.StatusServiceUnavailable, map[string]string{"instance": "opening"})
+	}))
+	defer first.Close()
+
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		secondHits++
+		writeTestJSON(w, http.StatusOK, map[string]string{"instance": "healthy"})
+	}))
+	defer second.Close()
+
+	routePath := uniqueRoutePath("/api/orders/circuit-open")
+	route := routeForTargets(t, routePath, "/api", "order-service", "round_robin", targetsForServers(t, first.URL, second.URL))
+	route.Retry = config.RetryConfig{
+		MaxAttempts: 2,
+		BaseDelay:   time.Millisecond,
+		MaxDelay:    5 * time.Millisecond,
+		Jitter:      "full",
+	}
+
+	cfg := testConfig(route)
+	cfg.CircuitBreaker.FailureThreshold = 1
+	cfg.CircuitBreaker.SuccessThreshold = 1
+	cfg.CircuitBreaker.Timeout = time.Minute
+	cfg.CircuitBreaker.HalfOpenMaxRequests = 1
+
+	gateway := httptest.NewServer(buildHandler(cfg, testLogger()))
+	defer gateway.Close()
+
+	firstResp := doGatewayRequest(t, gateway, http.MethodGet, routePath, "")
+	firstResp.Body.Close()
+	if firstResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected first request to retry onto healthy target, got %d", firstResp.StatusCode)
+	}
+
+	secondResp := doGatewayRequest(t, gateway, http.MethodGet, routePath, "")
+	defer secondResp.Body.Close()
+
+	if secondResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected second request to fail over around open circuit, got %d with body %s", secondResp.StatusCode, readBody(t, secondResp.Body))
+	}
+	if firstHits != 1 {
+		t.Fatalf("expected open target hit once before tripping circuit, got %d", firstHits)
+	}
+	if secondHits != 2 {
+		t.Fatalf("expected healthy target to serve both successful requests, got %d", secondHits)
+	}
+	if got := secondResp.Header.Get(transport.HeaderRetryCount); got != "0" {
+		t.Fatalf("expected open-circuit failover to keep %s at 0, got %q", transport.HeaderRetryCount, got)
+	}
+	if got := secondResp.Header.Get(transport.HeaderRetryTarget); got != targetHost(t, second.URL) {
+		t.Fatalf("expected %s=%q, got %q", transport.HeaderRetryTarget, targetHost(t, second.URL), got)
+	}
+}
+
+func TestAllTargetsOpenReturns503NoHealthyTargets(t *testing.T) {
+	var firstHits int
+	var secondHits int
+
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		firstHits++
+		writeTestJSON(w, http.StatusServiceUnavailable, map[string]string{"instance": "first-down"})
+	}))
+	defer first.Close()
+
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		secondHits++
+		writeTestJSON(w, http.StatusServiceUnavailable, map[string]string{"instance": "second-down"})
+	}))
+	defer second.Close()
+
+	routePath := uniqueRoutePath("/api/orders/no-healthy")
+	route := routeForTargets(t, routePath, "/api", "order-service", "round_robin", targetsForServers(t, first.URL, second.URL))
+	route.Retry = config.RetryConfig{
+		MaxAttempts: 2,
+		BaseDelay:   time.Millisecond,
+		MaxDelay:    5 * time.Millisecond,
+		Jitter:      "full",
+	}
+
+	cfg := testConfig(route)
+	cfg.CircuitBreaker.FailureThreshold = 1
+	cfg.CircuitBreaker.SuccessThreshold = 1
+	cfg.CircuitBreaker.Timeout = time.Minute
+	cfg.CircuitBreaker.HalfOpenMaxRequests = 1
+
+	gateway := httptest.NewServer(buildHandler(cfg, testLogger()))
+	defer gateway.Close()
+
+	firstResp := doGatewayRequest(t, gateway, http.MethodGet, routePath, "")
+	firstResp.Body.Close()
+	if firstResp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("expected first request to surface upstream 503, got %d", firstResp.StatusCode)
+	}
+
+	secondResp := doGatewayRequest(t, gateway, http.MethodGet, routePath, "")
+	defer secondResp.Body.Close()
+
+	if secondResp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 when all targets are open, got %d with body %s", secondResp.StatusCode, readBody(t, secondResp.Body))
+	}
+	if firstHits != 1 || secondHits != 1 {
+		t.Fatalf("expected open circuits to prevent extra upstream calls, got first=%d second=%d", firstHits, secondHits)
+	}
+
+	var payload struct {
+		Error     string `json:"error"`
+		Code      int    `json:"code"`
+		RequestID string `json:"request_id"`
+	}
+	if err := json.NewDecoder(secondResp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode no-healthy payload: %v", err)
+	}
+	if payload.Error != "no healthy targets for service: order-service" {
+		t.Fatalf("expected no-healthy error, got %+v", payload)
+	}
+	if payload.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 error code, got %+v", payload)
+	}
+	if _, err := uuid.Parse(payload.RequestID); err != nil {
+		t.Fatalf("expected request id on 503 payload, got %q", payload.RequestID)
+	}
+}
+
+func TestPutRetryPreservesRequestBody(t *testing.T) {
+	var firstBody string
+	var secondBody string
+
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read first body: %v", err)
+		}
+		firstBody = string(body)
+		writeTestJSON(w, http.StatusServiceUnavailable, map[string]string{"instance": "retry"})
+	}))
+	defer first.Close()
+
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read second body: %v", err)
+		}
+		secondBody = string(body)
+		writeTestJSON(w, http.StatusOK, map[string]string{"instance": "healthy"})
+	}))
+	defer second.Close()
+
+	routePath := uniqueRoutePath("/api/users/body-retry")
+	route := routeForTargets(t, routePath, "/api", "user-service", "round_robin", targetsForServers(t, first.URL, second.URL))
+	route.Methods = []string{http.MethodPut}
+	route.Retry = config.RetryConfig{
+		MaxAttempts: 2,
+		BaseDelay:   time.Millisecond,
+		MaxDelay:    5 * time.Millisecond,
 		Jitter:      "full",
 	}
 
 	gateway := httptest.NewServer(buildHandler(testConfig(route), testLogger()))
 	defer gateway.Close()
 
-	resp, err := http.Get(gateway.URL + "/api/users")
+	payload := `{"id":"u-1","name":"retry"}`
+	req, err := http.NewRequest(http.MethodPut, gateway.URL+routePath, strings.NewReader(payload))
 	if err != nil {
-		t.Fatalf("get route: %v", err)
+		t.Fatalf("new request: %v", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do put request: %v", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusNotImplemented {
-		t.Fatalf("expected %d, got %d with body %s", http.StatusNotImplemented, resp.StatusCode, readBody(t, resp.Body))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d with body %s", resp.StatusCode, readBody(t, resp.Body))
 	}
-	if upstreamHits != 0 {
-		t.Fatalf("expected unsupported feature to fail before upstream, got %d hits", upstreamHits)
+	if firstBody != payload || secondBody != payload {
+		t.Fatalf("expected identical bodies across retry, got first=%q second=%q", firstBody, secondBody)
 	}
-
-	var payload struct {
-		Error string `json:"error"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		t.Fatalf("decode error response: %v", err)
-	}
-	if payload.Error != "route retries are not implemented yet" {
-		t.Fatalf("expected retry error, got %q", payload.Error)
+	if got := resp.Header.Get(transport.HeaderRetryCount); got != "1" {
+		t.Fatalf("expected %s=1, got %q", transport.HeaderRetryCount, got)
 	}
 }
 
@@ -427,7 +669,7 @@ func TestProtectedRoutesReturn401WithoutToken(t *testing.T) {
 	}
 }
 
-func TestPublicRoutesRemainPublicInPhaseFour(t *testing.T) {
+func TestPublicRoutesRemainPublicInPhaseFive(t *testing.T) {
 	testCases := []struct {
 		name      string
 		build     func(t *testing.T) *httptest.Server
@@ -1120,6 +1362,21 @@ func testConfig(routes ...config.RouteConfig) *config.Config {
 			Format: "json",
 		},
 	}
+}
+
+type allowAllRateLimitStore struct{}
+
+func (allowAllRateLimitStore) Allow(_ context.Context, request ratelimit.Request) (ratelimit.Decision, error) {
+	now := request.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+
+	return ratelimit.Decision{
+		Allowed:   true,
+		Remaining: max(request.Limit-1, 0),
+		ResetAt:   now.Add(request.Window),
+	}, nil
 }
 
 func doGatewayRequest(t *testing.T, gateway *httptest.Server, method, path, authorization string) *http.Response {

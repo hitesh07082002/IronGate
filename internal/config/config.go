@@ -22,6 +22,10 @@ var (
 		"sliding_window": {},
 		"token_bucket":   {},
 	}
+	validRetryJitters = map[string]struct{}{
+		"":     {},
+		"full": {},
+	}
 )
 
 type Config struct {
@@ -190,6 +194,9 @@ func (c *Config) Validate() []error {
 		}
 		if route.Retry.MaxDelay < 0 {
 			errs = append(errs, fmt.Errorf("%s retry.max_delay must not be negative", routeName))
+		}
+		if _, ok := validRetryJitters[route.Retry.Jitter]; !ok {
+			errs = append(errs, fmt.Errorf("%s retry.jitter %q is invalid", routeName, route.Retry.Jitter))
 		}
 
 		if route.Service == gatewayInternalService {

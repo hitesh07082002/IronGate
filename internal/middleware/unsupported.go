@@ -3,7 +3,6 @@ package middleware
 import (
 	"net/http"
 
-	"github.com/hitesh07082002/irongate/internal/config"
 	"github.com/hitesh07082002/irongate/internal/response"
 )
 
@@ -16,22 +15,7 @@ func UnsupportedFeatures() Middleware {
 				return
 			}
 
-			switch unsupportedFeature(route) {
-			case "retry":
-				response.WriteError(w, req, http.StatusNotImplemented, "route retries are not implemented yet")
-				return
-			}
-
 			next.ServeHTTP(w, req)
 		})
-	}
-}
-
-func unsupportedFeature(route *config.RouteConfig) string {
-	switch {
-	case route.Retry.MaxAttempts > 1:
-		return "retry"
-	default:
-		return ""
 	}
 }

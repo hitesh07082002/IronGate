@@ -13,7 +13,7 @@
 
 IronGate is being built as a configurable API gateway in Go using a two-tier middleware pipeline — the same pattern production gateways like Traefik use. The target outer chain (`http.Handler`) handles request-level concerns (tracing, routing, auth, rate limiting), while the target inner chain (`http.RoundTripper`) handles transport-level concerns (retry, load balancing, circuit breaking). This separation is what makes retry-aware load balancing and per-target circuit breaking possible.
 
-Current status on `main`: the two-tier split already exists, and tracing, routing, auth, Redis-backed rate limiting, proxy, unsupported-feature guards, and load balancing are live. Retry, circuit breaker, and metrics remain planned.
+Current status on `main`: the two-tier split already exists, and tracing, routing, auth, Redis-backed rate limiting, proxy, retry, load balancing, and circuit breaking are live. Metrics remain planned.
 
 This document covers the target architecture, algorithms, failure modes, and key tradeoffs. Section 8 links to the ADR set that captures those decisions.
 
@@ -28,12 +28,11 @@ IronGate uses two distinct middleware layers with different Go interfaces.
 **Current `main` snapshot:**
 
 ```text
-Outer: [Tracing] -> [Router] -> [Auth] -> [RateLimiter] -> [UnsupportedFeatures] -> [Proxy]
-Inner: [LoadBalancer] -> [Base HTTP Transport]
+Outer: [Tracing] -> [Router] -> [Auth] -> [RateLimiter] -> [Proxy]
+Inner: [Retry] -> [LoadBalancer] -> [CircuitBreaker] -> [Base HTTP Transport]
 ```
 
-The sections below describe the target end-state ordering after later phases land. On `main`, `UnsupportedFeatures` still sits between `RateLimiter` and `Proxy` so retry remains fail-closed until Phase 5 lands.
-Once retry is implemented, that temporary guard drops out of the steady-state outer chain.
+The sections below now describe the live Phase 5 steady-state ordering. Later phases add observability and operational tooling around the same request and transport split.
 
 **Outer chain — `http.Handler` middleware (request-level):**
 
@@ -48,8 +47,6 @@ Request → [Tracing] → [Router] → [Auth] → [RateLimiter] → [Proxy] → 
 - **Auth** reads `auth_required` from context, validates JWT, injects `X-User-ID`/`X-User-Role`, and strips the bearer token before proxying protected requests.
 - **RateLimiter** reads rate limit config from context, checks Redis sliding window.
 - **Proxy** is `httputil.ReverseProxy` with a custom `Transport` (the inner chain).
-
-Current `main` note: `UnsupportedFeatures` still sits between `RateLimiter` and `Proxy` until Phase 5 ships, so retry config fails closed instead of being silently ignored.
 
 **Inner chain — `http.RoundTripper` (transport-level):**
 
@@ -249,11 +246,11 @@ In HALF-OPEN state, the circuit allows up to `half_open_max_requests` (default: 
 Only these count toward the failure threshold:
 - 5xx responses (500, 502, 503, 504)
 - Connection refused
-- DNS resolution failure
-- Socket timeout
+- Upstream timeout / transport timeout
 
 These do NOT count:
 - 4xx responses (client errors, not service failures)
+- Caller-originated request deadlines
 - Successful responses (obviously)
 
 **Concurrent safety:**

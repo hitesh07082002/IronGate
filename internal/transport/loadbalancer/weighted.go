@@ -29,7 +29,7 @@ func NewWeighted(targets []config.Target) *Weighted {
 	return &Weighted{targets: weightedTargets}
 }
 
-func (w *Weighted) Select() (Selection, error) {
+func (w *Weighted) Select(options SelectionOptions) (Selection, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -37,15 +37,23 @@ func (w *Weighted) Select() (Selection, error) {
 		return Selection{}, ErrNoTargets
 	}
 
-	bestIndex := 0
+	bestIndex := -1
 	totalWeight := 0
 	for index := range w.targets {
+		if isExcluded(options, w.targets[index].target) {
+			continue
+		}
+
 		w.targets[index].currentWeight += w.targets[index].weight
 		totalWeight += w.targets[index].weight
 
-		if w.targets[index].currentWeight > w.targets[bestIndex].currentWeight {
+		if bestIndex == -1 || w.targets[index].currentWeight > w.targets[bestIndex].currentWeight {
 			bestIndex = index
 		}
+	}
+
+	if bestIndex == -1 {
+		return Selection{}, ErrNoTargets
 	}
 
 	w.targets[bestIndex].currentWeight -= totalWeight

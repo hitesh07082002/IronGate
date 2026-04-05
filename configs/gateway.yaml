@@ -1,4 +1,4 @@
-# Phase 4 runtime config only includes behavior implemented in the current runtime.
+# Phase 5 runtime config only includes behavior implemented in the current runtime.
 server:
   port: 8080
   read_timeout: 30s
@@ -53,6 +53,11 @@ routes:
       requests: 100
       window: 60s
       strategy: "sliding_window"
+    retry:
+      max_attempts: 3
+      base_delay: 100ms
+      max_delay: 2s
+      jitter: "full"
     targets:
       - host: "user-service-1"
         port: 8081
@@ -72,6 +77,11 @@ routes:
       requests: 50
       window: 60s
       strategy: "sliding_window"
+    retry:
+      max_attempts: 3
+      base_delay: 100ms
+      max_delay: 2s
+      jitter: "full"
     targets:
       - host: "order-service-1"
         port: 8082
@@ -89,6 +99,8 @@ routes:
       requests: 20
       window: 60s
       strategy: "sliding_window"
+    retry:
+      max_attempts: 1
     targets:
       - host: "payment-service-1"
         port: 8083
@@ -97,6 +109,13 @@ routes:
   - path: "/health"
     service: "gateway-internal"
     auth_required: false
+
+circuit_breaker:
+  failure_threshold: 5
+  success_threshold: 3
+  timeout: 30s
+  window_size: 60s
+  half_open_max_requests: 3
 
 auth:
   jwt_secret: "${JWT_SECRET}"

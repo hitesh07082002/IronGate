@@ -161,7 +161,39 @@ func TestValidateRejectsPortsOutsideTCPRange(t *testing.T) {
 	assertContains(t, joined, `targets[0] port must be between 1 and 65535`)
 }
 
-func TestGatewayConfigPhaseFourEnablesRateLimitingWithoutLaterPhaseFeatures(t *testing.T) {
+func TestValidateRejectsUnknownRetryJitter(t *testing.T) {
+	cfg := &Config{
+		Server: ServerConfig{
+			Port:         8080,
+			ReadTimeout:  30 * time.Second,
+			WriteTimeout: 30 * time.Second,
+		},
+		Routes: []RouteConfig{
+			{
+				Path:         "/api/users",
+				Service:      "user-service",
+				LoadBalancer: "round_robin",
+				Retry: RetryConfig{
+					MaxAttempts: 2,
+					BaseDelay:   100 * time.Millisecond,
+					MaxDelay:    time.Second,
+					Jitter:      "equal",
+				},
+				Targets: []Target{
+					{
+						Host: "user-service-1",
+						Port: 8081,
+					},
+				},
+			},
+		},
+	}
+
+	joined := joinErrors(cfg.Validate())
+	assertContains(t, joined, `retry.jitter "equal" is invalid`)
+}
+
+func TestGatewayConfigPhaseFiveEnablesRetryAndCircuitBreaking(t *testing.T) {
 	t.Setenv("JWT_SECRET", "test-secret")
 
 	cfg, err := Load(repoPathFromThisFile("configs", "gateway.yaml"))
@@ -170,7 +202,7 @@ func TestGatewayConfigPhaseFourEnablesRateLimitingWithoutLaterPhaseFeatures(t *t
 	}
 
 	if errs := cfg.Validate(); len(errs) != 0 {
-		t.Fatalf("expected checked-in Phase 4 config to validate, got %v", errs)
+		t.Fatalf("expected checked-in Phase 5 config to validate, got %v", errs)
 	}
 
 	loginRoute := findRouteByPath(cfg.Routes, "/api/users/login")
@@ -183,35 +215,56 @@ func TestGatewayConfigPhaseFourEnablesRateLimitingWithoutLaterPhaseFeatures(t *t
 	if loginRoute == nil || registerRoute == nil || usersRoute == nil || ordersRoute == nil || paymentsRoute == nil || healthRoute == nil {
 		t.Fatalf("expected login, register, users, orders, payments, and health routes to exist")
 	}
+	if cfg.CircuitBreaker.FailureThreshold != 5 {
+		t.Fatalf("expected circuit breaker failure threshold 5, got %d", cfg.CircuitBreaker.FailureThreshold)
+	}
+	if cfg.CircuitBreaker.SuccessThreshold != 3 {
+		t.Fatalf("expected circuit breaker success threshold 3, got %d", cfg.CircuitBreaker.SuccessThreshold)
+	}
+	if cfg.CircuitBreaker.Timeout != 30*time.Second {
+		t.Fatalf("expected circuit breaker timeout 30s, got %s", cfg.CircuitBreaker.Timeout)
+	}
+	if cfg.CircuitBreaker.WindowSize != 60*time.Second {
+		t.Fatalf("expected circuit breaker window size 60s, got %s", cfg.CircuitBreaker.WindowSize)
+	}
+	if cfg.CircuitBreaker.HalfOpenMaxRequests != 3 {
+		t.Fatalf("expected circuit breaker half-open max requests 3, got %d", cfg.CircuitBreaker.HalfOpenMaxRequests)
+	}
 
 	for _, route := range []*RouteConfig{loginRoute, registerRoute} {
 		if route.AuthRequired {
-			t.Fatalf("expected %s to remain public in Phase 4", route.Path)
+			t.Fatalf("expected %s to remain public in Phase 5", route.Path)
 		}
 		if route.RateLimit == nil {
-			t.Fatalf("expected %s to have a Phase 4 rate limit", route.Path)
+			t.Fatalf("expected %s to keep a Phase 5 rate limit", route.Path)
 		}
 		if route.RateLimit.Strategy != "sliding_window" {
 			t.Fatalf("expected %s rate limit strategy %q, got %q", route.Path, "sliding_window", route.RateLimit.Strategy)
 		}
-		if route.Retry.MaxAttempts > 1 {
-			t.Fatalf("expected %s to avoid retry config until Phase 5", route.Path)
+		if route.Retry.MaxAttempts != 0 {
+			t.Fatalf("expected %s to use default retry config, got %+v", route.Path, route.Retry)
 		}
 	}
 
 	for _, route := range []*RouteConfig{usersRoute, ordersRoute, paymentsRoute} {
 		if !route.AuthRequired {
-			t.Fatalf("expected %s to require auth in Phase 4", route.Path)
+			t.Fatalf("expected %s to require auth in Phase 5", route.Path)
 		}
 		if route.RateLimit == nil {
-			t.Fatalf("expected %s to have a Phase 4 rate limit", route.Path)
+			t.Fatalf("expected %s to keep a Phase 5 rate limit", route.Path)
 		}
 		if route.RateLimit.Strategy != "sliding_window" {
 			t.Fatalf("expected %s rate limit strategy %q, got %q", route.Path, "sliding_window", route.RateLimit.Strategy)
 		}
-		if route.Retry.MaxAttempts > 1 {
-			t.Fatalf("expected %s to avoid retry config until Phase 5", route.Path)
-		}
+	}
+	if usersRoute.Retry.MaxAttempts != 3 || usersRoute.Retry.BaseDelay != 100*time.Millisecond || usersRoute.Retry.MaxDelay != 2*time.Second || usersRoute.Retry.Jitter != "full" {
+		t.Fatalf("expected /api/users retry config to be live in Phase 5, got %+v", usersRoute.Retry)
+	}
+	if ordersRoute.Retry.MaxAttempts != 3 || ordersRoute.Retry.BaseDelay != 100*time.Millisecond || ordersRoute.Retry.MaxDelay != 2*time.Second || ordersRoute.Retry.Jitter != "full" {
+		t.Fatalf("expected /api/orders retry config to be live in Phase 5, got %+v", ordersRoute.Retry)
+	}
+	if paymentsRoute.Retry.MaxAttempts != 1 {
+		t.Fatalf("expected /api/payments retries disabled by default, got %+v", paymentsRoute.Retry)
 	}
 
 	if cfg.Auth.JWTSecret != "test-secret" {

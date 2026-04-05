@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-IronGate is a reverse-proxy API gateway built from scratch using Go's `net/http` standard library. The current repo ships the foundation, tracing, routing, load balancing, JWT authentication, and Redis-backed sliding-window rate limiting. Retry, circuit breaking, and richer observability remain planned.
+IronGate is a reverse-proxy API gateway built from scratch using Go's `net/http` standard library. The current repo ships the foundation, tracing, routing, load balancing, JWT authentication, Redis-backed sliding-window rate limiting, retry, and circuit breaking. Richer observability remains planned.
 
 ## Key Documentation
 
@@ -21,11 +21,11 @@ IronGate is a reverse-proxy API gateway built from scratch using Go's `net/http`
 
 ## Architecture (Two-Tier Pipeline)
 
-**Current outer chain** (`http.Handler` middleware): Tracing → Router → Auth → RateLimiter → UnsupportedFeatures → Proxy
+**Current outer chain** (`http.Handler` middleware): Tracing → Router → Auth → RateLimiter → Proxy
 
-**Current inner chain** (`http.RoundTripper` transport): Load Balancer → Base Transport
+**Current inner chain** (`http.RoundTripper` transport): Retry → Load Balancer → Circuit Breaker → Base Transport
 
-Future-phase target architecture lives in [`DESIGN_DOC.md`](./DESIGN_DOC.md) and [`PROJECT_SPEC.md`](./PROJECT_SPEC.md). Later phases add retry plus circuit breaker to the inner chain and remove the remaining unsupported-feature guard once those behaviors land.
+Future-phase target architecture lives in [`DESIGN_DOC.md`](./DESIGN_DOC.md) and [`PROJECT_SPEC.md`](./PROJECT_SPEC.md). Later phases add observability and operational tooling on top of this Phase 5 transport chain.
 
 Router stores the matched `RouteConfig` in `context.Context`. All downstream middleware reads config from context, not globals.
 
@@ -37,7 +37,7 @@ Router stores the matched `RouteConfig` in `context.Context`. All downstream mid
 4. Never buffer response bodies in middleware
 5. Rate limiter client IP: trust `X-Forwarded-For` only from known proxy IPs
 6. JWT parsing: explicitly enforce `alg=HS256`, reject `none` and mismatched algorithms
-7. Circuit breaker: per-target (`host:port`), only 5xx + connection errors count
+7. Circuit breaker: per-target (`host:port`), only 5xx + upstream transport failures count; caller-side deadlines do not
 8. Retry: idempotent methods only (GET, HEAD, PUT, DELETE, OPTIONS). Clone request on each attempt.
 9. All state machines must pass `go test -race` with 100 concurrent goroutines
 10. Rate limiter fails-open when Redis is unreachable
@@ -59,7 +59,7 @@ make run        # start gateway on :8080
 
 ## Config
 
-Gateway runtime config lives in `configs/gateway.yaml`. Shipped route-level settings on `main` include `auth_required`, `timeout`, `rate_limit`, `load_balancer`, and `targets`. Top-level `redis` config is also live. Future-facing fields like `retry` are parsed but fail closed until those phases land.
+Gateway runtime config lives in `configs/gateway.yaml`. Shipped route-level settings on `main` include `auth_required`, `timeout`, `rate_limit`, `retry`, `load_balancer`, and `targets`. Top-level `circuit_breaker` and `redis` config are also live.
 
 ## Skill Routing
 
