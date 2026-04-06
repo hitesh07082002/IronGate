@@ -17,23 +17,25 @@ The project is built for fast evaluation. You can run the complete stack locally
 - `git`
 - Docker Desktop, or Docker Engine with the Compose plugin
 - `curl`
+- `make`
+- `mise`
 
 Optional:
 
-- `make`, for verification and the optional smoke benchmark
-- `k6`
 - `python3`
-- `mise`, if you want the exact pinned one-shot benchmark command from this README
 
 ## Quick Start
 
 ```bash
 git clone https://github.com/hitesh07082002/IronGate.git
 cd IronGate
+mise install
 ./demo.sh
 ```
 
-`./demo.sh` starts the stack, waits for `/ready`, mints a demo token, exercises protected routes, samples `/metrics`, runs the optional smoke test if `k6` is installed, and tears the stack down when it exits.
+`mise install` installs the project-pinned `k6` toolchain from [`mise.toml`](./mise.toml).
+
+`./demo.sh` starts the stack, waits for `/ready`, mints a demo token, exercises protected routes, samples `/metrics`, runs the smoke test, and tears the stack down when it exits.
 
 The first run can take a minute or two while Docker builds the images.
 
@@ -41,8 +43,6 @@ Success looks like:
 - you see JSON output from `/health` and `/ready`
 - protected routes return real mock data
 - the script ends with `Demo completed successfully.`
-
-If `k6` or `make` is missing, the demo still succeeds. It just skips the optional smoke benchmark and prints the exact follow-up command.
 
 If you want to keep the stack running after the walkthrough so you can inspect it:
 
@@ -62,10 +62,13 @@ When you are done inspecting the stack:
 ./demo.sh --teardown
 ```
 
-Optional smoke benchmark later:
+Run the same smoke benchmark later, with the local stack still running:
+
+- start it with `./demo.sh --keep-stack`, or
+- run `docker compose up -d --build`
 
 ```bash
-mise x k6@1.7.1 -- make load-test
+make load-test
 ```
 
 ## Production Deployment
@@ -158,7 +161,7 @@ make benchmark-test
 If you want to reproduce the benchmark suite:
 
 ```bash
-mise x k6@1.7.1 -- make benchmark
+make benchmark
 ```
 
 `make benchmark` writes a timestamped result bundle under `benchmarks/results/`.
@@ -194,8 +197,9 @@ Benchmark note: the local benchmark stack sets `IRONGATE_TRUSTED_PROXIES=0.0.0.0
 
 - If `./demo.sh` says Docker is not reachable, start Docker Desktop or Docker Engine first.
 - If `http://127.0.0.1:8080` is already in use, stop the conflicting service before running the demo.
-- If you only want the walkthrough, missing `k6` is fine. The smoke benchmark is optional.
+- If `./demo.sh` says `k6` is required, run `mise install` in the repo root and rerun it.
 - If you want to inspect Prometheus or Grafana after the walkthrough, rerun `./demo.sh --keep-stack`, then stop it with `./demo.sh --teardown`.
+- If `make load-test` says the gateway is not reachable, start the local stack first and rerun it.
 - If you are deploying to production, keep `IRONGATE_GATEWAY_BIND_HOST=127.0.0.1` so the gateway is only reachable through Caddy.
 
 ## Docs Map

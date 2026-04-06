@@ -3,6 +3,7 @@
 GO_TEST_FLAGS ?=
 COVERAGE_MIN ?= 70
 DOCKER_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then printf '%s' 'docker compose'; elif command -v docker-compose >/dev/null 2>&1; then printf '%s' 'docker-compose'; fi)
+K6_CMD ?= $(shell if command -v k6 >/dev/null 2>&1; then printf '%s' 'k6'; elif command -v mise >/dev/null 2>&1 && mise exec -- k6 version >/dev/null 2>&1; then printf '%s' 'mise exec -- k6'; fi)
 
 all: build
 
@@ -43,8 +44,17 @@ docker-down:
 	$(DOCKER_COMPOSE) down
 
 load-test:
-	@command -v k6 >/dev/null 2>&1 || (echo "k6 is required for load-test"; exit 1)
-	IRONGATE_BASE_URL="$${IRONGATE_BASE_URL:-http://127.0.0.1:8080}" k6 run benchmarks/smoke.js
+	@test -n "$(K6_CMD)" || (echo "k6 is required for load-test; run 'mise install' in the repo root first"; exit 1)
+	@command -v curl >/dev/null 2>&1 || (echo "curl is required for load-test"; exit 1)
+	@set -eu; \
+		base_url="$${IRONGATE_BASE_URL:-http://127.0.0.1:8080}"; \
+		ready_url="$${base_url%/}/ready"; \
+		if ! curl --connect-timeout 2 --max-time 5 -fsS "$$ready_url" >/dev/null 2>&1; then \
+			echo "gateway is not reachable at $$base_url"; \
+			echo "start the stack first with ./demo.sh --keep-stack or docker compose up -d --build"; \
+			exit 1; \
+		fi; \
+		IRONGATE_BASE_URL="$$base_url" $(K6_CMD) run benchmarks/smoke.js
 
 benchmark:
 	@command -v python3 >/dev/null 2>&1 || (echo "python3 is required for benchmark"; exit 1)
