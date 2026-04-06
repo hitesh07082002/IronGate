@@ -490,6 +490,7 @@ def format_command(command: list[str], env: dict[str, str]) -> str:
         "IRONGATE_DURATION",
         "IRONGATE_ITERATIONS",
         "IRONGATE_SLEEP_MS",
+        "IRONGATE_REQUEST_BODY",
         "IRONGATE_XFF_MODE",
         "IRONGATE_AUTH_MODE",
         "IRONGATE_AUTH_POOL_SIZE",

@@ -168,6 +168,7 @@ class FormattingTests(unittest.TestCase):
             "IRONGATE_VUS": "24",
             "IRONGATE_DURATION": "20s",
             "IRONGATE_SLEEP_MS": "100",
+            "IRONGATE_REQUEST_BODY": '{"username":"demo"}',
             "IRONGATE_AUTH_MODE": "pool",
             "IRONGATE_AUTH_POOL_SIZE": "32",
             "IRONGATE_LOGIN_SUBJECT_PREFIX": "bench-order-user",
@@ -187,6 +188,7 @@ class FormattingTests(unittest.TestCase):
         formatted = runner.format_command(command, env)
 
         self.assertIn("IRONGATE_SLEEP_MS='100'", formatted)
+        self.assertIn("IRONGATE_REQUEST_BODY='{\"username\":\"demo\"}'", formatted)
         self.assertIn("IRONGATE_TOKEN_POOL_PATH='./benchmarks/results/demo/tokens.json'", formatted)
         self.assertIn("'--summary-export' './benchmarks/results/demo/k6-summary.json'", formatted)
         self.assertIn("'--out' 'json=./benchmarks/results/demo/k6-metrics.json'", formatted)
