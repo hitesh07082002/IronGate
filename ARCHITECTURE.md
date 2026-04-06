@@ -3,6 +3,8 @@
 > Runtime reference for the shipped implementation.
 >
 > Start with [`README.md`](./README.md) for the overview and demo path. Use [`PROJECT_SPEC.md`](./PROJECT_SPEC.md) for full scope and [`DESIGN_DOC.md`](./DESIGN_DOC.md) for target-state design. If those documents disagree with the code, this file is the source of truth for current behavior.
+>
+> The Phase 9 planning docs under [`docs/phase9-planning/`](./docs/phase9-planning/) describe future work only. Until that phase ships, this file wins whenever planning docs disagree with current runtime behavior.
 
 ---
 
@@ -19,6 +21,7 @@ For broader product scope and future work, use:
 - [`DESIGN_DOC.md`](./DESIGN_DOC.md) for target architecture, algorithms, and tradeoffs
 - [`PROJECT_SPEC.md`](./PROJECT_SPEC.md) for full feature scope and project requirements
 - [`PROGRESS.md`](./PROGRESS.md) for what is shipped now versus planned next
+- [`docs/phase9-planning/`](./docs/phase9-planning/) for the planned Chaos Observatory expansion
 
 ---
 
