@@ -10,6 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+
 	"github.com/hitesh07082002/irongate/internal/config"
 )
 
@@ -20,7 +25,7 @@ func TestRouterMatchesLongestPrefixAndStoresRouteConfig(t *testing.T) {
 	}
 
 	var gotRoute *config.RouteConfig
-	handler := Router(routes)(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	handler := Router(routes, nil)(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		gotRoute = GetRouteConfig(req)
 		w.WriteHeader(http.StatusNoContent)
 	}))
@@ -38,7 +43,7 @@ func TestRouterMatchesLongestPrefixAndStoresRouteConfig(t *testing.T) {
 }
 
 func TestRouterReturnsNotFoundForUnknownRoute(t *testing.T) {
-	handler := Router([]config.RouteConfig{{Path: "/api/users", Service: "user-service"}})(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+	handler := Router([]config.RouteConfig{{Path: "/api/users", Service: "user-service"}}, nil)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		t.Fatal("expected unmatched route to stop before next handler")
 	}))
 
@@ -56,7 +61,7 @@ func TestRouterReturnsMethodNotAllowedAndAllowHeader(t *testing.T) {
 		Path:    "/api/users",
 		Service: "user-service",
 		Methods: []string{http.MethodGet, http.MethodPost},
-	}})(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+	}}, nil)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		t.Fatal("expected disallowed method to stop before next handler")
 	}))
 
@@ -77,7 +82,7 @@ func TestTracingSanitizesHeadersPropagatesRequestIDAndLogsCompletion(t *testing.
 	logger := slog.New(slog.NewTextHandler(&logBuffer, nil))
 
 	var seenRequestID string
-	handler := Tracing(logger)(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	handler := Tracing(logger, nil)(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.Header.Get(HeaderUserID) != "" {
 			t.Fatal("expected tracing to remove user id header before downstream handlers")
 		}
@@ -203,7 +208,7 @@ func TestGetRouteConfigHandlesMissingValue(t *testing.T) {
 }
 
 func TestTracingFallsBackToDefaultLogger(t *testing.T) {
-	handler := Tracing(nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	handler := Tracing(nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 
@@ -217,4 +222,92 @@ func TestTracingFallsBackToDefaultLogger(t *testing.T) {
 	if recorder.Header().Get(HeaderRequestID) == "" {
 		t.Fatal("expected default logger tracing path to still assign request id")
 	}
+}
+
+func TestTracingRecordsRootSpanWithRouteTemplate(t *testing.T) {
+	recorder := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+
+	handler := Tracing(testRateLimitLogger(), tp.Tracer("irongate.middleware.tracing"))(
+		Router([]config.RouteConfig{
+			{Path: "/api/users", Service: "user-service", Methods: []string{http.MethodGet}},
+		}, tp.Tracer("irongate.middleware.router"))(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusCreated)
+		})),
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/users/42", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, req)
+
+	root := findEndedSpanByName(t, recorder.Ended(), "irongate.request")
+	if got := spanAttribute(root.Attributes(), "http.path"); got != "/api/users" {
+		t.Fatalf("expected root http.path to use route template, got %q", got)
+	}
+	if got := spanAttribute(root.Attributes(), "http.method"); got != http.MethodGet {
+		t.Fatalf("expected root http.method %q, got %q", http.MethodGet, got)
+	}
+	if got := spanAttribute(root.Attributes(), "http.status_code"); got != int64(http.StatusCreated) {
+		t.Fatalf("expected root http.status_code %d, got %v", http.StatusCreated, got)
+	}
+	if spanAttribute(root.Attributes(), "request_id") == "" {
+		t.Fatal("expected root span request_id attribute")
+	}
+
+	routerSpan := findEndedSpanByName(t, recorder.Ended(), "irongate.middleware.router")
+	if got := spanAttribute(routerSpan.Attributes(), "route.service"); got != "user-service" {
+		t.Fatalf("expected route.service user-service, got %q", got)
+	}
+	if got := spanAttribute(routerSpan.Attributes(), "route.path"); got != "/api/users" {
+		t.Fatalf("expected route.path /api/users, got %q", got)
+	}
+	if got := spanAttribute(routerSpan.Attributes(), "route.matched"); got != true {
+		t.Fatalf("expected route.matched true, got %v", got)
+	}
+
+	findEndedSpanByName(t, recorder.Ended(), "irongate.middleware.tracing")
+}
+
+func TestRouterMarksNoMatchAsError(t *testing.T) {
+	recorder := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+
+	handler := Router([]config.RouteConfig{{Path: "/api/users", Service: "user-service"}}, tp.Tracer("irongate.middleware.router"))(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("expected unmatched route to stop before next handler")
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/orders", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, req)
+
+	span := findEndedSpanByName(t, recorder.Ended(), "irongate.middleware.router")
+	if got := spanAttribute(span.Attributes(), "route.matched"); got != false {
+		t.Fatalf("expected route.matched false, got %v", got)
+	}
+	if span.Status().Code != codes.Error {
+		t.Fatalf("expected router span status error, got %s", span.Status().Code)
+	}
+}
+
+func findEndedSpanByName(t *testing.T, spans []sdktrace.ReadOnlySpan, name string) sdktrace.ReadOnlySpan {
+	t.Helper()
+
+	for _, span := range spans {
+		if span.Name() == name {
+			return span
+		}
+	}
+
+	t.Fatalf("span %q not found", name)
+	return nil
+}
+
+func spanAttribute(attrs []attribute.KeyValue, key string) any {
+	for _, attr := range attrs {
+		if string(attr.Key) == key {
+			return attr.Value.AsInterface()
+		}
+	}
+
+	return nil
 }

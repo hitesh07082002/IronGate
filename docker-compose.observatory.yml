@@ -1,0 +1,24 @@
+services:
+  tempo:
+    image: grafana/tempo:2.4.1
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./otel/tempo.yaml:/etc/tempo.yaml:ro
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.97.0
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otel/collector-config.yaml:/etc/otelcol/config.yaml:ro
+    depends_on:
+      - tempo
+
+  gateway:
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
+      OTEL_TRACES_SAMPLER: always_on
+      OTEL_SERVICE_NAME: irongate
+      ADMIN_TOKEN: "${ADMIN_TOKEN}"
+      GATEWAY_CONTAINER_NAME: irongate-gateway-1
+      # REDIS_ADDR intentionally omitted for M1.
+      # M2 will override this with toxiproxy:6380 when Toxiproxy is introduced.

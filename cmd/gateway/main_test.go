@@ -122,6 +122,7 @@ func TestStripPrefixForwardsExpectedPath(t *testing.T) {
 
 func TestPaymentStatusRouteIsReachableThroughGateway(t *testing.T) {
 	t.Setenv("JWT_SECRET", "test-secret")
+	t.Setenv("REDIS_ADDR", "redis:6379")
 
 	cfg, err := config.Load(repoPathFromThisFile("configs", "gateway.yaml"))
 	if err != nil {

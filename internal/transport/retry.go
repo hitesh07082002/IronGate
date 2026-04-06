@@ -15,6 +15,10 @@ import (
 	"syscall"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/hitesh07082002/irongate/internal/config"
 	gatewaymetrics "github.com/hitesh07082002/irongate/internal/metrics"
 	"github.com/hitesh07082002/irongate/internal/middleware"
@@ -40,12 +44,13 @@ type RetryTransport struct {
 	next    http.RoundTripper
 	sleep   sleepFunc
 	metrics *gatewaymetrics.Registry
+	tracer  trace.Tracer
 
 	randMu sync.Mutex
 	rand   *rand.Rand
 }
 
-func NewRetryTransport(next http.RoundTripper, registry *gatewaymetrics.Registry) http.RoundTripper {
+func NewRetryTransport(next http.RoundTripper, registry *gatewaymetrics.Registry, tracer trace.Tracer) http.RoundTripper {
 	if next == nil {
 		next = http.DefaultTransport
 	}
@@ -55,10 +60,11 @@ func NewRetryTransport(next http.RoundTripper, registry *gatewaymetrics.Registry
 		sleepWithContext,
 		rand.New(rand.NewSource(time.Now().UnixNano())),
 		registry,
+		tracer,
 	)
 }
 
-func newRetryTransport(next http.RoundTripper, sleep sleepFunc, rng *rand.Rand, registry *gatewaymetrics.Registry) *RetryTransport {
+func newRetryTransport(next http.RoundTripper, sleep sleepFunc, rng *rand.Rand, registry *gatewaymetrics.Registry, tracer trace.Tracer) *RetryTransport {
 	if sleep == nil {
 		sleep = sleepWithContext
 	}
@@ -70,11 +76,24 @@ func newRetryTransport(next http.RoundTripper, sleep sleepFunc, rng *rand.Rand, 
 		next:    next,
 		sleep:   sleep,
 		metrics: registry,
+		tracer:  tracer,
 		rand:    rng,
 	}
 }
 
-func (rt *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+func (rt *RetryTransport) RoundTrip(req *http.Request) (resp *http.Response, err error) {
+	proxyCtx, proxySpan := transportTracerOrNoop(rt.tracer, "irongate.transport").Start(req.Context(), "irongate.proxy")
+	defer func() {
+		switch {
+		case err != nil:
+			proxySpan.SetStatus(codes.Error, err.Error())
+		case resp != nil && resp.StatusCode >= http.StatusInternalServerError:
+			proxySpan.SetStatus(codes.Error, http.StatusText(resp.StatusCode))
+		}
+		proxySpan.End()
+	}()
+	req = req.WithContext(proxyCtx)
+
 	route := middleware.GetRouteConfig(req)
 	if route == nil {
 		return nil, fmt.Errorf("route config missing from request context")
@@ -90,6 +109,7 @@ func (rt *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	triedTargets := make(map[string]struct{})
 	totalTargets := uniqueTargetCount(route.Targets)
 	logicalAttempt := 0
+	lastRetryReason := ""
 
 	for {
 		if err := req.Context().Err(); err != nil {
@@ -103,6 +123,12 @@ func (rt *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		if err != nil {
 			return nil, err
 		}
+		attemptCtx, attemptSpan := transportTracerOrNoop(rt.tracer, "irongate.transport").Start(attemptReq.Context(), "irongate.transport.retry.attempt")
+		attemptSpan.SetAttributes(attribute.Int("retry.attempt", logicalAttempt+1))
+		if lastRetryReason != "" {
+			attemptSpan.SetAttributes(attribute.String("retry.reason", lastRetryReason))
+		}
+		attemptReq = attemptReq.WithContext(attemptCtx)
 
 		if logicalAttempt > 0 {
 			rt.metrics.IncRetry(service)
@@ -110,6 +136,19 @@ func (rt *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 		resp, roundTripErr := rt.next.RoundTrip(attemptReq)
 		metadata := resolveAttemptMetadata(resp, roundTripErr, logicalAttempt)
+		outcomeReason := retryReason(resp, roundTripErr)
+		if outcomeReason != "" {
+			attemptSpan.SetAttributes(attribute.String("retry.reason", outcomeReason))
+			lastRetryReason = outcomeReason
+		} else {
+			lastRetryReason = ""
+		}
+		if roundTripErr != nil {
+			attemptSpan.SetStatus(codes.Error, roundTripErr.Error())
+		} else if resp != nil && resp.StatusCode >= http.StatusInternalServerError {
+			attemptSpan.SetStatus(codes.Error, http.StatusText(resp.StatusCode))
+		}
+		attemptSpan.End()
 
 		if errors.Is(roundTripErr, ErrCircuitOpen) {
 			if metadata.target != "" {
@@ -148,13 +187,21 @@ func (rt *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 
 		delay := rt.nextDelay(policy, logicalAttempt)
+		_, backoffSpan := transportTracerOrNoop(rt.tracer, "irongate.transport").Start(req.Context(), "irongate.transport.retry.backoff")
+		backoffSpan.SetAttributes(
+			attribute.Int64("retry.backoff_ms", delay.Milliseconds()),
+			attribute.Int("retry.attempt", logicalAttempt+1),
+		)
 		if err := rt.sleep(req.Context(), delay); err != nil {
+			backoffSpan.SetStatus(codes.Error, err.Error())
+			backoffSpan.End()
 			return nil, &AttemptError{
 				Err:        err,
 				RetryCount: logicalAttempt,
 				Target:     metadata.target,
 			}
 		}
+		backoffSpan.End()
 		rt.metrics.ObserveRetryDelay(service, delay)
 
 		logicalAttempt++
@@ -422,4 +469,25 @@ func isConnectionFailure(err error) bool {
 	default:
 		return false
 	}
+}
+
+func retryReason(resp *http.Response, err error) string {
+	switch {
+	case err == nil && resp != nil && resp.StatusCode >= http.StatusInternalServerError:
+		return "upstream_5xx"
+	case err == nil:
+		return ""
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timeout"
+	}
+
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return "timeout"
+	}
+	if isConnectionFailure(err) {
+		return "connection_failure"
+	}
+
+	return ""
 }

@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/hitesh07082002/irongate/internal/config"
+	"github.com/hitesh07082002/irongate/internal/metrics"
+	dto "github.com/prometheus/client_model/go"
 )
 
 func TestBreakerTransitionsClosedOpenHalfOpenClosed(t *testing.T) {
@@ -155,7 +157,7 @@ func TestBreakerHalfOpenIgnoredProbeCanFinishClosing(t *testing.T) {
 }
 
 func TestRegistryReturnsBreakerPerTarget(t *testing.T) {
-	registry := NewRegistry(config.CBConfig{FailureThreshold: 1})
+	registry := NewRegistry(config.CBConfig{FailureThreshold: 1}, nil)
 
 	first := registry.Breaker("user-service-1:8081")
 	second := registry.Breaker("user-service-1:8081")
@@ -176,7 +178,7 @@ func TestRegistryCloneWithConfigPreservesOpenState(t *testing.T) {
 		Timeout:             time.Minute,
 		WindowSize:          time.Minute,
 		HalfOpenMaxRequests: 1,
-	})
+	}, nil)
 
 	breaker := registry.Breaker("user-service-1:8081")
 	if !breaker.Allow() {
@@ -249,6 +251,117 @@ func TestBreakerConcurrentAccessRaceSafe(t *testing.T) {
 	}
 }
 
+func TestReset_AllBreakers(t *testing.T) {
+	registry := NewRegistry(config.CBConfig{
+		FailureThreshold:    1,
+		SuccessThreshold:    1,
+		Timeout:             time.Minute,
+		WindowSize:          time.Minute,
+		HalfOpenMaxRequests: 1,
+	}, nil)
+
+	first := registry.Breaker("user-service-1:8081")
+	second := registry.Breaker("user-service-2:8081")
+
+	if !first.Allow() || !second.Allow() {
+		t.Fatal("expected closed breakers to allow requests")
+	}
+	first.RecordFailure()
+	second.RecordFailure()
+
+	if got := registry.Reset(); got != 2 {
+		t.Fatalf("expected reset to clear 2 targets, got %d", got)
+	}
+	if first.State() != StateClosed {
+		t.Fatalf("expected first breaker closed after reset, got %s", first.State())
+	}
+	if second.State() != StateClosed {
+		t.Fatalf("expected second breaker closed after reset, got %s", second.State())
+	}
+}
+
+func TestReset_Race(t *testing.T) {
+	registry := NewRegistry(config.CBConfig{
+		FailureThreshold:    1,
+		SuccessThreshold:    1,
+		Timeout:             time.Millisecond,
+		WindowSize:          time.Minute,
+		HalfOpenMaxRequests: 1,
+	}, nil)
+	breakers := []*Breaker{
+		registry.Breaker("user-service-1:8081"),
+		registry.Breaker("user-service-2:8081"),
+		registry.Breaker("user-service-3:8081"),
+	}
+
+	var sequence atomic.Uint32
+	runConcurrentWorkers(100, func() {
+		index := int(sequence.Add(1))
+		breaker := breakers[index%len(breakers)]
+
+		switch index % 3 {
+		case 0:
+			if breaker.Allow() {
+				breaker.RecordFailure()
+			}
+		case 1:
+			_ = breaker.State()
+		default:
+			registry.Reset()
+		}
+	})
+
+	if got := registry.Reset(); got != len(breakers) {
+		t.Fatalf("expected final reset to clear %d targets, got %d", len(breakers), got)
+	}
+	for index, breaker := range breakers {
+		if breaker.State() != StateClosed {
+			t.Fatalf("expected breaker %d closed after race reset, got %s", index, breaker.State())
+		}
+	}
+}
+
+func TestCircuitStateGauge_Transitions(t *testing.T) {
+	clock := &fakeClock{now: time.Unix(0, 0)}
+	cfg := config.CBConfig{
+		FailureThreshold:    1,
+		SuccessThreshold:    1,
+		Timeout:             time.Second,
+		WindowSize:          time.Minute,
+		HalfOpenMaxRequests: 1,
+	}
+	metricsRegistry := metrics.NewRegistry()
+	registry := NewRegistry(cfg, metricsRegistry.RegisterCollector)
+	breaker := newWithClock(cfg, clock)
+	registry.breakers.Store("user-service-1:8081", breaker)
+	registry.attachBreaker("user-service-1:8081", breaker)
+
+	if got := circuitStateGaugeValueForTarget(t, metricsRegistry, "user-service-1:8081"); got != 0 {
+		t.Fatalf("expected initial closed gauge value 0, got %v", got)
+	}
+
+	if !breaker.Allow() {
+		t.Fatal("expected closed breaker to allow request")
+	}
+	breaker.RecordFailure()
+	if got := circuitStateGaugeValueForTarget(t, metricsRegistry, "user-service-1:8081"); got != 1 {
+		t.Fatalf("expected open gauge value 1, got %v", got)
+	}
+
+	clock.Advance(time.Second)
+	if !breaker.Allow() {
+		t.Fatal("expected half-open probe to be allowed")
+	}
+	if got := circuitStateGaugeValueForTarget(t, metricsRegistry, "user-service-1:8081"); got != 2 {
+		t.Fatalf("expected half-open gauge value 2, got %v", got)
+	}
+
+	breaker.RecordSuccess()
+	if got := circuitStateGaugeValueForTarget(t, metricsRegistry, "user-service-1:8081"); got != 0 {
+		t.Fatalf("expected closed gauge value 0 after recovery, got %v", got)
+	}
+}
+
 type fakeClock struct {
 	mu  sync.Mutex
 	now time.Time
@@ -281,4 +394,40 @@ func runConcurrentWorkers(workers int, fn func()) {
 
 	close(start)
 	wg.Wait()
+}
+
+func circuitStateGaugeValueForTarget(t *testing.T, registry *metrics.Registry, target string) float64 {
+	t.Helper()
+
+	families, err := registry.Gather()
+	if err != nil {
+		t.Fatalf("gather metrics: %v", err)
+	}
+
+	for _, family := range families {
+		if family.GetName() != metricCircuitState {
+			continue
+		}
+		for _, metric := range family.Metric {
+			if labelValue(metric, "target") == target {
+				if metric.Gauge == nil {
+					t.Fatalf("metric %s for target %s is not a gauge", metricCircuitState, target)
+				}
+				return metric.GetGauge().GetValue()
+			}
+		}
+	}
+
+	t.Fatalf("metric %s for target %s not found", metricCircuitState, target)
+	return 0
+}
+
+func labelValue(metric *dto.Metric, labelName string) string {
+	for _, label := range metric.Label {
+		if label.GetName() == labelName {
+			return label.GetValue()
+		}
+	}
+
+	return ""
 }

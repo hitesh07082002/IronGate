@@ -27,7 +27,7 @@ func TestLoadBalancerTransportInitializesNilResponseHeaders(t *testing.T) {
 			Body:       http.NoBody,
 			Request:    req,
 		}, nil
-	}), nil, config.CBConfig{}, nil, nil)
+	}), nil, config.CBConfig{}, nil, nil, nil)
 
 	route := &config.RouteConfig{
 		Path:         "/api/users",
@@ -63,7 +63,7 @@ func TestCircuitBreakerTransportDelaysSuccessUntilBodyEOF(t *testing.T) {
 		Timeout:             10 * time.Millisecond,
 		WindowSize:          time.Minute,
 		HalfOpenMaxRequests: 1,
-	})
+	}, nil)
 	target := "user-service-1:8081"
 	breaker := registry.Breaker(target)
 
@@ -83,6 +83,7 @@ func TestCircuitBreakerTransportDelaysSuccessUntilBodyEOF(t *testing.T) {
 			}, nil
 		}),
 		registry: registry,
+		tracer:   nil,
 	}
 
 	req, err := http.NewRequest(http.MethodGet, "http://"+target+"/health", nil)
@@ -116,7 +117,7 @@ func TestCircuitBreakerTransportReopensOnBodyReadError(t *testing.T) {
 		Timeout:             10 * time.Millisecond,
 		WindowSize:          time.Minute,
 		HalfOpenMaxRequests: 1,
-	})
+	}, nil)
 	target := "user-service-1:8081"
 	breaker := registry.Breaker(target)
 
@@ -136,6 +137,7 @@ func TestCircuitBreakerTransportReopensOnBodyReadError(t *testing.T) {
 			}, nil
 		}),
 		registry: registry,
+		tracer:   nil,
 	}
 
 	req, err := http.NewRequest(http.MethodGet, "http://"+target+"/health", nil)
@@ -167,7 +169,7 @@ func TestCircuitBreakerTransportIgnoresBodyReadErrorFromCallerCancellation(t *te
 		Timeout:             10 * time.Millisecond,
 		WindowSize:          time.Minute,
 		HalfOpenMaxRequests: 1,
-	})
+	}, nil)
 	target := "user-service-1:8081"
 	breaker := registry.Breaker(target)
 
@@ -187,6 +189,7 @@ func TestCircuitBreakerTransportIgnoresBodyReadErrorFromCallerCancellation(t *te
 			}, nil
 		}),
 		registry: registry,
+		tracer:   nil,
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -218,7 +221,7 @@ func TestCircuitBreakerTransportIgnoresBodyCloseErrorFromCallerDeadline(t *testi
 		Timeout:             10 * time.Millisecond,
 		WindowSize:          time.Minute,
 		HalfOpenMaxRequests: 1,
-	})
+	}, nil)
 	target := "user-service-1:8081"
 	breaker := registry.Breaker(target)
 
@@ -238,6 +241,7 @@ func TestCircuitBreakerTransportIgnoresBodyCloseErrorFromCallerDeadline(t *testi
 			}, nil
 		}),
 		registry: registry,
+		tracer:   nil,
 	}
 
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))

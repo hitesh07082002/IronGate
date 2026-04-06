@@ -3,6 +3,7 @@ package metrics
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -71,6 +72,24 @@ func TestObserveRequestCountsOnly5xxAsFailures(t *testing.T) {
 	}
 	if got := counterValueForService(t, families, MetricRequestFailuresTotal, "payment-service"); got != 1 {
 		t.Fatalf("expected only 5xx requests to count as failures, got %v", got)
+	}
+}
+
+func TestHandlerServesOpenMetricsExemplars(t *testing.T) {
+	registry := NewRegistry()
+	traceID := "0123456789abcdef0123456789abcdef"
+	registry.ObserveRequestWithExemplar("payment-service", http.StatusOK, 5*time.Millisecond, traceID)
+
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	req.Header.Set("Accept", "application/openmetrics-text")
+	recorder := httptest.NewRecorder()
+	registry.Handler().ServeHTTP(recorder, req)
+
+	if got := recorder.Header().Get("Content-Type"); !strings.Contains(got, "application/openmetrics-text") {
+		t.Fatalf("expected OpenMetrics content type, got %q", got)
+	}
+	if body := recorder.Body.String(); !strings.Contains(body, `traceID="`+traceID+`"`) {
+		t.Fatalf("expected exemplar traceID in metrics output, got %s", body)
 	}
 }
 

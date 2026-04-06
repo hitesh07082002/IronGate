@@ -126,6 +126,7 @@ func TestRetryTransportStopsWhenContextCancelsDuringBackoff(t *testing.T) {
 		},
 		rand.New(rand.NewSource(1)),
 		nil,
+		nil,
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -174,6 +175,7 @@ func TestRetryTransportPrefersContextCancellationOverOpenCircuitFailover(t *test
 		}),
 		sleepWithContext,
 		rand.New(rand.NewSource(1)),
+		nil,
 		nil,
 	)
 

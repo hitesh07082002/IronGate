@@ -13,9 +13,15 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
+
 	gatewaymetrics "github.com/hitesh07082002/irongate/internal/metrics"
 	"github.com/hitesh07082002/irongate/internal/ratelimit"
 	"github.com/hitesh07082002/irongate/internal/response"
+	"github.com/hitesh07082002/irongate/internal/telemetry"
 )
 
 const (
@@ -38,18 +44,25 @@ type RateLimiterOptions struct {
 }
 
 func RateLimiter(store ratelimit.Store, logger *slog.Logger, options RateLimiterOptions) Middleware {
-	return RateLimiterWithMetrics(store, logger, nil, options)
+	return RateLimiterWithMetrics(store, logger, nil, options, nil)
 }
 
-func RateLimiterWithMetrics(store ratelimit.Store, logger *slog.Logger, registry *gatewaymetrics.Registry, options RateLimiterOptions) Middleware {
+func RateLimiterWithMetrics(store ratelimit.Store, logger *slog.Logger, registry *gatewaymetrics.Registry, options RateLimiterOptions, tracer trace.Tracer) Middleware {
 	if logger == nil {
 		logger = slog.Default()
+	}
+	if tracer == nil {
+		tracer = noop.NewTracerProvider().Tracer("irongate.middleware.ratelimiter")
 	}
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			_, span := tracer.Start(req.Context(), "irongate.middleware.ratelimiter")
+			defer span.End()
+
 			route := GetRouteConfig(req)
 			if route == nil {
+				span.SetStatus(codes.Error, "route config missing")
 				response.WriteError(w, req, http.StatusInternalServerError, "route config missing")
 				return
 			}
@@ -64,10 +77,12 @@ func RateLimiterWithMetrics(store ratelimit.Store, logger *slog.Logger, registry
 				strategy = defaultRateLimitStrategy
 			}
 			if strategy != defaultRateLimitStrategy {
+				span.SetStatus(codes.Error, rateLimitStrategyUnsupportedMessage)
 				response.WriteError(w, req, http.StatusNotImplemented, rateLimitStrategyUnsupportedMessage)
 				return
 			}
 			if route.RateLimit.Requests <= 0 || route.RateLimit.Window <= 0 {
+				span.SetStatus(codes.Error, rateLimitConfigInvalidMessage)
 				logger.Error("rate limit configuration invalid; rejecting request",
 					"path", req.URL.Path,
 					"route", route.Path,
@@ -82,11 +97,14 @@ func RateLimiterWithMetrics(store ratelimit.Store, logger *slog.Logger, registry
 			clientKey := rateLimitClientKey(req, options.TrustedProxies)
 			requestID := strings.TrimSpace(req.Header.Get(HeaderRequestID))
 			if clientKey == "" || requestID == "" {
+				span.SetStatus(codes.Error, rateLimitMetadataMissingMessage)
 				response.WriteError(w, req, http.StatusInternalServerError, rateLimitMetadataMissingMessage)
 				return
 			}
+			span.SetAttributes(attribute.String("ratelimit.client_key", telemetry.HashAttr(clientKey)))
 
 			if store == nil {
+				span.SetAttributes(attribute.String("ratelimit.outcome", "fail_open"))
 				bucketKind, bucketKeyHash := rateLimitBucketLogFields(clientKey)
 				logger.Warn("rate limit store unavailable; allowing request",
 					"path", req.URL.Path,
@@ -112,6 +130,7 @@ func RateLimiterWithMetrics(store ratelimit.Store, logger *slog.Logger, registry
 			})
 			cancel()
 			if err != nil {
+				span.SetAttributes(attribute.String("ratelimit.outcome", "fail_open"))
 				bucketKind, bucketKeyHash := rateLimitBucketLogFields(clientKey)
 				logger.Warn("rate limit store unavailable; allowing request",
 					"path", req.URL.Path,
@@ -127,12 +146,21 @@ func RateLimiterWithMetrics(store ratelimit.Store, logger *slog.Logger, registry
 
 			setRateLimitHeaders(w.Header(), route.RateLimit.Requests, decision)
 			if !decision.Allowed {
+				span.SetAttributes(
+					attribute.String("ratelimit.outcome", "rejected"),
+					attribute.Int64("ratelimit.remaining", int64(decision.Remaining)),
+				)
+				span.SetStatus(codes.Error, rateLimitExceededMessage)
 				registry.IncRateLimitRejection(route.Service)
 				w.Header().Set(HeaderRetryAfter, strconv.FormatInt(retryAfterSeconds(now, decision.ResetAt), 10))
 				response.WriteError(w, req, http.StatusTooManyRequests, rateLimitExceededMessage)
 				return
 			}
 
+			span.SetAttributes(
+				attribute.String("ratelimit.outcome", "allowed"),
+				attribute.Int64("ratelimit.remaining", int64(decision.Remaining)),
+			)
 			next.ServeHTTP(w, req)
 		})
 	}

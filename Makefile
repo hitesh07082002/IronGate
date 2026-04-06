@@ -1,4 +1,4 @@
-.PHONY: all clean lint build test test-race coverage run docker-up docker-down load-test benchmark benchmark-scenario benchmark-render benchmark-test bootstrap-production deploy-production check-production
+.PHONY: all clean lint build test test-race coverage run docker-up docker-down load-test benchmark benchmark-scenario benchmark-render benchmark-test bootstrap-production deploy-production check-production observatory-up observatory-down observatory-logs
 
 GO_TEST_FLAGS ?=
 COVERAGE_MIN ?= 70
@@ -42,6 +42,21 @@ docker-up:
 docker-down:
 	@test -n "$(DOCKER_COMPOSE)" || (echo "Docker Compose is required"; exit 1)
 	$(DOCKER_COMPOSE) down
+
+observatory-up: ## Start full observatory stack (Tempo + OTel Collector + gateway)
+	@command -v docker >/dev/null 2>&1 || (echo "Docker is required for observatory-up"; exit 1)
+	@echo "Pre-pulling k6 image..."
+	docker pull grafana/k6:0.51.0
+	@test -n "$(DOCKER_COMPOSE)" || (echo "Docker Compose is required"; exit 1)
+	$(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.observatory.yml up -d --build
+
+observatory-down: ## Stop observatory stack
+	@test -n "$(DOCKER_COMPOSE)" || (echo "Docker Compose is required"; exit 1)
+	$(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.observatory.yml down
+
+observatory-logs: ## Tail observatory container logs
+	@test -n "$(DOCKER_COMPOSE)" || (echo "Docker Compose is required"; exit 1)
+	$(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.observatory.yml logs -f
 
 load-test:
 	@test -n "$(K6_CMD)" || (echo "k6 is required for load-test; run 'mise install' in the repo root first"; exit 1)

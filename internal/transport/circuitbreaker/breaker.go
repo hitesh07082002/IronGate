@@ -31,6 +31,8 @@ type Breaker struct {
 	config config.CBConfig
 	clock  timeSource
 
+	stateChangeCallback func(State)
+
 	state             State
 	openUntil         time.Time
 	failures          []time.Time
@@ -59,6 +61,9 @@ func (b *Breaker) Allow() bool {
 		b.state = StateHalfOpen
 		b.halfOpenSuccesses = 0
 		b.halfOpenInFlight = 0
+		if b.stateChangeCallback != nil {
+			b.stateChangeCallback(StateHalfOpen)
+		}
 	}
 
 	switch b.state {
@@ -148,13 +153,14 @@ func (b *Breaker) cloneWithConfig(cfg config.CBConfig) *Breaker {
 	defer b.mu.Unlock()
 
 	clone := &Breaker{
-		config:            normalizeConfig(cfg),
-		clock:             b.clock,
-		state:             b.state,
-		openUntil:         b.openUntil,
-		failures:          append([]time.Time(nil), b.failures...),
-		halfOpenSuccesses: b.halfOpenSuccesses,
-		halfOpenInFlight:  b.halfOpenInFlight,
+		config:              normalizeConfig(cfg),
+		clock:               b.clock,
+		stateChangeCallback: b.stateChangeCallback,
+		state:               b.state,
+		openUntil:           b.openUntil,
+		failures:            append([]time.Time(nil), b.failures...),
+		halfOpenSuccesses:   b.halfOpenSuccesses,
+		halfOpenInFlight:    b.halfOpenInFlight,
 	}
 	clone.reconcileLocked(b.config)
 	return clone
@@ -166,6 +172,9 @@ func (b *Breaker) openLocked(now time.Time) {
 	b.failures = nil
 	b.halfOpenSuccesses = 0
 	b.halfOpenInFlight = 0
+	if b.stateChangeCallback != nil {
+		b.stateChangeCallback(StateOpen)
+	}
 }
 
 func (b *Breaker) closeLocked() {
@@ -174,6 +183,23 @@ func (b *Breaker) closeLocked() {
 	b.failures = nil
 	b.halfOpenSuccesses = 0
 	b.halfOpenInFlight = 0
+	if b.stateChangeCallback != nil {
+		b.stateChangeCallback(StateClosed)
+	}
+}
+
+func (b *Breaker) ForceClose() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	b.state = StateClosed
+	b.openUntil = time.Time{}
+	b.failures = nil
+	b.halfOpenSuccesses = 0
+	b.halfOpenInFlight = 0
+	if b.stateChangeCallback != nil {
+		b.stateChangeCallback(StateClosed)
+	}
 }
 
 func (b *Breaker) pruneFailuresLocked(now time.Time) {
@@ -234,4 +260,16 @@ func normalizeConfig(cfg config.CBConfig) config.CBConfig {
 		cfg.HalfOpenMaxRequests = 3
 	}
 	return cfg
+}
+
+func (b *Breaker) setStateChangeCallback(callback func(State)) State {
+	if b == nil {
+		return StateClosed
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	b.stateChangeCallback = callback
+	return b.state
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/hmac"
 	"errors"
 	"flag"
 	"fmt"
@@ -14,10 +15,14 @@ import (
 	"syscall"
 	"time"
 
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/hitesh07082002/irongate/internal/config"
 	gatewaymetrics "github.com/hitesh07082002/irongate/internal/metrics"
 	"github.com/hitesh07082002/irongate/internal/ratelimit"
 	gwruntime "github.com/hitesh07082002/irongate/internal/runtime"
+	"github.com/hitesh07082002/irongate/internal/telemetry"
+	"github.com/hitesh07082002/irongate/internal/transport/circuitbreaker"
 )
 
 const (
@@ -29,6 +34,7 @@ type buildHandlerOptions struct {
 	rateLimitStore  ratelimit.Store
 	trustedProxies  []netip.Prefix
 	metricsRegistry *gatewaymetrics.Registry
+	tracerProvider  trace.TracerProvider
 }
 
 func main() {
@@ -58,13 +64,45 @@ func main() {
 		os.Exit(1)
 	}
 
+	tp, shutdownTracing := telemetry.Init(context.Background(), "irongate", "phase9")
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = shutdownTracing(shutdownCtx)
+	}()
+
 	manager, err := newRuntimeManager(cfg, logger, buildHandlerOptions{
 		trustedProxies: trustedProxies,
+		tracerProvider: tp,
 	})
 	if err != nil {
 		slog.Error("failed to build runtime manager", "error", err)
 		os.Exit(1)
 	}
+
+	adminToken := os.Getenv("ADMIN_TOKEN")
+	cbGetter := func() *circuitbreaker.Registry {
+		snapshot := manager.Current()
+		if snapshot == nil {
+			return nil
+		}
+
+		return snapshot.CircuitBreaker
+	}
+	adminServer := &http.Server{
+		Addr:         ":9090",
+		Handler:      newAdminHandler(adminToken, cbGetter),
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+	}
+	go func() {
+		if err := adminServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			slog.Error("admin server stopped", "error", err)
+		}
+	}()
+	defer func() {
+		_ = adminServer.Shutdown(context.Background())
+	}()
 
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),
@@ -112,6 +150,10 @@ func main() {
 
 	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), shutdownTimeout(cfg.Server.WriteTimeout))
 	defer cancelShutdown()
+	if err := adminServer.Shutdown(shutdownCtx); err != nil {
+		slog.Error("admin graceful shutdown failed", "error", err)
+		os.Exit(1)
+	}
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		slog.Error("graceful shutdown failed", "error", err)
 		os.Exit(1)
@@ -147,6 +189,7 @@ func newRuntimeManager(cfg *config.Config, logger *slog.Logger, options buildHan
 		Logger:          logger,
 		TrustedProxies:  options.trustedProxies,
 		MetricsRegistry: options.metricsRegistry,
+		TracerProvider:  options.tracerProvider,
 		RateLimitStoreFactory: func(next *config.Config, previous *gwruntime.Snapshot) ratelimit.Store {
 			if options.rateLimitStore != nil {
 				return options.rateLimitStore
@@ -226,4 +269,29 @@ func resolveConfigPath(flagValue string) string {
 	}
 
 	return "configs/gateway.yaml"
+}
+
+func newAdminHandler(adminToken string, cbGetter func() *circuitbreaker.Registry) http.Handler {
+	adminMux := http.NewServeMux()
+	adminMux.HandleFunc("POST /admin/circuit-breakers/reset", func(w http.ResponseWriter, r *http.Request) {
+		auth := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if adminToken == "" || !hmac.Equal([]byte(strings.TrimSpace(auth)), []byte(adminToken)) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			fmt.Fprint(w, `{"error":"unauthorized","code":401}`)
+			return
+		}
+
+		n := 0
+		if cbGetter != nil {
+			if registry := cbGetter(); registry != nil {
+				n = registry.Reset()
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"reset":true,"targets_cleared":%d}`, n)
+	})
+
+	return adminMux
 }

@@ -11,6 +11,13 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
+
 	"github.com/hitesh07082002/irongate/internal/config"
 	gatewaymetrics "github.com/hitesh07082002/irongate/internal/metrics"
 	"github.com/hitesh07082002/irongate/internal/middleware"
@@ -21,6 +28,7 @@ import (
 type LoadBalancerTransport struct {
 	next     http.RoundTripper
 	registry *balancerRegistry
+	tracer   trace.Tracer
 }
 
 type CircuitBreakerTransport struct {
@@ -28,28 +36,44 @@ type CircuitBreakerTransport struct {
 	registry       *circuitbreaker.Registry
 	metrics        *gatewaymetrics.Registry
 	serviceTargets map[string][]config.Target
+	tracer         trace.Tracer
 }
 
-func NewResilientTransport(base http.RoundTripper, routes []config.RouteConfig, breakerConfig config.CBConfig, registry *gatewaymetrics.Registry, breakers *circuitbreaker.Registry) http.RoundTripper {
+type UpstreamTransport struct {
+	next   http.RoundTripper
+	tracer trace.Tracer
+}
+
+func NewResilientTransport(base http.RoundTripper, routes []config.RouteConfig, breakerConfig config.CBConfig, registry *gatewaymetrics.Registry, breakers *circuitbreaker.Registry, tracer trace.Tracer) http.RoundTripper {
 	if base == nil {
 		base = NewBaseTransport()
 	}
 	if breakers == nil {
-		breakers = circuitbreaker.NewRegistry(breakerConfig)
+		if registry != nil {
+			breakers = circuitbreaker.NewRegistry(breakerConfig, registry.RegisterCollector)
+		} else {
+			breakers = circuitbreaker.NewRegistry(breakerConfig, nil)
+		}
 	}
 
+	upstreamTransport := &UpstreamTransport{
+		next:   base,
+		tracer: tracer,
+	}
 	breakerTransport := &CircuitBreakerTransport{
-		next:           base,
+		next:           upstreamTransport,
 		registry:       breakers,
 		metrics:        registry,
 		serviceTargets: serviceTargetSets(routes),
+		tracer:         tracer,
 	}
 	loadBalancing := &LoadBalancerTransport{
 		next:     breakerTransport,
 		registry: &balancerRegistry{},
+		tracer:   tracer,
 	}
 
-	return NewRetryTransport(loadBalancing, registry)
+	return NewRetryTransport(loadBalancing, registry, tracer)
 }
 
 func NewBaseTransport() http.RoundTripper {
@@ -62,16 +86,26 @@ func NewBaseTransport() http.RoundTripper {
 }
 
 func (lt *LoadBalancerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	_, span := transportTracerOrNoop(lt.tracer, "irongate.transport").Start(req.Context(), "irongate.transport.loadbalancer")
+	defer span.End()
+
 	route := middleware.GetRouteConfig(req)
 	if route == nil {
+		span.SetStatus(codes.Error, "route config missing from request context")
 		return nil, fmt.Errorf("route config missing from request context")
 	}
 	if len(route.Targets) == 0 {
+		span.SetStatus(codes.Error, loadbalancer.ErrNoTargets.Error())
 		return nil, loadbalancer.ErrNoTargets
 	}
 
+	strategy := route.LoadBalancer
+	if strings.TrimSpace(strategy) == "" {
+		strategy = "round_robin"
+	}
 	balancer, err := lt.registry.balancerFor(route)
 	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
 
@@ -79,8 +113,13 @@ func (lt *LoadBalancerTransport) RoundTrip(req *http.Request) (*http.Response, e
 		ExcludeTargets: getAttemptMetadata(req).excludedTargets(),
 	})
 	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
+	span.SetAttributes(
+		attribute.String("lb.strategy", strategy),
+		attribute.String("lb.selected", targetAddress(selection.Target)),
+	)
 
 	outbound := req.Clone(req.Context())
 	outbound.URL.Scheme = "http"
@@ -123,6 +162,9 @@ func (lt *LoadBalancerTransport) RoundTrip(req *http.Request) (*http.Response, e
 }
 
 func (ct *CircuitBreakerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	_, span := transportTracerOrNoop(ct.tracer, "irongate.transport").Start(req.Context(), "irongate.transport.circuitbreaker")
+	defer span.End()
+
 	service := routeService(req)
 	routeTargets := ct.targetsForService(service, routeTargets(req))
 	target := getAttemptMetadata(req).target
@@ -130,13 +172,20 @@ func (ct *CircuitBreakerTransport) RoundTrip(req *http.Request) (*http.Response,
 		target = req.URL.Host
 	}
 	if target == "" {
+		span.SetStatus(codes.Error, "upstream target missing from request")
 		return nil, fmt.Errorf("upstream target missing from request")
 	}
 
 	breaker := ct.registry.Breaker(target)
 	allowed := breaker.Allow()
+	span.SetAttributes(
+		attribute.String("cb.target", target),
+		attribute.String("cb.state", circuitStateAttribute(breaker.State())),
+	)
 	ct.syncOpenCircuitGauge(service, routeTargets, target)
 	if !allowed {
+		span.AddEvent("circuit_rejected")
+		span.SetStatus(codes.Error, ErrCircuitOpen.Error())
 		return nil, ErrCircuitOpen
 	}
 
@@ -144,6 +193,7 @@ func (ct *CircuitBreakerTransport) RoundTrip(req *http.Request) (*http.Response,
 	resp, err := ct.next.RoundTrip(req)
 	ct.metrics.ObserveUpstreamDuration(service, time.Since(start))
 	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
 		if countsTowardCircuit(req.Context(), err) {
 			ct.recordBreakerFailure(breaker, service, routeTargets, target)
 		} else {
@@ -152,11 +202,13 @@ func (ct *CircuitBreakerTransport) RoundTrip(req *http.Request) (*http.Response,
 		return nil, err
 	}
 	if resp == nil {
+		span.SetStatus(codes.Error, "upstream transport returned nil response")
 		ct.recordBreakerFailure(breaker, service, routeTargets, target)
 		return nil, fmt.Errorf("upstream transport returned nil response")
 	}
 
 	if resp.StatusCode >= http.StatusInternalServerError {
+		span.SetStatus(codes.Error, http.StatusText(resp.StatusCode))
 		ct.recordBreakerFailure(breaker, service, routeTargets, target)
 		return resp, nil
 	}
@@ -178,6 +230,41 @@ func (ct *CircuitBreakerTransport) RoundTrip(req *http.Request) (*http.Response,
 		ignore: func() {
 			ct.recordBreakerIgnored(breaker, service, routeTargets, target)
 		},
+	}
+
+	return resp, nil
+}
+
+func (ut *UpstreamTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	ctx, span := transportTracerOrNoop(ut.tracer, "irongate.transport").Start(req.Context(), "irongate.transport.upstream")
+	defer span.End()
+
+	if req.Header == nil {
+		req.Header = make(http.Header)
+	}
+	req = req.Clone(ctx)
+	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))
+
+	target := req.URL.Host
+	start := time.Now()
+	resp, err := ut.next.RoundTrip(req)
+	durationMs := float64(time.Since(start).Milliseconds())
+	span.SetAttributes(
+		attribute.String("upstream.target", target),
+		attribute.Float64("upstream.duration_ms", durationMs),
+	)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+	if resp != nil {
+		span.SetAttributes(attribute.Int("upstream.status", resp.StatusCode))
+		if resp.StatusCode >= http.StatusInternalServerError {
+			span.SetStatus(codes.Error, http.StatusText(resp.StatusCode))
+		}
+		if resp.Request == nil {
+			resp.Request = req
+		}
 	}
 
 	return resp, nil
@@ -371,6 +458,25 @@ func serviceTargetSets(routes []config.RouteConfig) map[string][]config.Target {
 	}
 
 	return serviceTargets
+}
+
+func circuitStateAttribute(state circuitbreaker.State) string {
+	switch state {
+	case circuitbreaker.StateOpen:
+		return "open"
+	case circuitbreaker.StateHalfOpen:
+		return "half_open"
+	default:
+		return "closed"
+	}
+}
+
+func transportTracerOrNoop(tracer trace.Tracer, name string) trace.Tracer {
+	if tracer == nil {
+		return noop.NewTracerProvider().Tracer(name)
+	}
+
+	return tracer
 }
 
 type releaseOnReadCloser struct {
