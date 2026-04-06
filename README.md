@@ -42,7 +42,7 @@ Deeper implementation notes live in [`ARCHITECTURE.md`](./ARCHITECTURE.md), [`DE
 ./demo.sh
 ```
 
-`demo.sh` bootstraps the local stack, waits for `/ready`, issues a login token, exercises protected user, order, and payment routes, samples `/metrics`, and finishes with the k6 smoke test.
+`demo.sh` bootstraps the local stack, waits for `/ready`, issues a login token, exercises protected user, order, and payment routes, and samples `/metrics`. If `k6` is installed it also finishes with the smoke test; otherwise it skips that optional step and prints the exact command to run later.
 
 ### Manual stack
 
@@ -75,7 +75,7 @@ mise x k6@1.7.1 -- make benchmark
 
 ## Demo
 
-`./demo.sh` is the recommended walkthrough. It brings up the stack, waits for readiness, issues a login token, exercises protected routes, samples `/metrics`, and finishes with the smoke benchmark.
+`./demo.sh` is the recommended walkthrough. It brings up the stack, waits for readiness, issues a login token, exercises protected routes, and samples `/metrics`. If `k6` is installed, it also runs the smoke benchmark; if not, the script still succeeds and prints the follow-up command.
 
 For a shareable demo asset, use [`scripts/capture-demo.sh`](./scripts/capture-demo.sh). Generated transcripts always land under [`artifacts/demo/`](./artifacts/demo/README.md), and the built-in MP4 path is wired for macOS `ffmpeg`/`avfoundation`; large binaries are intentionally not committed.
 

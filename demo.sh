@@ -71,8 +71,13 @@ METRICS_SAMPLE="$(curl -fsS http://127.0.0.1:8080/metrics)"
 printf '%s\n' "${METRICS_SAMPLE}" | sed -n '1,10p'
 
 echo
-echo "Running k6 smoke test..."
-IRONGATE_BASE_URL="http://127.0.0.1:8080" make load-test
+if command -v k6 >/dev/null 2>&1; then
+  echo "Running k6 smoke test..."
+  IRONGATE_BASE_URL="http://127.0.0.1:8080" make load-test
+else
+  echo "Skipping k6 smoke test because k6 is not installed."
+  echo "Run 'mise x k6@1.7.1 -- make load-test' later for the optional benchmark smoke."
+fi
 
 echo
 echo "Demo completed successfully."
