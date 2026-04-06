@@ -25,20 +25,22 @@ fi
 
 echo "Deploying ${release_id} to ${DEPLOY_HOST}..."
 
-git -C "${REPO_ROOT}" archive --format=tar HEAD | ssh -o StrictHostKeyChecking=accept-new "${DEPLOY_HOST}" \
-    "RELEASE_ID=$(printf '%q' "${release_id}") REMOTE_APP_ROOT=$(printf '%q' "${REMOTE_APP_ROOT}") REMOTE_RELEASE_ROOT=$(printf '%q' "${REMOTE_RELEASE_ROOT}") REMOTE_ENV_FILE=$(printf '%q' "${REMOTE_ENV_FILE}") bash -s" <<'EOF'
+remote_cmd=$(
+    cat <<EOF
 set -euo pipefail
-
-release_dir="${REMOTE_RELEASE_ROOT}/${RELEASE_ID}"
-mkdir -p "${release_dir}"
-tar -xf - -C "${release_dir}"
+release_dir="${REMOTE_RELEASE_ROOT}/${release_id}"
+archive_path="/tmp/${release_id}.tar"
+mkdir -p "\${release_dir}"
+cat >"\${archive_path}"
+tar -xf "\${archive_path}" -C "\${release_dir}"
+rm -f "\${archive_path}"
 
 if [ ! -f "${REMOTE_ENV_FILE}" ]; then
     echo "Missing ${REMOTE_ENV_FILE}. Run ./scripts/bootstrap-production-host.sh first." >&2
     exit 1
 fi
 
-cd "${release_dir}"
+cd "\${release_dir}"
 docker compose \
     --project-name irongate \
     --env-file "${REMOTE_ENV_FILE}" \
@@ -46,9 +48,9 @@ docker compose \
     -f deploy/docker-compose.prod.yml \
     up -d --build --remove-orphans
 
-for attempt in $(seq 1 60); do
+for attempt in \$(seq 1 60); do
     if curl -fsS http://127.0.0.1:8080/ready >/dev/null 2>&1; then
-        ln -sfn "${release_dir}" "${REMOTE_APP_ROOT}/current"
+        ln -sfn "\${release_dir}" "${REMOTE_APP_ROOT}/current"
         echo "Remote readiness check passed."
         exit 0
     fi
@@ -58,6 +60,9 @@ done
 echo "Gateway did not become ready on the droplet within 300 seconds." >&2
 exit 1
 EOF
+)
+
+git -C "${REPO_ROOT}" archive --format=tar HEAD | ssh -o StrictHostKeyChecking=accept-new "${DEPLOY_HOST}" "bash -lc $(printf '%q' "${remote_cmd}")"
 
 echo "Remote deploy finished. Verifying ${BASE_URL}..."
 BASE_URL="${BASE_URL}" "${SCRIPT_DIR}/check-production-health.sh"
