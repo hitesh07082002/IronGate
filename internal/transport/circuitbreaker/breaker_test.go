@@ -418,6 +418,44 @@ func TestRegistryCloneWithConfigUsesFreshCollector(t *testing.T) {
 	}
 }
 
+func TestRegistryBreakerForServiceReplacesRawTargetSeries(t *testing.T) {
+	metricsRegistry := metrics.NewRegistry()
+	registry := NewRegistry(config.CBConfig{FailureThreshold: 1}, metricsRegistry.RegisterCollector)
+
+	breaker := registry.Breaker("user-service-1:8081")
+	if !breaker.Allow() {
+		t.Fatal("expected initial breaker to allow request")
+	}
+	breaker.RecordFailure()
+
+	if !circuitStateGaugeHasService(t, metricsRegistry, "user-service-1:8081") {
+		t.Fatal("expected raw target series before service mapping is known")
+	}
+
+	serviceBreaker := registry.BreakerForService("user-service-1:8081", "user-service")
+	if serviceBreaker != breaker {
+		t.Fatal("expected service lookup to reuse the cached breaker")
+	}
+	if got := circuitStateGaugeValueForService(t, metricsRegistry, "user-service"); got != 1 {
+		t.Fatalf("expected remapped service series to reflect the open breaker, got %v", got)
+	}
+	if circuitStateGaugeHasService(t, metricsRegistry, "user-service-1:8081") {
+		t.Fatal("expected raw target series to be removed after remapping to the service label")
+	}
+}
+
+func TestRegistryStateDoesNotCreateBreakers(t *testing.T) {
+	metricsRegistry := metrics.NewRegistry()
+	registry := NewRegistry(config.CBConfig{FailureThreshold: 1}, metricsRegistry.RegisterCollector)
+
+	if state, ok := registry.State("user-service-1:8081"); ok || state != StateClosed {
+		t.Fatalf("expected missing breaker state lookup to return closed,false, got %s,%t", state, ok)
+	}
+	if circuitStateGaugeHasService(t, metricsRegistry, "user-service-1:8081") {
+		t.Fatal("expected state lookups to avoid creating a raw target gauge series")
+	}
+}
+
 type fakeClock struct {
 	mu  sync.Mutex
 	now time.Time
@@ -476,6 +514,28 @@ func circuitStateGaugeValueForService(t *testing.T, registry *metrics.Registry, 
 
 	t.Fatalf("metric %s for service %s not found", metricCircuitState, service)
 	return 0
+}
+
+func circuitStateGaugeHasService(t *testing.T, registry *metrics.Registry, service string) bool {
+	t.Helper()
+
+	families, err := registry.Gather()
+	if err != nil {
+		t.Fatalf("gather metrics: %v", err)
+	}
+
+	for _, family := range families {
+		if family.GetName() != metricCircuitState {
+			continue
+		}
+		for _, metric := range family.Metric {
+			if labelValue(metric, "service") == service {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 func labelValue(metric *dto.Metric, labelName string) string {

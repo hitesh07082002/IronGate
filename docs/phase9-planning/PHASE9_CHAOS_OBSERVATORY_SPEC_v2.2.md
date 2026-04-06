@@ -159,10 +159,10 @@ No routing, auth, rate-limit, retry, or circuit-breaker *semantics* change.
    when `OTEL_EXPORTER_OTLP_ENDPOINT` env var is set; otherwise a no-op tracer is used
    and the gateway is identical to Phase 8.
 
-2. **`gateway_circuit_state{target}` Prometheus gauge** — new gauge in the circuit
+2. **`gateway_circuit_state{service}` Prometheus gauge** — new gauge in the circuit
    breaker registry; values 0=CLOSED, 1=OPEN, 2=HALF_OPEN; updated on every state
-   transition. Required by the Circuit State Timeline panel in the Observatory UI (§9.4)
-   and Dashboard 2 (§10).
+   transition as the service-level aggregate of per-target breaker state. Required by the
+   Circuit State Timeline panel in the Observatory UI (§9.4) and Dashboard 2 (§10).
 
 3. **`ObserveWithExemplar` on `gateway_request_duration_seconds`** — the existing
    histogram observation in the tracing middleware is conditionally replaced with
@@ -556,7 +556,7 @@ reset_actions:
 - Error rate: flat zero
 - Latency p99: < 10ms (gateway overhead only, echo backends)
 - X-Served-By alternating between instances in event feed
-- `gateway_circuit_state` = 0 for all targets
+- `gateway_circuit_state` = 0 for all services
 
 ---
 
@@ -602,7 +602,7 @@ reset_actions:
 **Chaos sequence:** T+10s: `service_down`. Reset restarts it.
 **Expected signals** (given default gateway.yaml CB thresholds):
 - X-Served-By stops showing dead target within ~10s of chaos action
-- `gateway_circuit_state{target="user-service-2:8092"}` flips to 1 (OPEN) — **given default YAML**
+- `gateway_circuit_state{service="user-service"}` flips to 1 (OPEN) — **given default YAML**
 - Upstream picks shift 100% to healthy instance
 - Client error rate: brief 503 window before CB opens; < 1% after
 **Traces to show:** (1) Retry waterfall — attempt 1 hits dead target, attempt 2 hits live target. (2) Post-CB-open — `cb.state=open`, immediate routing to live target, no retry needed.
@@ -639,7 +639,7 @@ reset_actions:
 - Dead service restarted only during reset, not during the run
 **Expected signals — in order:**
 1. Event feed: green → red `circuit OPEN` → red `503 circuit open` events (5% sampled) → yellow `half-open probe sent` → green `circuit CLOSED`
-2. `gateway_circuit_state{target="user-service-2:8092"}` timeline: 0 → 1 → 2 → 0
+2. `gateway_circuit_state{service="user-service"}` timeline: 0 → 1 → 2 → 0
 3. Error rate graph: spike during OPEN; drops to zero on CLOSED
 4. Exemplar dot on latency spike → click → Tempo trace with `cb.state=open`
 
@@ -664,9 +664,9 @@ Zero upstream span. The circuit breaker worked.
 **Slider:** Target service: user / order / payment. Duration 60s / 120s.
 **Chaos sequence:** T+5s: kill instance 1. T+20s: kill instance 2. Reset restarts both.
 **Expected signals:**
-- First 20s: `gateway_circuit_state` for instance 1 = 1; traffic shifts to instance 2
-- After T+20s: `gateway_circuit_state` for instance 2 = 1; SSE shows `all_targets_exhausted`; 100% 503 responses
-- On reset: both `gateway_circuit_state` gauges return to 0; error rate returns to zero
+- First 20s: `gateway_circuit_state{service="user-service"}` = 1; traffic shifts to the surviving instance
+- After T+20s: the service aggregate remains 1; SSE shows `all_targets_exhausted`; 100% 503 responses
+- On reset: the `gateway_circuit_state` gauge returns to 0; error rate returns to zero
 
 ---
 
@@ -1100,7 +1100,7 @@ Four Recharts panels (2s Prometheus poll via Observatory proxy), each ~140px tal
 
 *Panel 2 — Latency Percentiles:* `LineChart` — p50 (green), p95 (yellow), p99 (red). Y: ms. X: last 2 minutes.
 
-*Panel 3 — Circuit Breaker States:* Custom timeline. One row per upstream target (4 rows). Driven by `gateway_circuit_state{target=~".+"}` range query. Values: 0=green (CLOSED), 1=red (OPEN), 2=yellow (HALF-OPEN). X: last 2 minutes. This panel is the most visually striking during S6.
+*Panel 3 — Circuit Breaker States:* Custom timeline. One row per service. Driven by `gateway_circuit_state{service=~".+"}` range query. Values: 0=green (CLOSED), 1=red (OPEN), 2=yellow (HALF-OPEN). X: last 2 minutes. This panel is the most visually striking during S6.
 
 *Panel 4 — Rate Limit Activity:* Stacked `BarChart` — allowed (green base) + rejected (red top). Y: req/s. X: last 2 minutes.
 
@@ -1140,7 +1140,7 @@ Four dashboards provisioned as JSON in `grafana/dashboards/`. Zero manual setup.
 - Row 3: Requests by service (stacked area), by status class (2xx/4xx/5xx stacked)
 
 **Dashboard 2 — Resilience** *(shipped in M5)*
-- Row 1: `gateway_circuit_state` per target — state timeline using value mapping (0=Closed/green, 1=Open/red, 2=Half-Open/yellow); circuit opens total; open circuits gauge
+- Row 1: `gateway_circuit_state` per service — state timeline using value mapping (0=Closed/green, 1=Open/red, 2=Half-Open/yellow); circuit opens total; open circuits gauge
 - Row 2: Retries total by service, retry exhaustions, retry delay histogram
 - Row 3: Upstream picks per target (stacked bar — shows LB distribution shift during S4/S6/S7)
 
@@ -1150,7 +1150,7 @@ Four dashboards provisioned as JSON in `grafana/dashboards/`. Zero manual setup.
 - Row 3: Top rate-limited route paths (bounded: `route.path` has at most 10 values)
 
 **Dashboard 4 — Scenario View (screen-sharing mode)** *(shipped in M5)*
-- Four large panels: RPS + Error Rate, Circuit States (all targets), Retry Activity, Rate Limit Activity
+- Four large panels: RPS + Error Rate, Circuit States (all services), Retry Activity, Rate Limit Activity
 - Grafana variables: `$scenario` (freetext annotation), `$time_range` (5m / 15m / 1h)
 - Font sizes and contrast optimised for screen sharing at 1080p
 
@@ -1280,7 +1280,7 @@ Steps:
 1. `internal/telemetry/telemetry.go` — `Init()` with no-op fallback; 5s OTLP connection timeout; 10s export timeout; log once on first failure, not on every failed export
 2. Outer chain spans (tracing, router, auth, ratelimiter) with all §5.4 attributes
 3. Inner chain spans (retry, loadbalancer, circuitbreaker, upstream) with all §5.4 attributes
-4. `gateway_circuit_state{target}` gauge + `Registry.Reset()` + admin server on `:9090`
+4. `gateway_circuit_state{service}` gauge + `Registry.Reset()` + admin server on `:9090`
 5. `ObserveWithExemplar` on `gateway_request_duration_seconds` (§6.2 Steps 1–2)
 6. `docker-compose.observatory.yml` skeleton: Tempo + OTel Collector; gateway env vars; pinned image tags
 7. Grafana: `tempo.yaml` datasource (`uid: tempo`); `prometheus.yaml` with `exemplarTraceIdDestinations`; `grafana.ini` with `allow_embedding = true`
@@ -1700,7 +1700,7 @@ All decisions are resolved and incorporated into the spec body. Do not re-open.
 |----|----------|--------------|
 | B1 | Pre-pull `grafana/k6:<pinned-tag>` in `make observatory-up` | §8.8, §14 |
 | B2 | `allow_embedding = true` + `content_security_policy = false` in `grafana.ini`; verify cross-subdomain iframe before M4 Traces tab | §11.6, §12 M4 |
-| B3 | Add `gateway_circuit_state{target}` gauge (0/1/2); implement in M1 | §3.3, §8.7, §10 Dashboard 2 |
+| B3 | Add `gateway_circuit_state{service}` gauge (0/1/2, service-level aggregate); implement in M1 | §3.3, §8.7, §10 Dashboard 2 |
 | B4 | Observatory mints its demo JWT via `POST http://gateway:8080/api/users/login`; 23h refresh; fallback to `DEMO_JWT` | §8.8 |
 | B5 | Docker SDK `ContainerLogs(Follow: true)` + `stdcopy.StdCopy()`; one JSON object per line | §8.4 |
 

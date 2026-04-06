@@ -275,7 +275,10 @@ func collectTransportSpanAttributes(spans []sdktrace.ReadOnlySpan, name, key str
 		if span.Name() != name {
 			continue
 		}
-		value, _ := transportSpanAttribute(span.Attributes(), key).(string)
+		value, ok := transportSpanAttribute(span.Attributes(), key).(string)
+		if !ok || value == "" {
+			panic("missing string attribute " + key + " on span " + span.Name())
+		}
 		values = append(values, value)
 	}
 	return values

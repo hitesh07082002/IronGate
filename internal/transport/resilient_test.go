@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -278,6 +280,118 @@ func TestCountsTowardCircuitIgnoresCallerDeadlineExceeded(t *testing.T) {
 	}
 	if !countsTowardCircuit(context.Background(), context.DeadlineExceeded) {
 		t.Fatal("expected upstream deadline to count toward the circuit breaker")
+	}
+}
+
+func TestReleaseOnReadCloserReadReleasesOnceAtEOF(t *testing.T) {
+	var releases atomic.Int32
+	body := &releaseOnReadCloser{
+		ReadCloser: io.NopCloser(strings.NewReader("ok")),
+		release: func() {
+			releases.Add(1)
+		},
+	}
+
+	if _, err := io.ReadAll(body); err != nil {
+		t.Fatalf("read release-on-read body: %v", err)
+	}
+	if err := body.Close(); err != nil {
+		t.Fatalf("close release-on-read body: %v", err)
+	}
+	if got := releases.Load(); got != 1 {
+		t.Fatalf("expected release callback once, got %d", got)
+	}
+}
+
+func TestResilientTransportConcurrentStateMachine(t *testing.T) {
+	route := &config.RouteConfig{
+		Path:         "/api/orders",
+		Service:      "order-service",
+		LoadBalancer: "round_robin",
+		Retry: config.RetryConfig{
+			MaxAttempts: 2,
+			BaseDelay:   time.Millisecond,
+			MaxDelay:    time.Millisecond,
+			Jitter:      "none",
+		},
+		Targets: []config.Target{
+			{Host: "order-service-1", Port: 8081},
+			{Host: "order-service-2", Port: 8082},
+		},
+	}
+	breakerConfig := config.CBConfig{
+		FailureThreshold:    1,
+		SuccessThreshold:    1,
+		Timeout:             2 * time.Millisecond,
+		WindowSize:          time.Second,
+		HalfOpenMaxRequests: 1,
+	}
+	breakers := circuitbreaker.NewRegistry(breakerConfig, nil)
+
+	var firstTargetHits atomic.Int32
+	var secondTargetHits atomic.Int32
+	transport := NewResilientTransport(roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Host {
+		case "order-service-1:8081":
+			firstTargetHits.Add(1)
+			return &http.Response{
+				StatusCode: http.StatusServiceUnavailable,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader("fail")),
+				Request:    req,
+			}, nil
+		case "order-service-2:8082":
+			secondTargetHits.Add(1)
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader("ok")),
+				Request:    req,
+			}, nil
+		default:
+			t.Fatalf("unexpected target %q", req.URL.Host)
+			return nil, nil
+		}
+	}), []config.RouteConfig{*route}, breakerConfig, nil, breakers, nil)
+
+	errs := make(chan error, 100)
+	var wg sync.WaitGroup
+	for range 100 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			req, err := http.NewRequest(http.MethodGet, "http://gateway"+route.Path, nil)
+			if err != nil {
+				errs <- err
+				return
+			}
+			req = req.WithContext(context.WithValue(req.Context(), middleware.RouteConfigKey, route))
+
+			resp, err := transport.RoundTrip(req)
+			if err != nil {
+				errs <- err
+				return
+			}
+			defer resp.Body.Close()
+			if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+				errs <- err
+			}
+			if resp.StatusCode != http.StatusOK {
+				errs <- errors.New("expected healthy target to serve concurrent request")
+			}
+		}()
+	}
+
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("unexpected concurrent transport error: %v", err)
+		}
+	}
+	if firstTargetHits.Load() == 0 || secondTargetHits.Load() == 0 {
+		t.Fatalf("expected concurrent transport to exercise both targets, got first=%d second=%d", firstTargetHits.Load(), secondTargetHits.Load())
 	}
 }
 

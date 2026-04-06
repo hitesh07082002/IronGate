@@ -164,7 +164,7 @@ ADMIN_TOKEN=admin-token \
 make observatory-up
 ```
 
-That overlay adds Tempo plus the OTel Collector on top of the normal Docker stack so you can verify live traces and Prometheus exemplars. Tear it down with:
+That overlay adds Tempo plus the OTel Collector on top of the normal Docker stack so you can verify live traces and Prometheus exemplars. It also enables the bearer-protected admin reset plane inside Docker via `ADMIN_TOKEN` without publishing a host admin port. Tear it down with:
 
 ```bash
 JWT_SECRET=test-secret \

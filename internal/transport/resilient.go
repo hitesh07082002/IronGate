@@ -364,11 +364,15 @@ func (ct *CircuitBreakerTransport) syncOpenCircuitGauge(service string, targets 
 }
 
 func (ct *CircuitBreakerTransport) openCircuitCount(targets []config.Target, fallbackTarget string) int {
+	if ct.registry == nil {
+		return 0
+	}
+
 	if len(targets) == 0 {
 		if fallbackTarget == "" {
 			return 0
 		}
-		if ct.registry.Breaker(fallbackTarget).State() == circuitbreaker.StateOpen {
+		if state, ok := ct.registry.State(fallbackTarget); ok && state == circuitbreaker.StateOpen {
 			return 1
 		}
 		return 0
@@ -382,7 +386,7 @@ func (ct *CircuitBreakerTransport) openCircuitCount(targets []config.Target, fal
 			continue
 		}
 		seen[address] = struct{}{}
-		if ct.registry.Breaker(address).State() == circuitbreaker.StateOpen {
+		if state, ok := ct.registry.State(address); ok && state == circuitbreaker.StateOpen {
 			openCount++
 		}
 	}

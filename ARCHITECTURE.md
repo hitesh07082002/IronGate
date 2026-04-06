@@ -46,7 +46,7 @@ For broader product scope and future work, use:
 - Atomic runtime snapshot manager backed by `atomic.Pointer[*runtime.Snapshot]`
 - fsnotify-based config hot reload with debounce and fail-safe rollback to the last valid snapshot
 - Direct gateway-served `/health`, `/ready`, and `/metrics` handling
-- Dedicated admin server on `:9090` serving `POST /admin/circuit-breakers/reset` behind a bearer token from `ADMIN_TOKEN`
+- Optional admin server serving `POST /admin/circuit-breakers/reset` when `ADMIN_TOKEN` is set; defaults to `127.0.0.1:9090` unless `ADMIN_ADDR` overrides it
 - Graceful shutdown that flips `/ready` to `503` before draining in-flight requests
 - Direct `/metrics` Prometheus handler with service-only labels
 - `gateway_circuit_state{service}` gauge showing `0=CLOSED`, `1=OPEN`, `2=HALF_OPEN` for the current per-service breaker aggregate
@@ -231,14 +231,14 @@ The direct `/health`, `/ready`, and `/metrics` handlers also strip `X-Request-ID
 
 ### Admin Control Plane
 
-`main` also starts a second HTTP server on `:9090` for observatory-only administrative actions.
+When `ADMIN_TOKEN` is set, `main` starts a second HTTP server for observatory-only administrative actions.
 
 - `POST /admin/circuit-breakers/reset`
 - Requires `Authorization: Bearer $ADMIN_TOKEN`
 - Uses constant-time token comparison
 - Calls `Registry.Reset()` on the active circuit-breaker registry and returns `{"reset":true,"targets_cleared":N}`
 
-This server is separate from the public gateway listener on `:8080`.
+This server is separate from the public gateway listener on `:8080`. The default bind address is `127.0.0.1:9090`; the observatory overlay sets `ADMIN_ADDR=:9090` so the admin plane stays reachable inside Docker without publishing a host port.
 
 #### `Router`
 
@@ -529,7 +529,7 @@ make benchmark
 
 `make test`, `make coverage`, and `make test-race` require a running Redis instance when you want the Redis-backed integration tests to execute locally. Without `IRONGATE_TEST_REDIS_ADDR`, those Redis integration tests are skipped.
 
-`make coverage` enforces a repo-wide statement coverage floor of 75%.
+`make coverage` enforces a repo-wide statement coverage floor of 70%.
 `make benchmark-test` exercises the Python benchmark runner without requiring a live stack.
 Run `mise install` once in the repo root to install the pinned `k6` toolchain used by the benchmark commands.
 `make load-test` requires `k6` plus a reachable gateway, defaulting to `http://127.0.0.1:8080`.

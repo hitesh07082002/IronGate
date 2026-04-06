@@ -12,6 +12,7 @@ const metricCircuitState = "gateway_circuit_state"
 type Registry struct {
 	config            config.CBConfig
 	breakers          sync.Map
+	breakersMu        sync.Mutex
 	circuitStateGauge *prometheus.GaugeVec
 	statesMu          sync.Mutex
 	targetStates      map[string]targetState
@@ -53,16 +54,23 @@ func (r *Registry) Breaker(target string) *Breaker {
 
 func (r *Registry) BreakerForService(target, service string) *Breaker {
 	if breaker, ok := r.breakers.Load(target); ok {
-		return breaker.(*Breaker)
+		actual := breaker.(*Breaker)
+		r.ensureBreakerService(target, service, actual)
+		return actual
+	}
+
+	r.breakersMu.Lock()
+	defer r.breakersMu.Unlock()
+
+	if breaker, ok := r.breakers.Load(target); ok {
+		actual := breaker.(*Breaker)
+		r.ensureBreakerService(target, service, actual)
+		return actual
 	}
 
 	breaker := New(r.config)
 	r.attachBreaker(target, service, breaker)
-	actual, loaded := r.breakers.LoadOrStore(target, breaker)
-	if loaded {
-		return actual.(*Breaker)
-	}
-
+	r.breakers.Store(target, breaker)
 	return breaker
 }
 
@@ -107,6 +115,19 @@ func (r *Registry) Collector() prometheus.Collector {
 	return r.circuitStateGauge
 }
 
+func (r *Registry) State(target string) (State, bool) {
+	if r == nil {
+		return StateClosed, false
+	}
+
+	breaker, ok := r.breakers.Load(target)
+	if !ok {
+		return StateClosed, false
+	}
+
+	return breaker.(*Breaker).State(), true
+}
+
 func (r *Registry) attachBreaker(target, service string, breaker *Breaker) {
 	if r == nil || breaker == nil {
 		return
@@ -126,13 +147,32 @@ func (r *Registry) setGauge(target, service string, state State) {
 	service = normalizeService(service)
 
 	r.statesMu.Lock()
+	previous, hadPrevious := r.targetStates[target]
 	r.targetStates[target] = targetState{
 		service: service,
 		state:   state,
 	}
 	aggregate := r.aggregateServiceStateLocked(service)
+	oldService := ""
+	oldAggregate := StateClosed
+	deleteOldSeries := false
+	if hadPrevious && previous.service != service {
+		oldService = previous.service
+		if r.serviceHasTargetsLocked(oldService) {
+			oldAggregate = r.aggregateServiceStateLocked(oldService)
+		} else {
+			deleteOldSeries = true
+		}
+	}
 	r.statesMu.Unlock()
 
+	if oldService != "" {
+		if deleteOldSeries {
+			r.circuitStateGauge.DeleteLabelValues(oldService)
+		} else {
+			r.circuitStateGauge.WithLabelValues(oldService).Set(circuitStateValue(oldAggregate))
+		}
+	}
 	r.circuitStateGauge.WithLabelValues(service).Set(circuitStateValue(aggregate))
 }
 
@@ -149,6 +189,32 @@ func (r *Registry) serviceForTarget(target string) string {
 	}
 
 	return normalizeService(target)
+}
+
+func (r *Registry) ensureBreakerService(target, service string, breaker *Breaker) {
+	if r == nil || breaker == nil {
+		return
+	}
+
+	desired := normalizeService(service)
+	current, ok := r.targetState(target)
+	if ok && current.service == desired {
+		return
+	}
+
+	r.attachBreaker(target, desired, breaker)
+}
+
+func (r *Registry) targetState(target string) (targetState, bool) {
+	if r == nil {
+		return targetState{}, false
+	}
+
+	r.statesMu.Lock()
+	defer r.statesMu.Unlock()
+
+	state, ok := r.targetStates[target]
+	return state, ok
 }
 
 func (r *Registry) aggregateServiceStateLocked(service string) State {
@@ -169,6 +235,16 @@ func (r *Registry) aggregateServiceStateLocked(service string) State {
 	}
 
 	return StateClosed
+}
+
+func (r *Registry) serviceHasTargetsLocked(service string) bool {
+	for _, state := range r.targetStates {
+		if state.service == service {
+			return true
+		}
+	}
+
+	return false
 }
 
 func normalizeService(service string) string {

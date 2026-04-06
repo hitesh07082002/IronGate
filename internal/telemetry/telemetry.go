@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -22,17 +23,25 @@ import (
 )
 
 const (
-	otlpEndpointEnvVar = "OTEL_EXPORTER_OTLP_ENDPOINT"
-	otlpInsecureEnvVar = "OTEL_EXPORTER_OTLP_INSECURE"
-	otelSamplerEnvVar  = "OTEL_TRACES_SAMPLER"
+	otlpEndpointEnvVar   = "OTEL_EXPORTER_OTLP_ENDPOINT"
+	otlpInsecureEnvVar   = "OTEL_EXPORTER_OTLP_INSECURE"
+	otelSamplerEnvVar    = "OTEL_TRACES_SAMPLER"
+	otelSamplerArgEnvVar = "OTEL_TRACES_SAMPLER_ARG"
 
-	alwaysOnSampler = "always_on"
+	alwaysOnSampler                = "always_on"
+	alwaysOffSampler               = "always_off"
+	traceIDRatioSampler            = "traceidratio"
+	parentBasedAlwaysOnSampler     = "parentbased_always_on"
+	parentBasedAlwaysOffSampler    = "parentbased_always_off"
+	parentBasedTraceIDRatioSampler = "parentbased_traceidratio"
 
 	otlpDialTimeout   = 5 * time.Second
 	otlpExportTimeout = 10 * time.Second
 )
 
 func Init(ctx context.Context, serviceName, version string) (trace.TracerProvider, func(context.Context) error) {
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+
 	endpoint := strings.TrimSpace(os.Getenv(otlpEndpointEnvVar))
 	if endpoint == "" {
 		return noop.NewTracerProvider(), func(context.Context) error { return nil }
@@ -42,10 +51,14 @@ func Init(ctx context.Context, serviceName, version string) (trace.TracerProvide
 	}
 
 	opts := []otlptracegrpc.Option{
-		otlptracegrpc.WithEndpoint(endpoint),
 		otlptracegrpc.WithDialOption(grpc.WithConnectParams(grpc.ConnectParams{
 			MinConnectTimeout: otlpDialTimeout,
 		})),
+	}
+	if otlpEndpointUsesURL(endpoint) {
+		opts = append(opts, otlptracegrpc.WithEndpointURL(endpoint))
+	} else {
+		opts = append(opts, otlptracegrpc.WithEndpoint(endpoint))
 	}
 	if otlpInsecure() {
 		opts = append(opts, otlptracegrpc.WithInsecure())
@@ -71,8 +84,6 @@ func Init(ctx context.Context, serviceName, version string) (trace.TracerProvide
 		sdktrace.WithSpanProcessor(processor),
 	)
 
-	otel.SetTextMapPropagator(propagation.TraceContext{})
-
 	return tp, tp.Shutdown
 }
 
@@ -94,15 +105,50 @@ func HashAttr(value string) string {
 }
 
 func traceSampler() sdktrace.Sampler {
-	if strings.EqualFold(strings.TrimSpace(os.Getenv(otelSamplerEnvVar)), alwaysOnSampler) {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(otelSamplerEnvVar))) {
+	case "":
+		return defaultTraceSampler()
+	case alwaysOnSampler:
 		return sdktrace.AlwaysSample()
+	case alwaysOffSampler:
+		return sdktrace.NeverSample()
+	case traceIDRatioSampler:
+		return sdktrace.TraceIDRatioBased(traceSamplerRatio(1.0))
+	case parentBasedAlwaysOnSampler:
+		return sdktrace.ParentBased(sdktrace.AlwaysSample())
+	case parentBasedAlwaysOffSampler:
+		return sdktrace.ParentBased(sdktrace.NeverSample())
+	case parentBasedTraceIDRatioSampler:
+		return sdktrace.ParentBased(sdktrace.TraceIDRatioBased(traceSamplerRatio(1.0)))
+	default:
+		return defaultTraceSampler()
 	}
-
-	return sdktrace.ParentBased(sdktrace.TraceIDRatioBased(0.1))
 }
 
 func otlpInsecure() bool {
 	return strings.EqualFold(strings.TrimSpace(os.Getenv(otlpInsecureEnvVar)), "true")
+}
+
+func otlpEndpointUsesURL(endpoint string) bool {
+	return strings.Contains(strings.TrimSpace(endpoint), "://")
+}
+
+func defaultTraceSampler() sdktrace.Sampler {
+	return sdktrace.ParentBased(sdktrace.TraceIDRatioBased(0.1))
+}
+
+func traceSamplerRatio(fallback float64) float64 {
+	raw := strings.TrimSpace(os.Getenv(otelSamplerArgEnvVar))
+	if raw == "" {
+		return fallback
+	}
+
+	ratio, err := strconv.ParseFloat(raw, 64)
+	if err != nil || ratio < 0 || ratio > 1 {
+		return fallback
+	}
+
+	return ratio
 }
 
 type warnOnceExporter struct {

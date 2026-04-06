@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/hmac"
+	"crypto/sha256"
 	"errors"
 	"flag"
 	"fmt"
@@ -31,6 +32,8 @@ import (
 const (
 	fallbackShutdownTimeout = 10 * time.Second
 	trustedProxiesEnvVar    = "IRONGATE_TRUSTED_PROXIES"
+	adminAddrEnvVar         = "ADMIN_ADDR"
+	defaultAdminAddr        = "127.0.0.1:9090"
 )
 
 type buildHandlerOptions struct {
@@ -88,7 +91,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	adminToken := os.Getenv("ADMIN_TOKEN")
+	adminToken := strings.TrimSpace(os.Getenv("ADMIN_TOKEN"))
 	cbGetter := func() *circuitbreaker.Registry {
 		snapshot := manager.Current()
 		if snapshot == nil {
@@ -97,11 +100,15 @@ func main() {
 
 		return snapshot.CircuitBreaker
 	}
-	adminServer := &http.Server{
-		Addr:         ":9090",
-		Handler:      newAdminHandler(adminToken, cbGetter),
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
+
+	var adminServer *http.Server
+	if adminToken != "" {
+		adminServer = &http.Server{
+			Addr:         resolveAdminAddr(),
+			Handler:      newAdminHandler(adminToken, cbGetter),
+			ReadTimeout:  10 * time.Second,
+			WriteTimeout: 10 * time.Second,
+		}
 	}
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),
@@ -126,7 +133,9 @@ func main() {
 	}()
 
 	serverErrors := make(chan serverError, 2)
-	serveAsync("admin", adminServer, serverErrors)
+	if adminServer != nil {
+		serveAsync("admin", adminServer, serverErrors)
+	}
 	serveAsync("gateway", server, serverErrors)
 
 	signalCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -138,7 +147,9 @@ func main() {
 		manager.BeginShutdown()
 		shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), shutdownTimeout(cfg.Server.WriteTimeout))
 		defer cancelShutdown()
-		_ = adminServer.Shutdown(shutdownCtx)
+		if adminServer != nil {
+			_ = adminServer.Shutdown(shutdownCtx)
+		}
 		_ = server.Shutdown(shutdownCtx)
 		slog.Error(serverErr.name+" server stopped", "error", serverErr.err)
 		os.Exit(1)
@@ -150,9 +161,11 @@ func main() {
 
 	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), shutdownTimeout(cfg.Server.WriteTimeout))
 	defer cancelShutdown()
-	if err := adminServer.Shutdown(shutdownCtx); err != nil {
-		slog.Error("admin graceful shutdown failed", "error", err)
-		os.Exit(1)
+	if adminServer != nil {
+		if err := adminServer.Shutdown(shutdownCtx); err != nil {
+			slog.Error("admin graceful shutdown failed", "error", err)
+			os.Exit(1)
+		}
 	}
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		slog.Error("graceful shutdown failed", "error", err)
@@ -266,12 +279,28 @@ func resolveConfigPath(flagValue string) string {
 	return "configs/gateway.yaml"
 }
 
+func resolveAdminAddr() string {
+	if value := strings.TrimSpace(os.Getenv(adminAddrEnvVar)); value != "" {
+		return value
+	}
+
+	return defaultAdminAddr
+}
+
 func newAdminHandler(adminToken string, cbGetter func() *circuitbreaker.Registry) http.Handler {
-	adminMux := http.NewServeMux()
-	adminMux.HandleFunc("POST /admin/circuit-breakers/reset", func(w http.ResponseWriter, r *http.Request) {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r = stampAdminRequest(w, r)
+		if r.URL.Path != "/admin/circuit-breakers/reset" {
+			response.WriteError(w, r, http.StatusNotFound, "not found")
+			return
+		}
+		if r.Method != http.MethodPost {
+			response.WriteError(w, r, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
 		auth, ok := adminBearerToken(r.Header.Get("Authorization"))
-		if adminToken == "" || !ok || !hmac.Equal([]byte(auth), []byte(strings.TrimSpace(adminToken))) {
+		if !ok || !adminTokenMatches(auth, adminToken) {
 			response.WriteError(w, r, http.StatusUnauthorized, "unauthorized")
 			return
 		}
@@ -286,8 +315,6 @@ func newAdminHandler(adminToken string, cbGetter func() *circuitbreaker.Registry
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"reset":true,"targets_cleared":%d}`, n)
 	})
-
-	return adminMux
 }
 
 func serveAsync(name string, server *http.Server, errs chan<- serverError) {
@@ -310,6 +337,17 @@ func adminBearerToken(header string) (string, bool) {
 	}
 
 	return token, true
+}
+
+func adminTokenMatches(provided, expected string) bool {
+	expected = strings.TrimSpace(expected)
+	if expected == "" {
+		return false
+	}
+
+	providedHash := sha256.Sum256([]byte(provided))
+	expectedHash := sha256.Sum256([]byte(expected))
+	return hmac.Equal(providedHash[:], expectedHash[:])
 }
 
 func stampAdminRequest(w http.ResponseWriter, r *http.Request) *http.Request {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/hitesh07082002/irongate/internal/config"
+	"github.com/hitesh07082002/irongate/internal/middleware"
 	"github.com/hitesh07082002/irongate/internal/response"
 	"github.com/hitesh07082002/irongate/internal/transport/circuitbreaker"
 )
@@ -124,6 +125,68 @@ func TestAdminReset_RequiresBearerScheme(t *testing.T) {
 	}
 }
 
+func TestAdminReset_UnknownPathUsesJSONErrorAndSanitizesHeaders(t *testing.T) {
+	handler := newAdminHandler("admin-token", nil)
+	req := httptest.NewRequest(http.MethodPost, "/admin/unknown", nil)
+	req.Header.Set(middleware.HeaderRequestID, "spoofed-request")
+	req.Header.Set(middleware.HeaderUserID, "spoofed-user")
+	req.Header.Set(middleware.HeaderUserRole, "spoofed-role")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d with body %s", recorder.Code, recorder.Body.String())
+	}
+	var body response.ErrorBody
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode admin 404 response: %v", err)
+	}
+	if body.Error != "not found" || body.Code != http.StatusNotFound {
+		t.Fatalf("unexpected admin 404 payload %+v", body)
+	}
+	if body.RequestID == "" {
+		t.Fatal("expected request_id in admin 404 response")
+	}
+	if req.Header.Get(middleware.HeaderUserID) != "" || req.Header.Get(middleware.HeaderUserRole) != "" {
+		t.Fatal("expected admin handler to strip spoofed identity headers before routing")
+	}
+	if got := req.Header.Get(middleware.HeaderRequestID); got == "" || got == "spoofed-request" {
+		t.Fatalf("expected admin handler to stamp a fresh request id, got %q", got)
+	}
+}
+
+func TestAdminReset_WrongMethodUsesJSONErrorAndSanitizesHeaders(t *testing.T) {
+	handler := newAdminHandler("admin-token", nil)
+	req := httptest.NewRequest(http.MethodGet, "/admin/circuit-breakers/reset", nil)
+	req.Header.Set(middleware.HeaderRequestID, "spoofed-request")
+	req.Header.Set(middleware.HeaderUserID, "spoofed-user")
+	req.Header.Set(middleware.HeaderUserRole, "spoofed-role")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d with body %s", recorder.Code, recorder.Body.String())
+	}
+	var body response.ErrorBody
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode admin 405 response: %v", err)
+	}
+	if body.Error != "method not allowed" || body.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("unexpected admin 405 payload %+v", body)
+	}
+	if body.RequestID == "" {
+		t.Fatal("expected request_id in admin 405 response")
+	}
+	if req.Header.Get(middleware.HeaderUserID) != "" || req.Header.Get(middleware.HeaderUserRole) != "" {
+		t.Fatal("expected admin handler to strip spoofed identity headers before method checks")
+	}
+	if got := req.Header.Get(middleware.HeaderRequestID); got == "" || got == "spoofed-request" {
+		t.Fatalf("expected admin handler to stamp a fresh request id, got %q", got)
+	}
+}
+
 func TestAdminReset_AfterReload(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeTestJSON(w, http.StatusOK, map[string]string{"instance": "admin"})
@@ -218,6 +281,60 @@ func TestAdminBearerToken(t *testing.T) {
 				t.Fatalf("expected token %q, got %q", testCase.want, got)
 			}
 		})
+	}
+}
+
+func TestAdminTokenMatches(t *testing.T) {
+	if !adminTokenMatches("admin-token", "admin-token") {
+		t.Fatal("expected identical admin tokens to match")
+	}
+	if adminTokenMatches("short", "much-longer-admin-token") {
+		t.Fatal("expected mismatched admin tokens to fail")
+	}
+	if adminTokenMatches("admin-token", "") {
+		t.Fatal("expected empty configured token to fail")
+	}
+}
+
+func TestResolveAdminAddr(t *testing.T) {
+	t.Setenv(adminAddrEnvVar, "")
+	if got := resolveAdminAddr(); got != defaultAdminAddr {
+		t.Fatalf("expected default admin addr %q, got %q", defaultAdminAddr, got)
+	}
+
+	t.Setenv(adminAddrEnvVar, ":19090")
+	if got := resolveAdminAddr(); got != ":19090" {
+		t.Fatalf("expected configured admin addr, got %q", got)
+	}
+}
+
+func TestResolveConfigPath(t *testing.T) {
+	t.Setenv("IRONGATE_CONFIG", "")
+	t.Setenv("GATEWAY_CONFIG", "")
+	if got := resolveConfigPath("configs/flag.yaml"); got != "configs/flag.yaml" {
+		t.Fatalf("expected flag config path, got %q", got)
+	}
+
+	t.Setenv("IRONGATE_CONFIG", "configs/irongate.yaml")
+	if got := resolveConfigPath(""); got != "configs/irongate.yaml" {
+		t.Fatalf("expected IRONGATE_CONFIG path, got %q", got)
+	}
+
+	t.Setenv("IRONGATE_CONFIG", "")
+	t.Setenv("GATEWAY_CONFIG", "configs/gateway-env.yaml")
+	if got := resolveConfigPath(""); got != "configs/gateway-env.yaml" {
+		t.Fatalf("expected GATEWAY_CONFIG path, got %q", got)
+	}
+
+	t.Setenv("GATEWAY_CONFIG", "")
+	if got := resolveConfigPath(""); got != "configs/gateway.yaml" {
+		t.Fatalf("expected default config path, got %q", got)
+	}
+}
+
+func TestShutdownTimeoutUsesFallbackWhenUnset(t *testing.T) {
+	if got := shutdownTimeout(0); got != fallbackShutdownTimeout {
+		t.Fatalf("expected fallback shutdown timeout %s, got %s", fallbackShutdownTimeout, got)
 	}
 }
 

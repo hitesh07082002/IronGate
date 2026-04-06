@@ -33,7 +33,7 @@
 |----|----------|---------|
 | B1 | Pre-pull `grafana/k6:<pinned-tag>` in `make observatory-up`; document air-gapped procedure | §8.8, §14 |
 | B2 | `allow_embedding = true` + `content_security_policy = false` in `grafana.ini` (demo VPS only — not for multi-tenant Grafana); verify cross-subdomain iframe in Chrome + Firefox on real VPS before building Observability Traces tab | §11.6, §12 M4 |
-| B3 | Add `gateway_circuit_state{target="host:port"}` gauge (0=CLOSED, 1=OPEN, 2=HALF_OPEN); implement in M1, not deferred | §3.3, §8.7, §10 |
+| B3 | Add `gateway_circuit_state{service}` gauge (service-level aggregate of per-target breaker state, 0=CLOSED, 1=OPEN, 2=HALF_OPEN); implement in M1, not deferred | §3.3, §8.7, §10 |
 | B4 | Observatory mints its demo JWT via `POST http://gateway:8080/api/users/login`; 23h refresh ticker; fallback to `DEMO_JWT` env var | §8.8 |
 | B5 | Docker SDK `ContainerLogs(Follow: true, Stdout: true)` + `stdcopy.StdCopy()` to demultiplex; one JSON object per line on gateway stdout | §8.4 |
 
@@ -57,7 +57,8 @@ Pinned image tags and tool versions are bumped only through an explicit PR that 
    matches the repo's stable gateway-facing login contract.
 
 4. **`Registry.Reset()` scope.** Transitions all breakers to CLOSED atomically; sets
-   all `gateway_circuit_state` gauges to 0. Does not drain in-flight probe requests.
+   all service-level `gateway_circuit_state` gauges to 0. Does not drain in-flight
+   probe requests.
    Acceptable for demo reset purposes.
 
 5. **Toxiproxy proxy creation.** Observatory creates the Redis proxy idempotently at
@@ -196,8 +197,8 @@ Acceptance:
 **M1.4 — `gateway_circuit_state` gauge + admin reset endpoint (1 day)**
 
 Deliverables:
-- `gateway_circuit_state{target="host:port"}` gauge; values 0/1/2; updated on every CB
-  state transition via `Registry`.
+- `gateway_circuit_state{service}` gauge; values 0/1/2; updated on every CB state
+  transition via `Registry` as the service-level aggregate of all breaker targets.
 - `Registry.Reset()`: transitions all breakers to CLOSED atomically; sets all gauges to 0.
 - Second HTTP server on `:9090` in `cmd/gateway/main.go`; not in Compose `ports:`.
 - `POST /admin/circuit-breakers/reset`: validates `Authorization: Bearer $ADMIN_TOKEN`
@@ -435,9 +436,9 @@ Acceptance:
 
 **S4 Single Replica Death** (kill user-service-2, Moderate 100 RPS, 120s) — *given default gateway.yaml CB thresholds*:
 - After T+10s chaos action: SSE shows no events with `X-Served-By: user-service-2`; exclusively `X-Served-By: user-service-1`.
-- `gateway_circuit_state{target="user-service-2:8092"}` = 1 within 30s — *given default CB config*.
+- `gateway_circuit_state{service="user-service"}` = 1 within 30s — *given default CB config*.
 - Client error rate < 1% after CB opens (retries absorb the failure window).
-- Reset restores `gateway_circuit_state` to 0 for all targets.
+- Reset restores `gateway_circuit_state` to 0 for the affected service.
 
 **S5 at 30% error rate** (100 RPS, 60s):
 - `gateway_retries_total` > 0.
@@ -452,9 +453,9 @@ Acceptance:
 Acceptance:
 
 **S7 Cascading Failure** (kill both user-service instances, 60s):
-- After T+5s: `gateway_circuit_state` for instance 1 = 1; traffic visible on instance 2.
-- After T+20s: `gateway_circuit_state` for instance 2 = 1; SSE shows `all_targets_exhausted`; `curl gateway:8080/api/users -H "Authorization: Bearer $JWT"` → 503 `{"error":"no healthy targets..."}`.
-- After reset: both gauges = 0; `/api/users` → 200.
+- After T+5s: `gateway_circuit_state{service="user-service"}` = 1; traffic shifts to the surviving instance.
+- After T+20s: service aggregate remains 1; SSE shows `all_targets_exhausted`; `curl gateway:8080/api/users -H "Authorization: Bearer $JWT"` → 503 `{"error":"no healthy targets..."}`.
+- After reset: service aggregate returns to 0; `/api/users` → 200.
 
 **S8 Redis Impaired** (full blackout via Toxiproxy, 60s):
 - `gateway_rate_limit_rejections_total` drops to zero during blackout (fail-open engaged).
@@ -569,14 +570,14 @@ Deliverables:
 - Request counter strip: ✅ success / ❌ error / 🔄 retry / ⛔ rate-limited. 1s poll.
 - Four Recharts panels (2s poll via Observatory proxy):
   - RequestRatePanel, LatencyPanel, CircuitStateTimeline, RateLimitPanel.
-  - CircuitStateTimeline: queries `gateway_circuit_state{target=~".+"}` as range query;
-    renders one colored row per target (0=green, 1=red, 2=yellow).
+  - CircuitStateTimeline: queries `gateway_circuit_state{service=~".+"}` as range query;
+    renders one colored row per service (0=green, 1=red, 2=yellow).
 - TraceShortcutsBar: 3 most recent traces from SSE events with `trace_id`.
 
 Acceptance:
 - Run S6 at Moderate: `circuit_open` event appears in feed with `ev-error` background within 3 seconds of `service_down` chaos action.
 - Click `[View Trace →]` on `circuit_open` event → new tab opens Grafana Explore URL containing the 32-character `trace_id` from the SSE event JSON.
-- CircuitStateTimeline: `user-service-2` row turns red within 3 seconds of `service_down` (derived from `gateway_circuit_state` metric = 1).
+- CircuitStateTimeline: `user-service` row turns red within 3 seconds of `service_down` (derived from `gateway_circuit_state` metric = 1).
 - RateLimitPanel: run S3 at Severe → red rejected stack ≥50% of bar within 30 seconds.
 - SSE disconnects: "Reconnecting..." indicator appears; reconnects within 30s after Observatory restarts.
 - At 300 RPS (S6 Severe): browser CPU < 20% sustained in DevTools; no UI freezing.
@@ -638,7 +639,7 @@ Acceptance:
 
 Acceptance:
 - `make observatory-up` → Grafana dashboards menu → all four dashboards present; no manual import.
-- **Dashboard 2 during S6:** `gateway_circuit_state` state timeline shows 0→1→2→0 for `user-service-2:8092`; retry counter climbs; upstream picks show redistribution.
+- **Dashboard 2 during S6:** `gateway_circuit_state` state timeline shows 0→1→2→0 for `user-service`; retry counter climbs; upstream picks show redistribution.
 - **Dashboard 3 during S3:** rejected stack dominates allowed/rejected bar; Redis latency panel shows data > 0.
 - **Dashboard 4:** All four panels render; `$scenario` variable in panel titles; legible at 1080p when screen-shared.
 

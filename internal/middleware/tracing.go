@@ -35,6 +35,7 @@ func Tracing(logger *slog.Logger, tracer trace.Tracer) Middleware {
 			req = req.WithContext(ctx)
 
 			ctx, tracingSpan := tracer.Start(ctx, "irongate.middleware.tracing")
+			defer tracingSpan.End()
 			req = req.WithContext(ctx)
 			req.Header.Del(HeaderUserID)
 			req.Header.Del(HeaderUserRole)
@@ -49,7 +50,6 @@ func Tracing(logger *slog.Logger, tracer trace.Tracer) Middleware {
 				statusCode:     http.StatusOK,
 			}
 			recorder.Header().Set(HeaderRequestID, requestID)
-			tracingSpan.End()
 
 			start := time.Now()
 			logger.Info("request started",

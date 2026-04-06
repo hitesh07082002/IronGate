@@ -20,9 +20,10 @@ services:
       OTEL_TRACES_SAMPLER: always_on
       OTEL_SERVICE_NAME: irongate
       ADMIN_TOKEN: "${ADMIN_TOKEN}"
+      ADMIN_ADDR: ":9090"
       GATEWAY_CONTAINER_NAME: irongate-gateway-1
-      # REDIS_ADDR intentionally omitted for M1.
-      # M2 will override this with toxiproxy:6380 when Toxiproxy is introduced.
+      # REDIS_ADDR is inherited from the base docker-compose.yml for M1.
+      # M2 will explicitly override it with toxiproxy:6380 when Toxiproxy is introduced.
 
   grafana:
     volumes:

@@ -265,7 +265,10 @@ func TestTracingRecordsRootSpanWithRouteTemplate(t *testing.T) {
 		t.Fatalf("expected route.matched true, got %v", got)
 	}
 
-	findEndedSpanByName(t, recorder.Ended(), "irongate.middleware.tracing")
+	tracingSpan := findEndedSpanByName(t, recorder.Ended(), "irongate.middleware.tracing")
+	if tracingSpan.EndTime().Before(routerSpan.EndTime()) {
+		t.Fatal("expected tracing middleware span to remain open until downstream middleware finishes")
+	}
 }
 
 func TestRouterMarksNoMatchAsError(t *testing.T) {
