@@ -13,7 +13,6 @@ REMOTE_ENV_FILE="${REMOTE_APP_ROOT}/shared/production.env"
 BASE_URL="${BASE_URL:-https://${DEPLOY_DOMAIN}}"
 EXPECTED_BRANCH="${EXPECTED_BRANCH:-main}"
 SKIP_REMOTE_SYNC_CHECK="${SKIP_REMOTE_SYNC_CHECK:-false}"
-release_id="$(date -u +%Y%m%d%H%M%S)-$(git -C "${REPO_ROOT}" rev-parse --short HEAD)"
 
 if ! command -v git >/dev/null 2>&1; then
     echo "git is required" >&2
@@ -24,6 +23,8 @@ if ! command -v ssh >/dev/null 2>&1; then
     echo "ssh is required" >&2
     exit 1
 fi
+
+release_id="$(date -u +%Y%m%d%H%M%S)-$(git -C "${REPO_ROOT}" rev-parse --short HEAD)"
 
 current_branch="$(git -C "${REPO_ROOT}" branch --show-current)"
 if [ "${current_branch}" != "${EXPECTED_BRANCH}" ]; then
