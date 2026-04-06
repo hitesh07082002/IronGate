@@ -5,12 +5,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-DEPLOY_HOST="${DEPLOY_HOST:-root@168.144.80.152}"
+DEPLOY_HOST="${DEPLOY_HOST:-irongate@168.144.80.152}"
 DEPLOY_DOMAIN="${DEPLOY_DOMAIN:-irongate.hiteshsadhwani.xyz}"
 REMOTE_APP_ROOT="${REMOTE_APP_ROOT:-/opt/irongate}"
 REMOTE_RELEASE_ROOT="${REMOTE_APP_ROOT}/releases"
 REMOTE_ENV_FILE="${REMOTE_APP_ROOT}/shared/production.env"
 BASE_URL="${BASE_URL:-https://${DEPLOY_DOMAIN}}"
+EXPECTED_BRANCH="${EXPECTED_BRANCH:-main}"
+SKIP_REMOTE_SYNC_CHECK="${SKIP_REMOTE_SYNC_CHECK:-false}"
 release_id="$(date -u +%Y%m%d%H%M%S)-$(git -C "${REPO_ROOT}" rev-parse --short HEAD)"
 
 if ! command -v git >/dev/null 2>&1; then
@@ -23,7 +25,23 @@ if ! command -v ssh >/dev/null 2>&1; then
     exit 1
 fi
 
-echo "Deploying ${release_id} to ${DEPLOY_HOST}..."
+current_branch="$(git -C "${REPO_ROOT}" branch --show-current)"
+if [ "${current_branch}" != "${EXPECTED_BRANCH}" ]; then
+    echo "Refusing to deploy branch ${current_branch}. Check out ${EXPECTED_BRANCH} first, or override EXPECTED_BRANCH if this is intentional." >&2
+    exit 1
+fi
+
+if [ "${SKIP_REMOTE_SYNC_CHECK}" != "true" ]; then
+    git -C "${REPO_ROOT}" fetch origin "${EXPECTED_BRANCH}" --quiet
+    local_sha="$(git -C "${REPO_ROOT}" rev-parse HEAD)"
+    remote_sha="$(git -C "${REPO_ROOT}" rev-parse "origin/${EXPECTED_BRANCH}")"
+    if [ "${local_sha}" != "${remote_sha}" ]; then
+        echo "Refusing to deploy ${local_sha}. Local HEAD does not match origin/${EXPECTED_BRANCH} (${remote_sha})." >&2
+        exit 1
+    fi
+fi
+
+echo "Deploying ${release_id} from ${EXPECTED_BRANCH} to ${DEPLOY_HOST}..."
 
 remote_cmd=$(
     cat <<EOF

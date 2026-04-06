@@ -4,7 +4,7 @@ IronGate is a production-style API gateway built in Go on top of the standard `n
 
 It is designed to make the core mechanics of a real gateway easy to inspect. You can see routing, auth, retries, rate limits, circuit breaking, and observability working together without needing a giant platform or a managed control plane.
 
-This repo is built to be easy to evaluate. Clone it, run one script, and watch the gateway exercise real public and protected routes end to end. The local workflow is shipped and benchmarked, and the repo now includes the bootstrap and deploy scripts used to publish `https://irongate.hiteshsadhwani.xyz`.
+This repo is built to be easy to evaluate. Clone it, run one script, and watch the gateway exercise real public and protected routes end to end. The local workflow is shipped and benchmarked, and the repo now includes a small production deployment path without turning the README into an ops manual.
 
 ## Start Here
 

@@ -1,6 +1,6 @@
 # Production Deploy
 
-IronGate now ships a repeatable production path for the DigitalOcean droplet at `168.144.80.152` and the public domain `irongate.hiteshsadhwani.xyz`.
+IronGate now ships a repeatable production path for the public domain `irongate.hiteshsadhwani.xyz`.
 
 ## Architecture
 
@@ -21,6 +21,7 @@ Run:
 That script:
 
 - installs Docker, Compose, Caddy, UFW, and the small host dependencies
+- creates a dedicated `irongate` deploy user with the existing SSH key copied from `root`
 - creates `/opt/irongate/{shared,releases}`
 - creates `/opt/irongate/shared/production.env` if it does not already exist
 - configures UFW to allow only `OpenSSH`, `80/tcp`, and `443/tcp`
