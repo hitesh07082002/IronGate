@@ -1,12 +1,14 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/hitesh07082002/irongate/internal/config"
+	"github.com/hitesh07082002/irongate/internal/response"
 	"github.com/hitesh07082002/irongate/internal/transport/circuitbreaker"
 )
 
@@ -59,8 +61,18 @@ func TestAdminReset_MissingAuth(t *testing.T) {
 	if recorder.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d with body %s", recorder.Code, recorder.Body.String())
 	}
-	if got := recorder.Body.String(); got != `{"error":"unauthorized","code":401}` {
-		t.Fatalf("unexpected response body %s", got)
+	var body response.ErrorBody
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode admin error response: %v", err)
+	}
+	if body.Error != "unauthorized" || body.Code != http.StatusUnauthorized {
+		t.Fatalf("unexpected error payload %+v", body)
+	}
+	if body.RequestID == "" {
+		t.Fatal("expected request_id in admin error response")
+	}
+	if got := recorder.Header().Get("X-Request-ID"); got != body.RequestID {
+		t.Fatalf("expected response request id %q, got %q", body.RequestID, got)
 	}
 }
 
@@ -86,6 +98,13 @@ func TestAdminReset_WrongToken(t *testing.T) {
 
 	if recorder.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d with body %s", recorder.Code, recorder.Body.String())
+	}
+	var body response.ErrorBody
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode admin error response: %v", err)
+	}
+	if body.RequestID == "" {
+		t.Fatal("expected request_id in admin error response")
 	}
 	if breaker.State() != circuitbreaker.StateOpen {
 		t.Fatalf("expected breaker to remain open after unauthorized reset, got %s", breaker.State())

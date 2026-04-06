@@ -117,6 +117,12 @@ func TestZeroValueRegistryGatherReturnsNilFamilies(t *testing.T) {
 	}
 }
 
+func TestZeroValueObserveRequestWithExemplarIsNoop(t *testing.T) {
+	var registry Registry
+
+	registry.ObserveRequestWithExemplar("payment-service", http.StatusOK, time.Millisecond, "trace-id")
+}
+
 func counterValueForService(t *testing.T, families []*dto.MetricFamily, name, service string) float64 {
 	t.Helper()
 

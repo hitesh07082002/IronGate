@@ -265,6 +265,9 @@ func (r *Registry) ObserveRequestWithExemplar(service string, statusCode int, du
 	if statusCode >= http.StatusInternalServerError {
 		r.requestFailuresTotal.Inc(service)
 	}
+	if r.requestDuration.vec == nil {
+		return
+	}
 
 	svc := normalizeService(service)
 	if traceID != "" {

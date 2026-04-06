@@ -15,11 +15,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/hitesh07082002/irongate/internal/config"
 	gatewaymetrics "github.com/hitesh07082002/irongate/internal/metrics"
+	"github.com/hitesh07082002/irongate/internal/middleware"
 	"github.com/hitesh07082002/irongate/internal/ratelimit"
+	"github.com/hitesh07082002/irongate/internal/response"
 	gwruntime "github.com/hitesh07082002/irongate/internal/runtime"
 	"github.com/hitesh07082002/irongate/internal/telemetry"
 	"github.com/hitesh07082002/irongate/internal/transport/circuitbreaker"
@@ -274,11 +277,10 @@ func resolveConfigPath(flagValue string) string {
 func newAdminHandler(adminToken string, cbGetter func() *circuitbreaker.Registry) http.Handler {
 	adminMux := http.NewServeMux()
 	adminMux.HandleFunc("POST /admin/circuit-breakers/reset", func(w http.ResponseWriter, r *http.Request) {
+		r = stampAdminRequest(w, r)
 		auth := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		if adminToken == "" || !hmac.Equal([]byte(strings.TrimSpace(auth)), []byte(adminToken)) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			fmt.Fprint(w, `{"error":"unauthorized","code":401}`)
+			response.WriteError(w, r, http.StatusUnauthorized, "unauthorized")
 			return
 		}
 
@@ -294,4 +296,25 @@ func newAdminHandler(adminToken string, cbGetter func() *circuitbreaker.Registry
 	})
 
 	return adminMux
+}
+
+func stampAdminRequest(w http.ResponseWriter, r *http.Request) *http.Request {
+	if r == nil {
+		return nil
+	}
+	if r.Header == nil {
+		r.Header = make(http.Header)
+	}
+
+	r.Header.Del(middleware.HeaderRequestID)
+	r.Header.Del(middleware.HeaderUserID)
+	r.Header.Del(middleware.HeaderUserRole)
+
+	requestID := uuid.NewString()
+	r.Header.Set(middleware.HeaderRequestID, requestID)
+	if w != nil {
+		w.Header().Set(middleware.HeaderRequestID, requestID)
+	}
+
+	return r
 }

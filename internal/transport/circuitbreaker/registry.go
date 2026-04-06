@@ -41,13 +41,13 @@ func (r *Registry) Breaker(target string) *Breaker {
 	}
 
 	breaker := New(r.config)
+	r.attachBreaker(target, breaker)
 	actual, loaded := r.breakers.LoadOrStore(target, breaker)
-	if !loaded {
-		r.attachBreaker(target, breaker)
-		return breaker
+	if loaded {
+		return actual.(*Breaker)
 	}
 
-	return actual.(*Breaker)
+	return breaker
 }
 
 func (r *Registry) CloneWithConfig(cfg config.CBConfig) *Registry {
