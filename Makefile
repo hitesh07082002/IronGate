@@ -2,6 +2,7 @@
 
 GO_TEST_FLAGS ?=
 COVERAGE_MIN ?= 70
+DOCKER_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then printf '%s' 'docker compose'; elif command -v docker-compose >/dev/null 2>&1; then printf '%s' 'docker-compose'; fi)
 
 all: build
 
@@ -34,10 +35,12 @@ run:
 	go run ./cmd/gateway
 
 docker-up:
-	docker-compose up --build
+	@test -n "$(DOCKER_COMPOSE)" || (echo "Docker Compose is required"; exit 1)
+	$(DOCKER_COMPOSE) up --build
 
 docker-down:
-	docker-compose down
+	@test -n "$(DOCKER_COMPOSE)" || (echo "Docker Compose is required"; exit 1)
+	$(DOCKER_COMPOSE) down
 
 load-test:
 	@command -v k6 >/dev/null 2>&1 || (echo "k6 is required for load-test"; exit 1)
