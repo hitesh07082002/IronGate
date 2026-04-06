@@ -1,6 +1,6 @@
 # Demo Capture Workflow
 
-The repo does not commit a large binary demo asset by default. The source of truth is the reproducible capture workflow below.
+The project does not commit a large binary demo asset by default. The source of truth is the reproducible capture workflow below.
 
 ## Canonical Output Paths
 

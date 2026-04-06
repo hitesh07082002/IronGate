@@ -1,10 +1,10 @@
-# IronGate Build Progress
+# IronGate Progress Tracker
 
-> This tracker reflects what is actually shipped in the repo. If work from a later phase lands early, mark the box based on reality rather than the original week label.
+> Status: Phases 1 through 8 are complete. Stretch goals remain open.
 >
-> Phases 1 through 8 are complete in this checkout. Stretch goals remain open until they land.
+> Use this file as the delivery checklist. Use [`README.md`](./README.md) for the public overview and [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the current runtime reference.
 
-## Phase 1: Foundation (Week 1-2)
+## Phase 1: Foundation
 - [x] Initialize Git repo, Go modules
 - [x] Project structure: `cmd/gateway/`, `internal/config/`, `internal/middleware/`, `internal/transport/`, `internal/proxy/`
 - [x] Config struct with YAML parsing and `Validate()` method
@@ -19,7 +19,7 @@
 - [x] Integration tests: request routes to correct service
 - [x] Test: overlapping routes (/api/users vs /api/users/login) resolve to the more specific match
 
-## Phase 2: Load Balancing (Week 2-3)
+## Phase 2: Load Balancing
 - [x] Load balancer interface in `internal/transport/loadbalancer/`
 - [x] Round-robin implementation
 - [x] Weighted round-robin implementation
@@ -28,7 +28,7 @@
 - [x] `X-Served-By` response header
 - [x] Tests: even distribution, weighted distribution, concurrent safety
 
-## Phase 3: Authentication (Week 3)
+## Phase 3: Authentication
 - [x] JWT parsing and signature verification (`golang-jwt/jwt/v5`)
 - [x] Claims extraction (sub, role, exp, iat)
 - [x] Auth middleware reads `auth_required` from `context.Context`
@@ -41,7 +41,7 @@
 - [x] Test: protected routes forward JWT-derived identity and strip the original bearer token before proxying
 - [x] Test: login, register, and health stay public; login -> protected route succeeds
 
-## Phase 4: Rate Limiting (Week 3-4)
+## Phase 4: Rate Limiting
 - [x] Redis in Docker Compose
 - [x] Sliding window algorithm with Redis Lua script (sorted sets)
 - [x] Rate limit middleware reads config from `context.Context`
@@ -54,7 +54,7 @@
 - [x] Test: X-Forwarded-For only trusted from known proxy IPs; spoofed header from untrusted source ignored
 - [x] Verification: `IRONGATE_TEST_REDIS_ADDR=127.0.0.1:6379 make coverage` enforces a 70% statement coverage floor in local runs and CI
 
-## Phase 5: Circuit Breaker + Retry (Week 4-5)
+## Phase 5: Circuit Breaker + Retry
 - [x] Circuit breaker state machine in `internal/transport/circuitbreaker/`
 - [x] Per-target (host:port) circuit breaker registry
 - [x] Only count 5xx + upstream transport failures toward threshold (connection failures and upstream timeouts, not 4xx or caller-side deadlines)
@@ -72,7 +72,7 @@
 - [x] Test: PUT with body, first attempt fails, verify body is intact on retry attempt 2
 - [x] Test: client disconnects (context cancelled) mid-retry backoff sleep → gateway stops retrying
 
-## Phase 5.5: Integration Checkpoint (Mid Week 5)
+## Phase 5.5: Integration Checkpoint
 - [x] Wire `resilient.go`: retry -> load balancer -> circuit breaker -> base transport
 - [x] Integration test: CB open on target A -> LB picks target B
 - [x] Integration test: all targets open -> 503 "no healthy targets"
@@ -80,7 +80,7 @@
 - [x] `go test -race` with 100 concurrent goroutines on circuit breaker
 - [x] Full end-to-end pipeline test: request through all 8 layers (tracing → router → auth → rate limit → proxy → retry → LB → CB)
 
-## Phase 6: Observability (Week 5-6)
+## Phase 6: Observability
 - [x] Structured JSON logging for every request
 - [x] X-Request-ID generation and propagation (tracing middleware)
 - [x] Lock the metrics contract to service-only labels
@@ -91,7 +91,7 @@
 - [x] Grafana dashboard: RPS, latency percentiles, error rates, circuit activity, rate limit rejections
 - [x] Export dashboard JSON for version control
 
-## Phase 7: Polish & Production Readiness (Week 6-7)
+## Phase 7: Polish & Production Readiness
 - [x] Atomic runtime snapshot manager for hot-reloadable request handling
 - [x] fsnotify file watcher: parse -> validate -> build new runtime -> swap atomically (keep old snapshot on invalid reload)
 - [x] Graceful shutdown (drain in-flight requests)
@@ -101,7 +101,7 @@
 - [x] Makefile: `make load-test` (`make build`, `make test`, `make run`, and `make docker-up` were already shipped earlier)
 - [x] `demo.sh` automated demo script
 
-## Phase 8: Documentation & Benchmarks (Week 7-8)
+## Phase 8: Documentation & Benchmarks
 - [x] ADRs for all architectural decisions (see `ADR/`)
 - [x] k6 benchmarks: baseline, with rate limiting, full pipeline, during CB transitions
 - [x] Benchmark results with graphs in `benchmarks/results/`

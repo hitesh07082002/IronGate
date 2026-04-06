@@ -1,24 +1,20 @@
-# IronGate — Implementation Reference
+# IronGate — Architecture Reference
 
-> This file is the runtime reference for the code currently checked into the repo.
+> Runtime reference for the shipped implementation.
 >
-> Phase 1 through Phase 8 are shipped here, including the gateway runtime, observability stack, benchmark harness, recorded benchmark artifacts, ADRs, and demo-capture workflow.
->
-> For quick start and benchmark highlights, start with [`README.md`](./README.md). For target end-state scope and design, see [`PROJECT_SPEC.md`](./PROJECT_SPEC.md) and [`DESIGN_DOC.md`](./DESIGN_DOC.md). If either conflicts with this file, this file wins for the current runtime.
+> Start with [`README.md`](./README.md) for the overview and demo path. Use [`PROJECT_SPEC.md`](./PROJECT_SPEC.md) for full scope and [`DESIGN_DOC.md`](./DESIGN_DOC.md) for target-state design. If those documents disagree with the code, this file is the source of truth for current behavior.
 
 ---
 
-## Current Runtime
+## How To Use This Document
 
-This file documents the architecture that is actually shipped in this repo:
+This file covers:
 
-- live middleware and transport ordering
-- runtime-reference config contract and supported behavior
-- current headers, routes, and verification coverage
+- the live middleware and transport ordering
+- the shipped config contract and runtime behavior
+- the current request flow, headers, routes, and verification commands
 
-## Full Project Target Design
-
-The complete end-state and future-phase architecture lives in:
+For broader product scope and future work, use:
 
 - [`DESIGN_DOC.md`](./DESIGN_DOC.md) for target architecture, algorithms, and tradeoffs
 - [`PROJECT_SPEC.md`](./PROJECT_SPEC.md) for full feature scope and project requirements
@@ -26,9 +22,9 @@ The complete end-state and future-phase architecture lives in:
 
 ---
 
-## 1. Current Main Snapshot
+## 1. Shipped Snapshot
 
-### Shipped in this repo
+### What Is Shipped
 
 - Reverse proxy gateway built with `net/http` and `httputil.ReverseProxy`
 - Outer middleware chain: `Tracing -> Router -> Metrics -> Auth -> RateLimiter -> Proxy`
@@ -68,7 +64,7 @@ The complete end-state and future-phase architecture lives in:
   - Redis kept internal-only on the Compose network
   - Prometheus and Grafana bound to `127.0.0.1` on the host for local-only access
 
-The codebase still contains some future-facing config fields so later phases can plug into the same route model. On `main`, unsupported later-phase features such as non-sliding-window rate limiting still fail closed instead of being silently ignored.
+The codebase still contains some future-facing config fields so later phases can plug into the same route model. In the current implementation, unsupported later-phase features such as non-sliding-window rate limiting still fail closed instead of being silently ignored.
 
 ---
 
@@ -148,10 +144,6 @@ irongate/
     └── capture-demo.sh
 ```
 
-Only list files here that exist in this checkout.
-
----
-
 ## 3. Current Request Pipeline
 
 ### Outer Chain
@@ -212,7 +204,7 @@ Implemented in [`internal/middleware/router.go`](./internal/middleware/router.go
 
 #### `Auth`
 
-Implemented in [`internal/middleware/auth.go`](./internal/middleware/auth.go). The demo user service in [`services/user-service/main.go`](./services/user-service/main.go) also accepts optional `subject` and `role` overrides on `/users/login` so the benchmark harness can mint distinct valid demo identities without changing the gateway auth contract.
+Implemented in [`internal/middleware/auth.go`](./internal/middleware/auth.go). The demo user service in [`services/user-service/main.go`](./services/user-service/main.go) can also accept benchmark-only `subject` and `role` overrides on `/users/login` when `IRONGATE_ALLOW_LOGIN_OVERRIDES=true`; the default runtime keeps that override path disabled.
 
 - Reads the matched `RouteConfig` from context
 - Skips routes with `auth_required: false`
@@ -341,7 +333,7 @@ The proxy in [`internal/proxy/proxy.go`](./internal/proxy/proxy.go):
 - strips `route.StripPrefix` from `URL.Path` and `URL.RawPath`
 - calls `ProxyRequest.SetXForwarded()`
 
-That means `main` now forwards:
+That means the current implementation forwards:
 
 - `X-Forwarded-For`
 - `X-Forwarded-Host`
@@ -473,7 +465,7 @@ Upstreams currently see:
 
 ## 9. Verification
 
-Current repo verification commands:
+Verification commands:
 
 ```bash
 make lint

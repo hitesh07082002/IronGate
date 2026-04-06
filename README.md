@@ -1,10 +1,10 @@
 # IronGate
 
-IronGate is a production-style API gateway built from scratch in Go with the standard `net/http` stack. It routes traffic from a single YAML config file and layers in JWT authentication, Redis-backed sliding-window rate limiting, retry, load balancing, circuit breaking, Prometheus metrics, hot reload, readiness draining, and graceful shutdown.
+IronGate is a configurable API gateway built in Go with the standard `net/http` stack. It combines config-driven routing, JWT authentication, Redis-backed sliding-window rate limiting, retry, load balancing, circuit breaking, Prometheus/Grafana observability, hot reload, and graceful shutdown in one runnable project.
 
-The repo includes a runnable benchmark suite, recorded benchmark artifacts, ADRs, and a reproducible demo-capture workflow alongside the gateway runtime.
+The project is set up to be easy to evaluate: `./demo.sh` exercises the stack end to end, `benchmarks/` contains reproducible k6 scenarios, and the repository includes recorded benchmark artifacts plus architectural decision records.
 
-## Feature Overview
+## Highlights
 
 - Config-driven longest-prefix routing with per-route method allowlists
 - JWT auth with explicit `HS256` enforcement and sanitized identity headers
@@ -58,7 +58,7 @@ curl -fsS -X POST http://127.0.0.1:8080/api/users/login
 
 ## Verification
 
-Run the full repo verification contract:
+Run the full local verification suite:
 
 ```bash
 make lint
@@ -73,23 +73,17 @@ mise x k6@1.7.1 -- make benchmark
 `make benchmark` writes a timestamped result bundle under `benchmarks/results/`.
 `make benchmark-test` covers the Python benchmark runner's artifact-rendering and dependency-check contract without needing k6 or Docker.
 
-## Demo Flow
+## Demo
 
-The under-five-minute demo path is:
+`./demo.sh` is the recommended walkthrough. It brings up the stack, waits for readiness, issues a login token, exercises protected routes, samples `/metrics`, and finishes with the smoke benchmark.
 
-1. `./demo.sh`
-2. health and readiness checks from the gateway
-3. a fresh JWT login token from `/api/users/login`
-4. protected `/api/users`, `/api/orders`, and `/api/payments/p-1` requests
-5. a `/metrics` sample plus the k6 smoke test
-
-The 2-minute capture workflow is scripted in [`scripts/capture-demo.sh`](./scripts/capture-demo.sh). Generated transcripts always land under [`artifacts/demo/`](./artifacts/demo/README.md), and the built-in MP4 path is wired for macOS `ffmpeg`/`avfoundation`; large binaries are intentionally not committed.
+For a shareable demo asset, use [`scripts/capture-demo.sh`](./scripts/capture-demo.sh). Generated transcripts always land under [`artifacts/demo/`](./artifacts/demo/README.md), and the built-in MP4 path is wired for macOS `ffmpeg`/`avfoundation`; large binaries are intentionally not committed.
 
 ## Benchmark Summary
 
 Recorded benchmark bundle: [`benchmarks/results/20260406-033854-d1edb38/`](./benchmarks/results/20260406-033854-d1edb38/README.md)
 
-Environment note for the committed run:
+Committed run environment:
 
 - Apple M4, 10 logical CPU cores, 16 GB RAM
 - `k6 v1.7.1`
@@ -104,28 +98,15 @@ Main scenario highlights from that run:
 | Authenticated + rate-limited traffic | `GET /api/payments/p-1`, 8 VUs, 20s, single authenticated identity | `111,042` rate-limited `429` responses after the first `20` successful requests |
 | Full pipeline under normal conditions | `GET /api/orders`, 24 VUs, 20s, 1024 authenticated demo users, 100 ms pacing | `230.15 req/s`, `p50 2.92 ms`, `p95 6.47 ms`, `p99 11.08 ms` |
 
-Circuit-breaker proof artifact:
-
-- [`benchmarks/results/20260406-033854-d1edb38/circuit-breaker-transition-recovery/circuit-breaker-behavior.svg`](./benchmarks/results/20260406-033854-d1edb38/circuit-breaker-transition-recovery/circuit-breaker-behavior.svg)
-- Healthy: `8x 200`
-- Failure trip: `5x 500`, then `3x 503`
-- Open circuit: `4x 503`
-- Recovery after timeout: `5x 200`
+Circuit-breaker proof artifact: [`circuit-breaker-behavior.svg`](./benchmarks/results/20260406-033854-d1edb38/circuit-breaker-transition-recovery/circuit-breaker-behavior.svg), showing healthy traffic, failure-induced trip, open-circuit fast rejection, and recovery after the timeout window.
 
 Benchmark note: the local benchmark stack sets `IRONGATE_TRUSTED_PROXIES=0.0.0.0/0,::/0` so one host can emulate many client IPs through `X-Forwarded-For`, and it enables login-claim overrides only inside the benchmark Compose stack so auth scenarios can mint distinct demo identities. Those are benchmark-only local settings. The default runtime still trusts no proxies and rejects login claim overrides unless explicitly configured.
 
-## Docs
+## Further Reading
 
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md): current-runtime source of truth
 - [`PROJECT_SPEC.md`](./PROJECT_SPEC.md): full project scope, success criteria, and deployment plan
 - [`DESIGN_DOC.md`](./DESIGN_DOC.md): target architecture, algorithms, and failure-mode reasoning
 - [`PROGRESS.md`](./PROGRESS.md): shipped phases and still-open stretch goals
-- [`CLAUDE.md`](./CLAUDE.md): agent-facing repo map, command contract, and architecture guardrails
-- [`ADR/001-two-tier-pipeline.md`](./ADR/001-two-tier-pipeline.md)
-- [`ADR/002-auth-before-rate-limiting.md`](./ADR/002-auth-before-rate-limiting.md)
-- [`ADR/003-fail-open-rate-limiting.md`](./ADR/003-fail-open-rate-limiting.md)
-- [`ADR/004-per-route-auth-not-global-public-paths.md`](./ADR/004-per-route-auth-not-global-public-paths.md)
-- [`ADR/005-sliding-window-over-token-bucket.md`](./ADR/005-sliding-window-over-token-bucket.md)
-- [`ADR/006-in-memory-least-connections.md`](./ADR/006-in-memory-least-connections.md)
-- [`ADR/007-context-for-route-config.md`](./ADR/007-context-for-route-config.md)
-- [`ADR/008-standard-middleware-interface.md`](./ADR/008-standard-middleware-interface.md)
+- [`ADR/`](./ADR/): architectural decisions and tradeoffs
+- [`benchmarks/results/20260406-033854-d1edb38/`](./benchmarks/results/20260406-033854-d1edb38/README.md): recorded benchmark evidence

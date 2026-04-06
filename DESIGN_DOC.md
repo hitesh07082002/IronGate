@@ -11,11 +11,11 @@
 
 ## 1. Summary
 
-IronGate is being built as a configurable API gateway in Go using a two-tier middleware pipeline — the same pattern production gateways like Traefik use. The target outer chain (`http.Handler`) handles request-level concerns (tracing, routing, auth, rate limiting), while the target inner chain (`http.RoundTripper`) handles transport-level concerns (retry, load balancing, circuit breaking). This separation is what makes retry-aware load balancing and per-target circuit breaking possible.
+IronGate is designed as a configurable API gateway in Go using a two-tier middleware pipeline. The outer chain (`http.Handler`) handles request-level concerns such as tracing, routing, auth, and rate limiting. The inner chain (`http.RoundTripper`) handles transport-level concerns such as retry, load balancing, and circuit breaking. That split is what makes retry-aware load balancing and per-target circuit breaking possible.
 
-The current repo already ships the two-tier split plus tracing, routing, auth, Redis-backed rate limiting, proxy, retry, load balancing, circuit breaking, Prometheus-backed observability, the Phase 8 benchmark harness, and recorded benchmark artifacts.
+The current implementation already ships that two-tier split plus tracing, routing, auth, Redis-backed rate limiting, proxy, retry, load balancing, circuit breaking, Prometheus-backed observability, the benchmark harness, and recorded benchmark artifacts.
 
-This document covers the target architecture, algorithms, failure modes, and key tradeoffs. Section 8 links to the ADR set that captures those decisions.
+This document covers the target architecture, algorithms, failure modes, and key tradeoffs. The ADR section near the end links the main design choices back to their written decisions.
 
 ---
 
@@ -25,7 +25,7 @@ This document covers the target architecture, algorithms, failure modes, and key
 
 IronGate uses two distinct middleware layers with different Go interfaces.
 
-**Current `main` snapshot:**
+**Current shipped snapshot:**
 
 ```text
 Outer: [Tracing] -> [Router] -> [Metrics] -> [Auth] -> [RateLimiter] -> [Proxy]

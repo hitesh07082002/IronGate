@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-IronGate is a reverse-proxy API gateway built from scratch using Go's `net/http` standard library. The current repo ships tracing, routing, load balancing, JWT authentication, Redis-backed sliding-window rate limiting, retry, circuit breaking, Prometheus/Grafana observability, hot reload, readiness, graceful shutdown, a benchmark harness, and recorded benchmark artifacts.
+IronGate is a reverse-proxy API gateway built from scratch using Go's `net/http` standard library. The current implementation ships tracing, routing, load balancing, JWT authentication, Redis-backed sliding-window rate limiting, retry, circuit breaking, Prometheus/Grafana observability, hot reload, readiness, graceful shutdown, a benchmark harness, and recorded benchmark artifacts.
 
 ## Key Documentation
 
@@ -15,7 +15,7 @@ IronGate is a reverse-proxy API gateway built from scratch using Go's `net/http`
 
 ## Source Of Truth
 
-- Treat the Git repo root, [`IronGate/`](./), as the only project root and source of truth.
+- Treat the project root, [`IronGate/`](./), as the only source of truth.
 - Treat [`ARCHITECTURE.md`](./ARCHITECTURE.md) as the current-runtime reference when code and docs disagree.
 - Treat [`PROJECT_SPEC.md`](./PROJECT_SPEC.md), [`DESIGN_DOC.md`](./DESIGN_DOC.md), and [`PROGRESS.md`](./PROGRESS.md) as the full-project and future-phase references.
 - Do not assume planned features are already shipped just because they appear in the full-project docs.
@@ -63,7 +63,7 @@ make run        # start gateway on :8080
 
 ## Config
 
-Gateway runtime config lives in `configs/gateway.yaml`. Shipped route-level settings on `main` include `auth_required`, `timeout`, `rate_limit`, `retry`, `load_balancer`, and `targets`. Top-level `circuit_breaker` and `redis` config are also live.
+Gateway runtime config lives in `configs/gateway.yaml`. Current route-level settings include `auth_required`, `timeout`, `rate_limit`, `retry`, `load_balancer`, and `targets`. Top-level `circuit_breaker` and `redis` config are also live.
 
 ## Skill Routing
 
