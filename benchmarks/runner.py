@@ -74,13 +74,7 @@ def run_command(args: argparse.Namespace, scenarios: dict[str, Any]) -> int:
     result_dir = determine_result_dir(args.result_dir, git_commit)
     result_dir.mkdir(parents=True, exist_ok=True)
 
-    benchmark_env = {
-        "JWT_SECRET": os.environ.get("JWT_SECRET", DEFAULT_JWT_SECRET),
-        "GRAFANA_ADMIN_USER": os.environ.get("GRAFANA_ADMIN_USER", DEFAULT_GRAFANA_USER),
-        "GRAFANA_ADMIN_PASSWORD": os.environ.get("GRAFANA_ADMIN_PASSWORD", DEFAULT_GRAFANA_PASSWORD),
-        "IRONGATE_TRUSTED_PROXIES": os.environ.get("IRONGATE_TRUSTED_PROXIES", DEFAULT_TRUSTED_PROXIES),
-        "IRONGATE_ALLOW_LOGIN_OVERRIDES": os.environ.get("IRONGATE_ALLOW_LOGIN_OVERRIDES", "true"),
-    }
+    benchmark_env = build_benchmark_env(skip_stack=args.skip_stack)
 
     stack_started = False
     if not args.skip_stack:
@@ -147,6 +141,30 @@ def ensure_dependencies(*, skip_stack: bool) -> None:
 
 def load_scenarios() -> dict[str, Any]:
     return json.loads(SCENARIOS_PATH.read_text())
+
+
+def build_benchmark_env(*, skip_stack: bool) -> dict[str, str]:
+    if skip_stack:
+        keys = (
+            "JWT_SECRET",
+            "GRAFANA_ADMIN_USER",
+            "GRAFANA_ADMIN_PASSWORD",
+            "IRONGATE_TRUSTED_PROXIES",
+            "IRONGATE_ALLOW_LOGIN_OVERRIDES",
+        )
+        return {
+            key: os.environ[key]
+            for key in keys
+            if key in os.environ
+        }
+
+    return {
+        "JWT_SECRET": os.environ.get("JWT_SECRET", DEFAULT_JWT_SECRET),
+        "GRAFANA_ADMIN_USER": os.environ.get("GRAFANA_ADMIN_USER", DEFAULT_GRAFANA_USER),
+        "GRAFANA_ADMIN_PASSWORD": os.environ.get("GRAFANA_ADMIN_PASSWORD", DEFAULT_GRAFANA_PASSWORD),
+        "IRONGATE_TRUSTED_PROXIES": os.environ.get("IRONGATE_TRUSTED_PROXIES", DEFAULT_TRUSTED_PROXIES),
+        "IRONGATE_ALLOW_LOGIN_OVERRIDES": os.environ.get("IRONGATE_ALLOW_LOGIN_OVERRIDES", "true"),
+    }
 
 
 def determine_result_dir(requested: str | None, git_commit: str) -> Path:
@@ -505,6 +523,8 @@ def normalize_command_part(part: str) -> str:
 
 def normalize_cli_path(raw: str) -> str:
     path = Path(raw).expanduser()
+    if not path.is_absolute():
+        path = (ROOT / path).resolve()
     try:
         relative = path.relative_to(ROOT)
         return f"./{relative.as_posix()}"
@@ -515,7 +535,7 @@ def normalize_cli_path(raw: str) -> str:
         relative = path.relative_to(Path.home())
         return f"$HOME/{relative.as_posix()}"
     except ValueError:
-        return path.name or raw
+        return path.as_posix()
 
 
 def shell_quote(value: str) -> str:
@@ -615,10 +635,16 @@ def refresh_suite_from_raw(result_dir: Path, suite: dict[str, Any]) -> dict[str,
             raw_metadata_path = scenario_dir / "scenario.json"
             raw_metadata = json.loads(raw_metadata_path.read_text()) if raw_metadata_path.exists() else scenario
             raw_summary = sanitize_k6_summary_file(scenario_dir / "k6-summary.json")
+            metrics_path = declared_metrics_path(raw_metadata.get("command"), scenario_dir)
             raw_metadata["metrics"] = summarize_metrics(raw_summary)
             raw_metadata["artifacts"] = benchmark_artifacts(
                 summary_path=scenario_dir / "k6-summary.json",
-                metrics_path=(scenario_dir / "k6-metrics.json") if (scenario_dir / "k6-metrics.json").exists() else None,
+                metrics_path=metrics_path,
+            )
+            raw_metadata["command"] = refresh_command_artifacts(
+                raw_metadata.get("command"),
+                summary_path=scenario_dir / "k6-summary.json",
+                metrics_path=metrics_path,
             )
             raw_metadata = sanitize_scenario_metadata(raw_metadata)
             write_json(scenario_dir / "scenario.json", raw_metadata)
@@ -635,10 +661,16 @@ def refresh_suite_from_raw(result_dir: Path, suite: dict[str, Any]) -> dict[str,
             raw_phase_path = phase_dir / "scenario.json"
             raw_phase = json.loads(raw_phase_path.read_text()) if raw_phase_path.exists() else phase
             raw_summary = sanitize_k6_summary_file(phase_dir / "k6-summary.json")
+            metrics_path = declared_metrics_path(raw_phase.get("command"), phase_dir)
             raw_phase["metrics"] = summarize_metrics(raw_summary)
             raw_phase["artifacts"] = benchmark_artifacts(
                 summary_path=phase_dir / "k6-summary.json",
-                metrics_path=(phase_dir / "k6-metrics.json") if (phase_dir / "k6-metrics.json").exists() else None,
+                metrics_path=metrics_path,
+            )
+            raw_phase["command"] = refresh_command_artifacts(
+                raw_phase.get("command"),
+                summary_path=phase_dir / "k6-summary.json",
+                metrics_path=metrics_path,
             )
             raw_phase = sanitize_scenario_metadata(raw_phase)
             write_json(phase_dir / "scenario.json", raw_phase)
@@ -1045,6 +1077,42 @@ def sanitize_command_string(command: str) -> str:
     return format_command(command_parts, env)
 
 
+def refresh_command_artifacts(command: Any, *, summary_path: Path, metrics_path: Path | None) -> Any:
+    if not isinstance(command, str):
+        return command
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        return command
+
+    refreshed: list[str] = []
+    index = 0
+    while index < len(parts):
+        part = parts[index]
+        if part == "--summary-export" and index + 1 < len(parts):
+            refreshed.extend([part, str(summary_path)])
+            index += 2
+            continue
+        if part == "--out" and index + 1 < len(parts):
+            out_value = parts[index + 1]
+            if out_value.startswith("json=") and metrics_path is not None:
+                refreshed.extend([part, f"json={metrics_path}"])
+                index += 2
+                continue
+        refreshed.append(part)
+        index += 1
+    return " ".join(shell_quote(part) for part in refreshed)
+
+
+def declared_metrics_path(command: Any, scenario_dir: Path) -> Path | None:
+    candidate = scenario_dir / "k6-metrics.json"
+    if candidate.exists():
+        return candidate
+    if isinstance(command, str) and "--out" in command and "json=" in command:
+        return candidate
+    return None
+
+
 def sanitize_k6_summary_file(path: Path) -> dict[str, Any]:
     summary = json.loads(path.read_text())
     summary = sanitize_k6_summary(summary)
@@ -1059,8 +1127,14 @@ def sanitize_k6_summary(summary: dict[str, Any]) -> dict[str, Any]:
 
     tokens = setup_data.get("tokens")
     if isinstance(tokens, list):
+        existing_count = setup_data.get("token_count")
         setup_data["tokens"] = []
-        setup_data["token_count"] = len(tokens)
+        if tokens:
+            setup_data["token_count"] = len(tokens)
+        elif isinstance(existing_count, int):
+            setup_data["token_count"] = existing_count
+        else:
+            setup_data["token_count"] = 0
     return summary
 
 

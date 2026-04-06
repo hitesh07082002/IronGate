@@ -260,7 +260,7 @@
             "vus": 1,
             "iterations": 8
           },
-          "command": "IRONGATE_BASE_URL='http://127.0.0.1:8080' IRONGATE_SCENARIO_NAME='circuit-breaker-transition-recovery:healthy-warmup' IRONGATE_METHOD='GET' IRONGATE_ROUTE_PATH='/api/payments/p-1' IRONGATE_EXPECTED_STATUSES='200' IRONGATE_VUS='1' IRONGATE_ITERATIONS='8' IRONGATE_AUTH_MODE='pool' IRONGATE_AUTH_POOL_SIZE='32' IRONGATE_LOGIN_SUBJECT_PREFIX='bench-cb-user' IRONGATE_LOGIN_ROLE='user' 'k6' 'run' '--summary-export' './benchmarks/results/20260406-033854-d1edb38/circuit-breaker-transition-recovery/healthy-warmup/k6-summary.json' '--out' 'json=k6-metrics.json' './benchmarks/route.js'",
+          "command": "IRONGATE_BASE_URL='http://127.0.0.1:8080' IRONGATE_SCENARIO_NAME='circuit-breaker-transition-recovery:healthy-warmup' IRONGATE_METHOD='GET' IRONGATE_ROUTE_PATH='/api/payments/p-1' IRONGATE_EXPECTED_STATUSES='200' IRONGATE_VUS='1' IRONGATE_ITERATIONS='8' IRONGATE_AUTH_MODE='pool' IRONGATE_AUTH_POOL_SIZE='32' IRONGATE_LOGIN_SUBJECT_PREFIX='bench-cb-user' IRONGATE_LOGIN_ROLE='user' 'k6' 'run' '--summary-export' './benchmarks/results/20260406-033854-d1edb38/circuit-breaker-transition-recovery/healthy-warmup/k6-summary.json' '--out' 'json=./benchmarks/results/20260406-033854-d1edb38/circuit-breaker-transition-recovery/healthy-warmup/k6-metrics.json' './benchmarks/route.js'",
           "environment": {
             "benchmark_stack": {
               "JWT_SECRET": "<redacted>",
@@ -332,7 +332,7 @@
             "vus": 1,
             "iterations": 8
           },
-          "command": "IRONGATE_BASE_URL='http://127.0.0.1:8080' IRONGATE_SCENARIO_NAME='circuit-breaker-transition-recovery:failure-trip' IRONGATE_METHOD='GET' IRONGATE_ROUTE_PATH='/api/payments/p-1' IRONGATE_EXPECTED_STATUSES='500,503' IRONGATE_VUS='1' IRONGATE_ITERATIONS='8' IRONGATE_AUTH_MODE='pool' IRONGATE_AUTH_POOL_SIZE='32' IRONGATE_LOGIN_SUBJECT_PREFIX='bench-cb-user' IRONGATE_LOGIN_ROLE='user' 'k6' 'run' '--summary-export' './benchmarks/results/20260406-033854-d1edb38/circuit-breaker-transition-recovery/failure-trip/k6-summary.json' '--out' 'json=k6-metrics.json' './benchmarks/route.js'",
+          "command": "IRONGATE_BASE_URL='http://127.0.0.1:8080' IRONGATE_SCENARIO_NAME='circuit-breaker-transition-recovery:failure-trip' IRONGATE_METHOD='GET' IRONGATE_ROUTE_PATH='/api/payments/p-1' IRONGATE_EXPECTED_STATUSES='500,503' IRONGATE_VUS='1' IRONGATE_ITERATIONS='8' IRONGATE_AUTH_MODE='pool' IRONGATE_AUTH_POOL_SIZE='32' IRONGATE_LOGIN_SUBJECT_PREFIX='bench-cb-user' IRONGATE_LOGIN_ROLE='user' 'k6' 'run' '--summary-export' './benchmarks/results/20260406-033854-d1edb38/circuit-breaker-transition-recovery/failure-trip/k6-summary.json' '--out' 'json=./benchmarks/results/20260406-033854-d1edb38/circuit-breaker-transition-recovery/failure-trip/k6-metrics.json' './benchmarks/route.js'",
           "environment": {
             "benchmark_stack": {
               "JWT_SECRET": "<redacted>",
@@ -403,7 +403,7 @@
             "vus": 1,
             "iterations": 4
           },
-          "command": "IRONGATE_BASE_URL='http://127.0.0.1:8080' IRONGATE_SCENARIO_NAME='circuit-breaker-transition-recovery:open-circuit' IRONGATE_METHOD='GET' IRONGATE_ROUTE_PATH='/api/payments/p-1' IRONGATE_EXPECTED_STATUSES='503' IRONGATE_VUS='1' IRONGATE_ITERATIONS='4' IRONGATE_AUTH_MODE='pool' IRONGATE_AUTH_POOL_SIZE='32' IRONGATE_LOGIN_SUBJECT_PREFIX='bench-cb-user' IRONGATE_LOGIN_ROLE='user' 'k6' 'run' '--summary-export' './benchmarks/results/20260406-033854-d1edb38/circuit-breaker-transition-recovery/open-circuit/k6-summary.json' '--out' 'json=k6-metrics.json' './benchmarks/route.js'",
+          "command": "IRONGATE_BASE_URL='http://127.0.0.1:8080' IRONGATE_SCENARIO_NAME='circuit-breaker-transition-recovery:open-circuit' IRONGATE_METHOD='GET' IRONGATE_ROUTE_PATH='/api/payments/p-1' IRONGATE_EXPECTED_STATUSES='503' IRONGATE_VUS='1' IRONGATE_ITERATIONS='4' IRONGATE_AUTH_MODE='pool' IRONGATE_AUTH_POOL_SIZE='32' IRONGATE_LOGIN_SUBJECT_PREFIX='bench-cb-user' IRONGATE_LOGIN_ROLE='user' 'k6' 'run' '--summary-export' './benchmarks/results/20260406-033854-d1edb38/circuit-breaker-transition-recovery/open-circuit/k6-summary.json' '--out' 'json=./benchmarks/results/20260406-033854-d1edb38/circuit-breaker-transition-recovery/open-circuit/k6-metrics.json' './benchmarks/route.js'",
           "environment": {
             "benchmark_stack": {
               "JWT_SECRET": "<redacted>",
@@ -474,7 +474,7 @@
             "vus": 1,
             "iterations": 5
           },
-          "command": "IRONGATE_BASE_URL='http://127.0.0.1:8080' IRONGATE_SCENARIO_NAME='circuit-breaker-transition-recovery:recovery' IRONGATE_METHOD='GET' IRONGATE_ROUTE_PATH='/api/payments/p-1' IRONGATE_EXPECTED_STATUSES='200' IRONGATE_VUS='1' IRONGATE_ITERATIONS='5' IRONGATE_AUTH_MODE='pool' IRONGATE_AUTH_POOL_SIZE='32' IRONGATE_LOGIN_SUBJECT_PREFIX='bench-cb-user' IRONGATE_LOGIN_ROLE='user' 'k6' 'run' '--summary-export' './benchmarks/results/20260406-033854-d1edb38/circuit-breaker-transition-recovery/recovery/k6-summary.json' '--out' 'json=k6-metrics.json' './benchmarks/route.js'",
+          "command": "IRONGATE_BASE_URL='http://127.0.0.1:8080' IRONGATE_SCENARIO_NAME='circuit-breaker-transition-recovery:recovery' IRONGATE_METHOD='GET' IRONGATE_ROUTE_PATH='/api/payments/p-1' IRONGATE_EXPECTED_STATUSES='200' IRONGATE_VUS='1' IRONGATE_ITERATIONS='5' IRONGATE_AUTH_MODE='pool' IRONGATE_AUTH_POOL_SIZE='32' IRONGATE_LOGIN_SUBJECT_PREFIX='bench-cb-user' IRONGATE_LOGIN_ROLE='user' 'k6' 'run' '--summary-export' './benchmarks/results/20260406-033854-d1edb38/circuit-breaker-transition-recovery/recovery/k6-summary.json' '--out' 'json=./benchmarks/results/20260406-033854-d1edb38/circuit-breaker-transition-recovery/recovery/k6-metrics.json' './benchmarks/route.js'",
           "environment": {
             "benchmark_stack": {
               "JWT_SECRET": "<redacted>",

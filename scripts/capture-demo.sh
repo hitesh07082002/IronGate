@@ -59,7 +59,12 @@ if [[ -z "${DEMO_SHELL}" || ! -x "${DEMO_SHELL}" ]]; then
   fi
 fi
 
-script -q "${TRANSCRIPT_PATH}" "${DEMO_SHELL}" -c "./demo.sh" | tee "${LOG_PATH}"
+if [[ "${CAPTURE_OS}" == "Darwin" ]]; then
+  script -q "${TRANSCRIPT_PATH}" "${DEMO_SHELL}" -c "./demo.sh" | tee "${LOG_PATH}"
+else
+  printf -v SCRIPT_COMMAND "%q -c %q" "${DEMO_SHELL}" "./demo.sh"
+  script -q -c "${SCRIPT_COMMAND}" "${TRANSCRIPT_PATH}" | tee "${LOG_PATH}"
+fi
 
 echo
 echo "Artifacts:"

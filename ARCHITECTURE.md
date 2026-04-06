@@ -119,14 +119,24 @@ irongate/
 │   ├── testutil/
 │   │   └── redis.go
 │   └── transport/
+│       ├── attempt.go
 │       ├── doc.go
+│       ├── errors.go
+│       ├── observability_test.go
 │       ├── resilient.go
+│       ├── resilient_test.go
+│       ├── retry.go
+│       ├── retry_test.go
+│       ├── circuitbreaker/
+│       │   ├── breaker.go
+│       │   ├── breaker_test.go
+│       │   └── registry.go
 │       └── loadbalancer/
 │           ├── balancer.go
-│           ├── round_robin.go
-│           ├── weighted.go
 │           ├── least_conn.go
-│           └── loadbalancer_test.go
+│           ├── loadbalancer_test.go
+│           ├── round_robin.go
+│           └── weighted.go
 ├── services/
 │   ├── common/
 │   │   ├── chaos.go

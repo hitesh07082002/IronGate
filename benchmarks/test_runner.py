@@ -83,6 +83,44 @@ class EnsureDependenciesTests(unittest.TestCase):
         self.assertEqual(str(raised.exception), "missing required tooling: docker-compose")
 
 
+class BenchmarkEnvTests(unittest.TestCase):
+    def test_build_benchmark_env_uses_managed_stack_defaults(self):
+        with mock.patch.dict(
+            os.environ,
+            {
+                "JWT_SECRET": "managed-secret",
+                "IRONGATE_ALLOW_LOGIN_OVERRIDES": "false",
+            },
+            clear=False,
+        ):
+            env = runner.build_benchmark_env(skip_stack=False)
+
+        self.assertEqual(env["JWT_SECRET"], "managed-secret")
+        self.assertEqual(env["GRAFANA_ADMIN_USER"], runner.DEFAULT_GRAFANA_USER)
+        self.assertEqual(env["IRONGATE_ALLOW_LOGIN_OVERRIDES"], "false")
+        self.assertEqual(env["IRONGATE_TRUSTED_PROXIES"], runner.DEFAULT_TRUSTED_PROXIES)
+
+    def test_build_benchmark_env_does_not_invent_skip_stack_defaults(self):
+        with mock.patch.dict(
+            os.environ,
+            {
+                "JWT_SECRET": "external-secret",
+                "IRONGATE_ALLOW_LOGIN_OVERRIDES": "true",
+                "UNRELATED": "keep-out",
+            },
+            clear=True,
+        ):
+            env = runner.build_benchmark_env(skip_stack=True)
+
+        self.assertEqual(
+            env,
+            {
+                "JWT_SECRET": "external-secret",
+                "IRONGATE_ALLOW_LOGIN_OVERRIDES": "true",
+            },
+        )
+
+
 class BuildK6EnvTests(unittest.TestCase):
     def test_build_k6_env_strips_inherited_irongate_keys(self):
         context = runner.RunContext(
@@ -155,6 +193,18 @@ class FormattingTests(unittest.TestCase):
         self.assertIn("'./benchmarks/route.js'", formatted)
         self.assertNotIn(str(runner.ROOT), formatted)
 
+    def test_sanitize_command_string_preserves_repo_relative_json_output_paths(self):
+        command = (
+            "IRONGATE_BASE_URL='http://127.0.0.1:8080' "
+            "'k6' 'run' '--summary-export' './benchmarks/results/demo/k6-summary.json' "
+            "'--out' 'json=./benchmarks/results/demo/k6-metrics.json' './benchmarks/route.js'"
+        )
+
+        sanitized = runner.sanitize_command_string(command)
+
+        self.assertIn("'--summary-export' './benchmarks/results/demo/k6-summary.json'", sanitized)
+        self.assertIn("'--out' 'json=./benchmarks/results/demo/k6-metrics.json'", sanitized)
+
 
 class SanitizationTests(unittest.TestCase):
     def test_summarize_metrics_reads_http_req_failed_value_field(self):
@@ -226,7 +276,10 @@ class RenderResultDirectoryTests(unittest.TestCase):
                     },
                     "auth": {"mode": "none"},
                     "load": {"vus": 4, "duration": "5s"},
-                    "command": f"'k6' 'run' '--summary-export' '{result_dir / 'baseline-public-routing' / 'k6-summary.json'}' '{runner.ROUTE_SCRIPT}'",
+                    "command": (
+                        f"'k6' 'run' '--summary-export' '{result_dir / 'baseline-public-routing' / 'k6-summary.json'}' "
+                        f"'--out' 'json=./k6-metrics.json' '{runner.ROUTE_SCRIPT}'"
+                    ),
                     "environment": {
                         "benchmark_stack": {
                             "JWT_SECRET": "demo-secret",
@@ -262,12 +315,17 @@ class RenderResultDirectoryTests(unittest.TestCase):
             self.assertEqual(scenario["environment"]["benchmark_stack"]["JWT_SECRET"], "<redacted>")
             self.assertNotIn("token_pool_json", scenario["artifacts"])
             self.assertNotIn(str(runner.ROOT), scenario["command"])
+            self.assertIn("baseline-public-routing/k6-metrics.json", scenario["command"])
             self.assertTrue((result_dir / "throughput.svg").exists())
             self.assertTrue((result_dir / "latency.svg").exists())
 
             raw_summary = json.loads((scenario_dir / "k6-summary.json").read_text())
             self.assertEqual(raw_summary["setup_data"]["tokens"], [])
             self.assertEqual(raw_summary["setup_data"]["token_count"], 2)
+
+            runner.render_result_directory(result_dir)
+            rerendered_summary = json.loads((scenario_dir / "k6-summary.json").read_text())
+            self.assertEqual(rerendered_summary["setup_data"]["token_count"], 2)
 
             run_context = json.loads((result_dir / "run-context.json").read_text())
             self.assertEqual(run_context["benchmark_stack"]["JWT_SECRET"], "<redacted>")
