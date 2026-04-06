@@ -1,0 +1,72 @@
+{
+  "name": "full-pipeline-normal",
+  "kind": "single",
+  "description": "Protected order traffic with a pool of authenticated demo users to exercise auth, rate limiting, retry, load balancing, and healthy circuit breakers together.",
+  "timestamp": "2026-04-06T03:39:58.281634+05:30",
+  "git_commit": "d1edb38",
+  "git_branch": "feat/phase-8-docs-benchmarks",
+  "base_url": "http://127.0.0.1:8080",
+  "request": {
+    "method": "GET",
+    "path": "/api/orders",
+    "expected_statuses": [
+      200
+    ]
+  },
+  "auth": {
+    "mode": "pool",
+    "pool_size": 1024,
+    "subject_prefix": "bench-order-user",
+    "role": "user"
+  },
+  "load": {
+    "vus": 24,
+    "duration": "20s",
+    "sleep_ms": 100
+  },
+  "command": "IRONGATE_BASE_URL='http://127.0.0.1:8080' IRONGATE_SCENARIO_NAME='full-pipeline-normal' IRONGATE_METHOD='GET' IRONGATE_ROUTE_PATH='/api/orders' IRONGATE_EXPECTED_STATUSES='200' IRONGATE_VUS='24' IRONGATE_DURATION='20s' IRONGATE_AUTH_MODE='pool' IRONGATE_AUTH_POOL_SIZE='1024' IRONGATE_LOGIN_SUBJECT_PREFIX='bench-order-user' IRONGATE_LOGIN_ROLE='user' 'k6' 'run' '--summary-export' './benchmarks/results/20260406-033854-d1edb38/full-pipeline-normal/k6-summary.json' '--out' 'json=./benchmarks/results/20260406-033854-d1edb38/full-pipeline-normal/k6-metrics.json' './benchmarks/route.js'",
+  "environment": {
+    "benchmark_stack": {
+      "JWT_SECRET": "<redacted>",
+      "GRAFANA_ADMIN_USER": "<redacted>",
+      "GRAFANA_ADMIN_PASSWORD": "<redacted>",
+      "IRONGATE_TRUSTED_PROXIES": "<configure-at-runtime>"
+    },
+    "hardware": {
+      "platform": "macOS-15.3-arm64-arm-64bit-Mach-O",
+      "machine": "arm64",
+      "python": "3.14.2",
+      "cpu": "Apple M4",
+      "logical_cpu_count": "10",
+      "memory_gb": 16.0
+    },
+    "software": {
+      "k6": "k6 v1.7.1 (commit/9f82e6f1fc, go1.26.1, darwin/arm64)",
+      "docker_compose": "Docker Compose version v2.35.1-desktop.1",
+      "go": "go version go1.24.4 darwin/arm64"
+    }
+  },
+  "artifacts": {
+    "summary_json": "benchmarks/results/20260406-033854-d1edb38/full-pipeline-normal/k6-summary.json"
+  },
+  "metrics": {
+    "throughput_rps": 230.152,
+    "requests_total": 4624,
+    "unexpected_failure_rate": 0.0,
+    "latency_ms": {
+      "avg": 3.375,
+      "p50": 2.924,
+      "p95": 6.471,
+      "p99": 11.081
+    },
+    "status_counts": {
+      "200": 4624,
+      "429": 0,
+      "500": 0,
+      "503": 0,
+      "other": 0
+    },
+    "unexpected_status_count": 0
+  },
+  "wall_time_seconds": 20.45
+}

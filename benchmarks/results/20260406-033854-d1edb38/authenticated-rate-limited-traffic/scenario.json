@@ -1,0 +1,71 @@
+{
+  "name": "authenticated-rate-limited-traffic",
+  "kind": "single",
+  "description": "Single authenticated identity hitting the payment status route until the Redis-backed limiter starts returning 429s.",
+  "timestamp": "2026-04-06T03:39:35.888205+05:30",
+  "git_commit": "d1edb38",
+  "git_branch": "feat/phase-8-docs-benchmarks",
+  "base_url": "http://127.0.0.1:8080",
+  "request": {
+    "method": "GET",
+    "path": "/api/payments/p-1",
+    "expected_statuses": [
+      200,
+      429
+    ]
+  },
+  "auth": {
+    "mode": "static",
+    "subject_prefix": "bench-rate-limit-user",
+    "role": "user"
+  },
+  "load": {
+    "vus": 8,
+    "duration": "20s"
+  },
+  "command": "IRONGATE_BASE_URL='http://127.0.0.1:8080' IRONGATE_SCENARIO_NAME='authenticated-rate-limited-traffic' IRONGATE_METHOD='GET' IRONGATE_ROUTE_PATH='/api/payments/p-1' IRONGATE_EXPECTED_STATUSES='200,429' IRONGATE_VUS='8' IRONGATE_DURATION='20s' IRONGATE_AUTH_MODE='static' IRONGATE_LOGIN_SUBJECT_PREFIX='bench-rate-limit-user' IRONGATE_LOGIN_ROLE='user' 'k6' 'run' '--summary-export' './benchmarks/results/20260406-033854-d1edb38/authenticated-rate-limited-traffic/k6-summary.json' '--out' 'json=./benchmarks/results/20260406-033854-d1edb38/authenticated-rate-limited-traffic/k6-metrics.json' './benchmarks/route.js'",
+  "environment": {
+    "benchmark_stack": {
+      "JWT_SECRET": "<redacted>",
+      "GRAFANA_ADMIN_USER": "<redacted>",
+      "GRAFANA_ADMIN_PASSWORD": "<redacted>",
+      "IRONGATE_TRUSTED_PROXIES": "<configure-at-runtime>"
+    },
+    "hardware": {
+      "platform": "macOS-15.3-arm64-arm-64bit-Mach-O",
+      "machine": "arm64",
+      "python": "3.14.2",
+      "cpu": "Apple M4",
+      "logical_cpu_count": "10",
+      "memory_gb": 16.0
+    },
+    "software": {
+      "k6": "k6 v1.7.1 (commit/9f82e6f1fc, go1.26.1, darwin/arm64)",
+      "docker_compose": "Docker Compose version v2.35.1-desktop.1",
+      "go": "go version go1.24.4 darwin/arm64"
+    }
+  },
+  "artifacts": {
+    "summary_json": "benchmarks/results/20260406-033854-d1edb38/authenticated-rate-limited-traffic/k6-summary.json"
+  },
+  "metrics": {
+    "throughput_rps": 5552.439,
+    "requests_total": 111062,
+    "unexpected_failure_rate": 0.0,
+    "latency_ms": {
+      "avg": 1.379,
+      "p50": 1.191,
+      "p95": 2.465,
+      "p99": 4.149
+    },
+    "status_counts": {
+      "200": 20,
+      "429": 111042,
+      "500": 0,
+      "503": 0,
+      "other": 0
+    },
+    "unexpected_status_count": 0
+  },
+  "wall_time_seconds": 20.34
+}

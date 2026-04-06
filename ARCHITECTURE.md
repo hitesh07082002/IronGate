@@ -1,24 +1,20 @@
-# IronGate — Implementation Reference
+# IronGate — Architecture Reference
 
-> This is the implementation reference for the current `main` branch.
+> Runtime reference for the shipped implementation.
 >
-> Project status: in progress. `main` has shipped Phase 1 foundation, Phase 2 load balancing, Phase 3 JWT authentication, Phase 4 Redis-backed rate limiting, Phase 5 retry plus circuit breaking, Phase 6 observability, and Phase 7 production-readiness runtime management. Later documentation and benchmark work remains planned.
->
-> For target end-state scope and design, see [`PROJECT_SPEC.md`](./PROJECT_SPEC.md) and [`DESIGN_DOC.md`](./DESIGN_DOC.md). If either conflicts with this file, this file wins for the current runtime.
+> Start with [`README.md`](./README.md) for the overview and demo path. Use [`PROJECT_SPEC.md`](./PROJECT_SPEC.md) for full scope and [`DESIGN_DOC.md`](./DESIGN_DOC.md) for target-state design. If those documents disagree with the code, this file is the source of truth for current behavior.
 
 ---
 
-## Current Runtime
+## How To Use This Document
 
-This file documents the architecture that is actually shipped on `main` today:
+This file covers:
 
-- live middleware and transport ordering
-- runtime-reference config contract and supported behavior
-- current headers, routes, and verification coverage
+- the live middleware and transport ordering
+- the shipped config contract and runtime behavior
+- the current request flow, headers, routes, and verification commands
 
-## Full Project Target Design
-
-The complete end-state and future-phase architecture lives in:
+For broader product scope and future work, use:
 
 - [`DESIGN_DOC.md`](./DESIGN_DOC.md) for target architecture, algorithms, and tradeoffs
 - [`PROJECT_SPEC.md`](./PROJECT_SPEC.md) for full feature scope and project requirements
@@ -26,9 +22,9 @@ The complete end-state and future-phase architecture lives in:
 
 ---
 
-## 1. Current Main Snapshot
+## 1. Shipped Snapshot
 
-### Shipped on `main`
+### What Is Shipped
 
 - Reverse proxy gateway built with `net/http` and `httputil.ReverseProxy`
 - Outer middleware chain: `Tracing -> Router -> Metrics -> Auth -> RateLimiter -> Proxy`
@@ -49,7 +45,12 @@ The complete end-state and future-phase architecture lives in:
 - Direct `/metrics` Prometheus handler with service-only labels
 - Gateway-exposed payment routes: `POST /api/payments` for creation and `GET /api/payments/{id}` for status lookup
 - `make load-test` backed by [`benchmarks/smoke.js`](./benchmarks/smoke.js)
+- `make benchmark` backed by [`benchmarks/scenarios.json`](./benchmarks/scenarios.json), [`benchmarks/route.js`](./benchmarks/route.js), and [`benchmarks/runner.py`](./benchmarks/runner.py)
+- `make benchmark-test` backed by [`benchmarks/test_runner.py`](./benchmarks/test_runner.py) to keep the benchmark artifact contract regression-tested
+- Recorded benchmark bundle under [`benchmarks/results/20260406-033854-d1edb38/`](./benchmarks/results/20260406-033854-d1edb38/README.md)
+- Top-level [`README.md`](./README.md) with quick start, architecture diagram, benchmark summary, and doc links
 - [`demo.sh`](./demo.sh) for an end-to-end local stack smoke run
+- [`scripts/capture-demo.sh`](./scripts/capture-demo.sh) plus [`artifacts/demo/README.md`](./artifacts/demo/README.md) for regenerating the 2-minute demo asset without committing a large binary
 - Docker Compose with:
   - `gateway`
   - `redis`
@@ -63,7 +64,7 @@ The complete end-state and future-phase architecture lives in:
   - Redis kept internal-only on the Compose network
   - Prometheus and Grafana bound to `127.0.0.1` on the host for local-only access
 
-The codebase still contains some future-facing config fields so later phases can plug into the same route model. On `main`, unsupported later-phase features such as non-sliding-window rate limiting still fail closed instead of being silently ignored.
+The codebase still contains some future-facing config fields so later phases can plug into the same route model. In the current implementation, unsupported later-phase features such as non-sliding-window rate limiting still fail closed instead of being silently ignored.
 
 ---
 
@@ -71,12 +72,23 @@ The codebase still contains some future-facing config fields so later phases can
 
 ```text
 irongate/
+├── README.md
+├── artifacts/
+│   └── demo/
+│       └── README.md
 ├── cmd/
 │   └── gateway/
 │       ├── main.go
 │       ├── main_test.go
 │       └── phase7_test.go
 ├── benchmarks/
+│   ├── results/
+│   │   ├── 20260406-033854-d1edb38/
+│   │   └── README.md
+│   ├── route.js
+│   ├── runner.py
+│   ├── scenarios.json
+│   ├── test_runner.py
 │   └── smoke.js
 ├── configs/
 │   └── gateway.yaml
@@ -107,14 +119,24 @@ irongate/
 │   ├── testutil/
 │   │   └── redis.go
 │   └── transport/
+│       ├── attempt.go
 │       ├── doc.go
+│       ├── errors.go
+│       ├── observability_test.go
 │       ├── resilient.go
+│       ├── resilient_test.go
+│       ├── retry.go
+│       ├── retry_test.go
+│       ├── circuitbreaker/
+│       │   ├── breaker.go
+│       │   ├── breaker_test.go
+│       │   └── registry.go
 │       └── loadbalancer/
 │           ├── balancer.go
-│           ├── round_robin.go
-│           ├── weighted.go
 │           ├── least_conn.go
-│           └── loadbalancer_test.go
+│           ├── loadbalancer_test.go
+│           ├── round_robin.go
+│           └── weighted.go
 ├── services/
 │   ├── common/
 │   │   ├── chaos.go
@@ -127,12 +149,10 @@ irongate/
 ├── ADR/
 ├── DESIGN_DOC.md
 ├── PROJECT_SPEC.md
-└── PROGRESS.md
+├── PROGRESS.md
+└── scripts/
+    └── capture-demo.sh
 ```
-
-Only list files here that exist on `main`.
-
----
 
 ## 3. Current Request Pipeline
 
@@ -170,16 +190,20 @@ Direct internal paths bypass the service middleware chain entirely.
 
 #### `Tracing`
 
+Implemented in [`internal/middleware/tracing.go`](./internal/middleware/tracing.go).
+
 - Strips incoming `X-Request-ID`, `X-User-ID`, and `X-User-Role`
 - Always generates a fresh UUID request ID
 - Writes the generated `X-Request-ID` to both the upstream request and client response
 - Logs request start and completion with status and latency
 
-This is a deliberate sanitization boundary. Client-supplied request IDs are not trusted on `main`.
+This is a deliberate sanitization boundary. Client-supplied request IDs are not trusted in the current runtime.
 
 The direct `/health`, `/ready`, and `/metrics` handlers also strip `X-Request-ID`, `X-User-ID`, and `X-User-Role`, then issue a fresh gateway request ID before responding.
 
 #### `Router`
+
+Implemented in [`internal/middleware/router.go`](./internal/middleware/router.go).
 
 - Sorts routes by descending path length at startup
 - Uses longest-prefix matching
@@ -189,6 +213,8 @@ The direct `/health`, `/ready`, and `/metrics` handlers also strip `X-Request-ID
 - Stores the matched `RouteConfig` in request context
 
 #### `Auth`
+
+Implemented in [`internal/middleware/auth.go`](./internal/middleware/auth.go). The demo user service in [`services/user-service/main.go`](./services/user-service/main.go) can also accept benchmark-only `subject` and `role` overrides on `/users/login` when `IRONGATE_ALLOW_LOGIN_OVERRIDES=true`; the default runtime keeps that override path disabled.
 
 - Reads the matched `RouteConfig` from context
 - Skips routes with `auth_required: false`
@@ -203,13 +229,16 @@ The direct `/health`, `/ready`, and `/metrics` handlers also strip `X-Request-ID
 
 #### `RateLimiter`
 
+Implemented in [`internal/middleware/ratelimit.go`](./internal/middleware/ratelimit.go) and [`internal/ratelimit/store.go`](./internal/ratelimit/store.go).
+
 - Reads the matched `RouteConfig` from context
 - Skips routes with `rate_limit: null`
-- Supports `sliding_window` only on `main`
+- Supports `sliding_window` only in the current runtime
 - Uses authenticated `X-User-ID` when present
 - Falls back to client IP for unauthenticated routes
 - Trusts `X-Forwarded-For` only for explicitly wired trusted proxy IPs
-- Defaults to trusting no proxies on `main`
+- Defaults to trusting no proxies on the runtime path
+- Parses the optional `IRONGATE_TRUSTED_PROXIES` env var in [`cmd/gateway/main.go`](./cmd/gateway/main.go) so the benchmark stack can emulate many public clients from one host without weakening the default runtime contract
 - Uses a Redis Lua script plus sorted sets for atomic sliding-window enforcement
 - Keys counters as `rate_limit:{client_key}:{route.Path}`
 - Uses the gateway-generated `X-Request-ID` as the Redis sorted-set member
@@ -223,6 +252,8 @@ The direct `/health`, `/ready`, and `/metrics` handlers also strip `X-Request-ID
 - Retained only as a compatibility shim for legacy references and tests
 
 #### `Proxy`
+
+Implemented in [`internal/proxy/proxy.go`](./internal/proxy/proxy.go).
 
 - Still handles `gateway-internal` routes defensively if they reach the proxy, but `/health` and `/ready` are intercepted earlier by the runtime manager
 - Applies per-route timeout with fallback to server `WriteTimeout`
@@ -245,6 +276,8 @@ Retry owns the per-attempt loop, load balancer target selection, and circuit-bre
 
 ### Retry Transport
 
+Implemented in [`internal/transport/retry.go`](./internal/transport/retry.go).
+
 - Reads per-route retry config from `RouteConfig` in context
 - Retries only idempotent methods by default: `GET`, `HEAD`, `PUT`, `DELETE`, `OPTIONS`
 - Retries only `502`, `503`, `504`, plus transient connection and timeout errors
@@ -255,6 +288,8 @@ Retry owns the per-attempt loop, load balancer target selection, and circuit-bre
 
 ### Load Balancer Transport
 
+Implemented in [`internal/transport/resilient.go`](./internal/transport/resilient.go).
+
 - Reads the matched `RouteConfig` from context
 - Selects a target inside the transport layer, not in the proxy director path
 - Clones the request before mutating upstream URL/host
@@ -264,6 +299,8 @@ Retry owns the per-attempt loop, load balancer target selection, and circuit-bre
 - Releases least-connection counters when the response body is fully read or closed
 
 ### Circuit Breaker Transport
+
+Implemented in [`internal/transport/resilient.go`](./internal/transport/resilient.go) plus the breaker state machine in [`internal/transport/circuitbreaker/`](./internal/transport/circuitbreaker/).
 
 - Maintains a concurrent-safe per-target (`host:port`) breaker registry
 - Counts only `5xx` responses plus connection and timeout failures toward opening a circuit
@@ -306,7 +343,7 @@ The proxy in [`internal/proxy/proxy.go`](./internal/proxy/proxy.go):
 - strips `route.StripPrefix` from `URL.Path` and `URL.RawPath`
 - calls `ProxyRequest.SetXForwarded()`
 
-That means `main` now forwards:
+That means the current implementation forwards:
 
 - `X-Forwarded-For`
 - `X-Forwarded-Host`
@@ -317,13 +354,13 @@ The upstream `Host` header is the selected upstream instance, not the original c
 
 ---
 
-## 6. Config Contract on `main`
+## 6. Config Contract
 
 The `Config` and `RouteConfig` structs in [`internal/config/config.go`](./internal/config/config.go) already include some future-phase fields. That is intentional.
 
 ### Default shipped route fields
 
-The checked-in [`configs/gateway.yaml`](./configs/gateway.yaml) only uses fields supported on `main`:
+The checked-in [`configs/gateway.yaml`](./configs/gateway.yaml) only uses fields supported in the current runtime:
 
 - `path`
 - `strip_prefix`
@@ -353,7 +390,7 @@ for the local Grafana instance.
 
 ### Runtime-supported live fields
 
-These config fields are live on `main` today:
+These config fields are live in the current runtime:
 
 - route-level `retry`
 - top-level `circuit_breaker`
@@ -374,7 +411,7 @@ These fields exist in config structs today but are not live features yet:
 
 - `logging`
 
-Rules on `main`:
+Rules in the current runtime:
 
 - Keeping these fields in the struct is allowed
 - Retry, circuit-breaker, and metrics settings are runtime-supported and validated on load
@@ -383,7 +420,7 @@ Rules on `main`:
 
 ---
 
-## 7. Error and Header Rules on `main`
+## 7. Error and Header Rules
 
 ### Standard error body
 
@@ -417,12 +454,12 @@ Upstreams currently see:
 - no forwarded `Authorization` header on protected routes after gateway auth succeeds
 - `X-Served-By` on the response back to the client
 
-## 8. Observability on `main`
+## 8. Observability
 
-- `/metrics` is mounted directly in [`cmd/gateway/main.go`](./cmd/gateway/main.go). It does not flow through router auth, rate limiting, or proxy logic.
+- `/metrics` is served directly by [`internal/runtime/manager.go`](./internal/runtime/manager.go), not by the service middleware chain.
 - The metrics endpoint strips `X-User-ID`, `X-User-Role`, and `X-Request-ID` before handling the request and only serves loopback or private-network clients.
 - Every gateway-exported application metric uses only the `{service}` label.
-- Exported application series on `main`:
+- Exported application series in the current runtime:
   - `gateway_requests_total`
   - `gateway_request_failures_total`
   - `gateway_request_duration_seconds`
@@ -438,22 +475,27 @@ Upstreams currently see:
 
 ## 9. Verification
 
-Current repo verification commands:
+Verification commands:
 
 ```bash
 make lint
+make build
 IRONGATE_TEST_REDIS_ADDR=127.0.0.1:6379 make test
 IRONGATE_TEST_REDIS_ADDR=127.0.0.1:6379 make coverage
 IRONGATE_TEST_REDIS_ADDR=127.0.0.1:6379 make test-race
-make build
+make benchmark-test
 make load-test
+mise x k6@1.7.1 -- make benchmark
 ```
 
 `make test`, `make coverage`, and `make test-race` require a running Redis instance when you want the Redis-backed integration tests to execute locally. Without `IRONGATE_TEST_REDIS_ADDR`, those Redis integration tests are skipped.
 
 `make coverage` enforces a repo-wide statement coverage floor of 70%.
+`make benchmark-test` exercises the Python benchmark runner without requiring a live stack.
 `make load-test` requires `k6` plus a reachable gateway, defaulting to `http://127.0.0.1:8080`.
+`make benchmark` requires `k6`, boots the benchmark contract from [`benchmarks/scenarios.json`](./benchmarks/scenarios.json), and records machine-readable bundles under [`benchmarks/results/`](./benchmarks/results/README.md).
 [`demo.sh`](./demo.sh) boots the local Compose stack, waits for `/ready`, exercises protected routes, samples `/metrics`, and then runs the k6 smoke test.
+[`scripts/capture-demo.sh`](./scripts/capture-demo.sh) always captures the demo transcript and optionally records an MP4 on macOS when `ffmpeg` plus an `avfoundation` `IRONGATE_CAPTURE_SOURCE` are configured; [`artifacts/demo/README.md`](./artifacts/demo/README.md) covers Linux and Windows alternatives.
 
 Key test coverage lives in:
 

@@ -1,6 +1,6 @@
 # IronGate — Project Specification
 
-> **Status:** In Progress
+> **Status:** Core scope shipped, stretch goals pending
 > **Author:** Hitesh Sadhwani
 > **Last Updated:** April 2026
 >
@@ -11,28 +11,28 @@
 
 ## 1. Overview
 
-**IronGate** is a lightweight, configurable API gateway built in Go. The target end-state handles routing, authentication, rate limiting, load balancing, circuit breaking, retry with exponential backoff, and observability through a single YAML config file.
+**IronGate** is a configurable API gateway built in Go. The target end-state handles routing, authentication, rate limiting, load balancing, circuit breaking, retry with exponential backoff, and observability through a single YAML config file.
 
-Current status on `main`: Phase 1 foundation, Phase 2 load balancing, Phase 3 JWT authentication, Phase 4 Redis-backed rate limiting, Phase 5 retry plus circuit breaking, Phase 6 observability, and Phase 7 runtime-readiness management are shipped.
+The current implementation already ships Phases 1 through 8: gateway foundations, load balancing, JWT authentication, Redis-backed rate limiting, retry plus circuit breaking, observability, runtime-readiness management, and documentation plus benchmark artifacts.
 
-Target end-state: a single `docker-compose up` brings up the gateway, backend services, Redis, Prometheus, and Grafana. Current `main` does that for the shipped auth plus load-balancing plus rate-limiting plus resilience plus observability plus readiness flow, with `JWT_SECRET`, `GRAFANA_ADMIN_USER`, and `GRAFANA_ADMIN_PASSWORD` supplied through the environment.
+Target end-state: a single `docker-compose up` brings up the gateway, backend services, Redis, Prometheus, and Grafana. The shipped project already supports that local system for the current runtime path, with `JWT_SECRET`, `GRAFANA_ADMIN_USER`, and `GRAFANA_ADMIN_PASSWORD` supplied through the environment.
 
 ---
 
 ## 2. Motivation
 
-### Why I'm Building This
+### Project Goals
 
-I'm a junior backend engineer with 1 year of experience at e2e Cloud. I work around infrastructure daily but haven't built infrastructure myself. Most junior portfolios are CRUD apps with a React frontend and a REST API — they blur together. I want to build something that:
+This project is meant to be both a serious systems exercise and a strong public portfolio artifact. The goals are to build something that:
 
 - Proves I understand **how production systems actually work** under the hood
 - Shows I can think in terms of **system design**, not just feature development
 - Demonstrates skills that are **directly relevant** to infrastructure/platform/backend roles
-- Gives me a project I can **talk about for 30 minutes** in any interview without running out of depth
+- Gives me a project that can hold up under a **deep technical discussion** without running out of depth
 
 ### Why an API Gateway
 
-Every request in a microservices architecture passes through a gateway. It's the single most critical piece of infrastructure — handling auth, rate limiting, routing, resilience, and observability. Companies like Netflix (Zuul), Kong, Cloudflare, and AWS have entire teams dedicated to this.
+Every request in a microservices architecture passes through a gateway. It is the control point for auth, rate limiting, routing, resilience, and observability. Mature platforms such as Kong, Cloudflare, AWS, and Netflix's gateway stack all invest heavily in this layer because it sits directly on the reliability and security path.
 
 Building one from scratch means I have to deeply understand:
 
@@ -44,7 +44,7 @@ Building one from scratch means I have to deeply understand:
 
 ### Why Go
 
-Every serious proxy in production — Traefik, Caddy, KrakenD, Envoy's control plane — is written in Go. The stdlib has `net/http` and `httputil.ReverseProxy` built in. Go is the industry standard for this class of infrastructure, and choosing it sends the right signal for backend/infrastructure roles.
+Go is a strong fit for this class of infrastructure. Its standard library already provides `net/http` and `httputil.ReverseProxy`, and its concurrency model maps cleanly to high-throughput network services. The language choice keeps the project close to the tooling and implementation style used across modern backend and platform engineering teams.
 
 ### Constraints
 
@@ -101,7 +101,7 @@ Every serious proxy in production — Traefik, Caddy, KrakenD, Envoy's control p
 
 ## 4. Feature Requirements
 
-> This section defines the target end-state behavior for the full project. `main` currently ships only a subset of these requirements. For current runtime behavior, see [`ARCHITECTURE.md`](./ARCHITECTURE.md) and [`PROGRESS.md`](./PROGRESS.md).
+> This section defines the target end-state behavior for the full project. The current implementation ships only a subset of these requirements. For current runtime behavior, see [`ARCHITECTURE.md`](./ARCHITECTURE.md) and [`PROGRESS.md`](./PROGRESS.md).
 
 ### 4.1 Config-Driven Routing
 
@@ -202,11 +202,11 @@ Three strategies, selectable per route:
 - Rate-limit rejections over time by service
 - Upstream P95 latency by service
 
-The default checked-in dashboard intentionally focuses on the primary service trend panels above. `gateway_in_flight_requests{service}` and `gateway_retry_delay_seconds{service}` are exported in Prometheus for ad hoc queries and future dashboard expansion, but they are not visualized by default on `main`.
+The default checked-in dashboard intentionally focuses on the primary service trend panels above. `gateway_in_flight_requests{service}` and `gateway_retry_delay_seconds{service}` are exported in Prometheus for ad hoc queries and future dashboard expansion, but they are not visualized by default in the current runtime.
 
 ### 4.8 Distributed Tracing
 
-- Gateway sanitizes incoming `X-Request-ID` and generates a fresh request ID on `main`
+- Gateway sanitizes incoming `X-Request-ID` and generates a fresh request ID in the current runtime
 - Request ID appears in every structured JSON log entry
 - Headers propagated to upstream: `X-Request-ID`, `X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto`, `X-User-ID`, `X-User-Role`
 - On protected routes, the original `Authorization` bearer token is not forwarded after gateway auth succeeds
@@ -238,7 +238,7 @@ Every implemented middleware and proxy path should return errors in this format,
 
 ## 5. Config Schema
 
-Target end-state schema for the full gateway. The shipped Phase 5 runtime config on `main` is a smaller subset and intentionally omits later-phase fields until those behaviors land.
+Target end-state schema for the full gateway. The shipped runtime config is a smaller subset and intentionally omits later-phase fields until those behaviors land.
 
 ```yaml
 server:
@@ -526,6 +526,12 @@ Also running:
 - [ ] README tells a complete story with diagrams, quick start, and demo
 - [ ] Architecture decisions documented with tradeoffs in ADRs
 - [ ] Project can be demoed in under 5 minutes with `demo.sh`
+
+Phase 8 reconciliation note:
+
+- The committed benchmark bundle lives in [`benchmarks/results/20260406-033854-d1edb38/`](./benchmarks/results/20260406-033854-d1edb38/README.md).
+- The committed run was captured on local Apple M4 hardware, not the planned 2-vCPU VPS target, so the explicit 2-vCPU success criterion remains a post-deploy validation item.
+- The README, benchmark suite, recorded graphs, architecture docs, and demo-capture workflow are present in this repo.
 
 ## GSTACK REVIEW REPORT
 

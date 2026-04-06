@@ -1,0 +1,526 @@
+{
+  "generated_at": "2026-04-06T03:40:30.795984+05:30",
+  "scenarios": [
+    {
+      "name": "baseline-public-routing",
+      "kind": "single",
+      "description": "Public login traffic routed through the gateway with distributed client IPs so the public bucket does not dominate the latency profile.",
+      "timestamp": "2026-04-06T03:39:15.518651+05:30",
+      "git_commit": "d1edb38",
+      "git_branch": "feat/phase-8-docs-benchmarks",
+      "base_url": "http://127.0.0.1:8080",
+      "request": {
+        "method": "POST",
+        "path": "/api/users/login",
+        "expected_statuses": [
+          200
+        ],
+        "xff_mode": "per_request"
+      },
+      "auth": {
+        "mode": "none"
+      },
+      "load": {
+        "vus": 24,
+        "duration": "20s"
+      },
+      "command": "IRONGATE_BASE_URL='http://127.0.0.1:8080' IRONGATE_SCENARIO_NAME='baseline-public-routing' IRONGATE_METHOD='POST' IRONGATE_ROUTE_PATH='/api/users/login' IRONGATE_EXPECTED_STATUSES='200' IRONGATE_VUS='24' IRONGATE_DURATION='20s' IRONGATE_XFF_MODE='per_request' IRONGATE_AUTH_MODE='none' 'k6' 'run' '--summary-export' './benchmarks/results/20260406-033854-d1edb38/baseline-public-routing/k6-summary.json' '--out' 'json=./benchmarks/results/20260406-033854-d1edb38/baseline-public-routing/k6-metrics.json' './benchmarks/route.js'",
+      "environment": {
+        "benchmark_stack": {
+          "JWT_SECRET": "<redacted>",
+          "GRAFANA_ADMIN_USER": "<redacted>",
+          "GRAFANA_ADMIN_PASSWORD": "<redacted>",
+          "IRONGATE_TRUSTED_PROXIES": "<configure-at-runtime>"
+        },
+        "hardware": {
+          "platform": "macOS-15.3-arm64-arm-64bit-Mach-O",
+          "machine": "arm64",
+          "python": "3.14.2",
+          "cpu": "Apple M4",
+          "logical_cpu_count": "10",
+          "memory_gb": 16.0
+        },
+        "software": {
+          "k6": "k6 v1.7.1 (commit/9f82e6f1fc, go1.26.1, darwin/arm64)",
+          "docker_compose": "Docker Compose version v2.35.1-desktop.1",
+          "go": "go version go1.24.4 darwin/arm64"
+        }
+      },
+      "artifacts": {
+        "summary_json": "benchmarks/results/20260406-033854-d1edb38/baseline-public-routing/k6-summary.json"
+      },
+      "metrics": {
+        "throughput_rps": 3799.534,
+        "requests_total": 76016,
+        "unexpected_failure_rate": 0.0,
+        "latency_ms": {
+          "avg": 6.24,
+          "p50": 4.821,
+          "p95": 12.904,
+          "p99": 31.962
+        },
+        "status_counts": {
+          "200": 76016,
+          "429": 0,
+          "500": 0,
+          "503": 0,
+          "other": 0
+        },
+        "unexpected_status_count": 0
+      },
+      "wall_time_seconds": 20.41
+    },
+    {
+      "name": "authenticated-rate-limited-traffic",
+      "kind": "single",
+      "description": "Single authenticated identity hitting the payment status route until the Redis-backed limiter starts returning 429s.",
+      "timestamp": "2026-04-06T03:39:35.888205+05:30",
+      "git_commit": "d1edb38",
+      "git_branch": "feat/phase-8-docs-benchmarks",
+      "base_url": "http://127.0.0.1:8080",
+      "request": {
+        "method": "GET",
+        "path": "/api/payments/p-1",
+        "expected_statuses": [
+          200,
+          429
+        ]
+      },
+      "auth": {
+        "mode": "static",
+        "subject_prefix": "bench-rate-limit-user",
+        "role": "user"
+      },
+      "load": {
+        "vus": 8,
+        "duration": "20s"
+      },
+      "command": "IRONGATE_BASE_URL='http://127.0.0.1:8080' IRONGATE_SCENARIO_NAME='authenticated-rate-limited-traffic' IRONGATE_METHOD='GET' IRONGATE_ROUTE_PATH='/api/payments/p-1' IRONGATE_EXPECTED_STATUSES='200,429' IRONGATE_VUS='8' IRONGATE_DURATION='20s' IRONGATE_AUTH_MODE='static' IRONGATE_LOGIN_SUBJECT_PREFIX='bench-rate-limit-user' IRONGATE_LOGIN_ROLE='user' 'k6' 'run' '--summary-export' './benchmarks/results/20260406-033854-d1edb38/authenticated-rate-limited-traffic/k6-summary.json' '--out' 'json=./benchmarks/results/20260406-033854-d1edb38/authenticated-rate-limited-traffic/k6-metrics.json' './benchmarks/route.js'",
+      "environment": {
+        "benchmark_stack": {
+          "JWT_SECRET": "<redacted>",
+          "GRAFANA_ADMIN_USER": "<redacted>",
+          "GRAFANA_ADMIN_PASSWORD": "<redacted>",
+          "IRONGATE_TRUSTED_PROXIES": "<configure-at-runtime>"
+        },
+        "hardware": {
+          "platform": "macOS-15.3-arm64-arm-64bit-Mach-O",
+          "machine": "arm64",
+          "python": "3.14.2",
+          "cpu": "Apple M4",
+          "logical_cpu_count": "10",
+          "memory_gb": 16.0
+        },
+        "software": {
+          "k6": "k6 v1.7.1 (commit/9f82e6f1fc, go1.26.1, darwin/arm64)",
+          "docker_compose": "Docker Compose version v2.35.1-desktop.1",
+          "go": "go version go1.24.4 darwin/arm64"
+        }
+      },
+      "artifacts": {
+        "summary_json": "benchmarks/results/20260406-033854-d1edb38/authenticated-rate-limited-traffic/k6-summary.json"
+      },
+      "metrics": {
+        "throughput_rps": 5552.439,
+        "requests_total": 111062,
+        "unexpected_failure_rate": 0.0,
+        "latency_ms": {
+          "avg": 1.379,
+          "p50": 1.191,
+          "p95": 2.465,
+          "p99": 4.149
+        },
+        "status_counts": {
+          "200": 20,
+          "429": 111042,
+          "500": 0,
+          "503": 0,
+          "other": 0
+        },
+        "unexpected_status_count": 0
+      },
+      "wall_time_seconds": 20.34
+    },
+    {
+      "name": "full-pipeline-normal",
+      "kind": "single",
+      "description": "Protected order traffic with a pool of authenticated demo users to exercise auth, rate limiting, retry, load balancing, and healthy circuit breakers together.",
+      "timestamp": "2026-04-06T03:39:58.281634+05:30",
+      "git_commit": "d1edb38",
+      "git_branch": "feat/phase-8-docs-benchmarks",
+      "base_url": "http://127.0.0.1:8080",
+      "request": {
+        "method": "GET",
+        "path": "/api/orders",
+        "expected_statuses": [
+          200
+        ]
+      },
+      "auth": {
+        "mode": "pool",
+        "pool_size": 1024,
+        "subject_prefix": "bench-order-user",
+        "role": "user"
+      },
+      "load": {
+        "vus": 24,
+        "duration": "20s",
+        "sleep_ms": 100
+      },
+      "command": "IRONGATE_BASE_URL='http://127.0.0.1:8080' IRONGATE_SCENARIO_NAME='full-pipeline-normal' IRONGATE_METHOD='GET' IRONGATE_ROUTE_PATH='/api/orders' IRONGATE_EXPECTED_STATUSES='200' IRONGATE_VUS='24' IRONGATE_DURATION='20s' IRONGATE_AUTH_MODE='pool' IRONGATE_AUTH_POOL_SIZE='1024' IRONGATE_LOGIN_SUBJECT_PREFIX='bench-order-user' IRONGATE_LOGIN_ROLE='user' 'k6' 'run' '--summary-export' './benchmarks/results/20260406-033854-d1edb38/full-pipeline-normal/k6-summary.json' '--out' 'json=./benchmarks/results/20260406-033854-d1edb38/full-pipeline-normal/k6-metrics.json' './benchmarks/route.js'",
+      "environment": {
+        "benchmark_stack": {
+          "JWT_SECRET": "<redacted>",
+          "GRAFANA_ADMIN_USER": "<redacted>",
+          "GRAFANA_ADMIN_PASSWORD": "<redacted>",
+          "IRONGATE_TRUSTED_PROXIES": "<configure-at-runtime>"
+        },
+        "hardware": {
+          "platform": "macOS-15.3-arm64-arm-64bit-Mach-O",
+          "machine": "arm64",
+          "python": "3.14.2",
+          "cpu": "Apple M4",
+          "logical_cpu_count": "10",
+          "memory_gb": 16.0
+        },
+        "software": {
+          "k6": "k6 v1.7.1 (commit/9f82e6f1fc, go1.26.1, darwin/arm64)",
+          "docker_compose": "Docker Compose version v2.35.1-desktop.1",
+          "go": "go version go1.24.4 darwin/arm64"
+        }
+      },
+      "artifacts": {
+        "summary_json": "benchmarks/results/20260406-033854-d1edb38/full-pipeline-normal/k6-summary.json"
+      },
+      "metrics": {
+        "throughput_rps": 230.152,
+        "requests_total": 4624,
+        "unexpected_failure_rate": 0.0,
+        "latency_ms": {
+          "avg": 3.375,
+          "p50": 2.924,
+          "p95": 6.471,
+          "p99": 11.081
+        },
+        "status_counts": {
+          "200": 4624,
+          "429": 0,
+          "500": 0,
+          "503": 0,
+          "other": 0
+        },
+        "unexpected_status_count": 0
+      },
+      "wall_time_seconds": 20.45
+    },
+    {
+      "name": "circuit-breaker-transition-recovery",
+      "kind": "phased",
+      "description": "Payment route across healthy traffic, upstream failure, open-circuit fast rejection, and recovery after the breaker timeout.",
+      "timestamp": "2026-04-06T03:40:30.795062+05:30",
+      "git_commit": "d1edb38",
+      "git_branch": "feat/phase-8-docs-benchmarks",
+      "request": {
+        "method": "GET",
+        "path": "/api/payments/p-1"
+      },
+      "auth": {
+        "mode": "pool",
+        "pool_size": 32,
+        "subject_prefix": "bench-cb-user",
+        "role": "user"
+      },
+      "chaos": {
+        "reset_url": "http://127.0.0.1:18083/chaos/reset",
+        "errors_url": "http://127.0.0.1:18083/chaos/errors"
+      },
+      "phases": [
+        {
+          "name": "circuit-breaker-transition-recovery:healthy-warmup",
+          "kind": "single",
+          "description": "Healthy upstream responses before inducing failures.",
+          "timestamp": "2026-04-06T03:39:58.670561+05:30",
+          "git_commit": "d1edb38",
+          "git_branch": "feat/phase-8-docs-benchmarks",
+          "base_url": "http://127.0.0.1:8080",
+          "request": {
+            "method": "GET",
+            "path": "/api/payments/p-1",
+            "expected_statuses": [
+              200
+            ]
+          },
+          "auth": {
+            "mode": "pool",
+            "pool_size": 32,
+            "subject_prefix": "bench-cb-user",
+            "role": "user"
+          },
+          "load": {
+            "vus": 1,
+            "iterations": 8
+          },
+          "command": "IRONGATE_BASE_URL='http://127.0.0.1:8080' IRONGATE_SCENARIO_NAME='circuit-breaker-transition-recovery:healthy-warmup' IRONGATE_METHOD='GET' IRONGATE_ROUTE_PATH='/api/payments/p-1' IRONGATE_EXPECTED_STATUSES='200' IRONGATE_VUS='1' IRONGATE_ITERATIONS='8' IRONGATE_AUTH_MODE='pool' IRONGATE_AUTH_POOL_SIZE='32' IRONGATE_LOGIN_SUBJECT_PREFIX='bench-cb-user' IRONGATE_LOGIN_ROLE='user' 'k6' 'run' '--summary-export' './benchmarks/results/20260406-033854-d1edb38/circuit-breaker-transition-recovery/healthy-warmup/k6-summary.json' '--out' 'json=./benchmarks/results/20260406-033854-d1edb38/circuit-breaker-transition-recovery/healthy-warmup/k6-metrics.json' './benchmarks/route.js'",
+          "environment": {
+            "benchmark_stack": {
+              "JWT_SECRET": "<redacted>",
+              "GRAFANA_ADMIN_USER": "<redacted>",
+              "GRAFANA_ADMIN_PASSWORD": "<redacted>",
+              "IRONGATE_TRUSTED_PROXIES": "<configure-at-runtime>"
+            },
+            "hardware": {
+              "platform": "macOS-15.3-arm64-arm-64bit-Mach-O",
+              "machine": "arm64",
+              "python": "3.14.2",
+              "cpu": "Apple M4",
+              "logical_cpu_count": "10",
+              "memory_gb": 16.0
+            },
+            "software": {
+              "k6": "k6 v1.7.1 (commit/9f82e6f1fc, go1.26.1, darwin/arm64)",
+              "docker_compose": "Docker Compose version v2.35.1-desktop.1",
+              "go": "go version go1.24.4 darwin/arm64"
+            }
+          },
+          "artifacts": {
+            "summary_json": "benchmarks/results/20260406-033854-d1edb38/circuit-breaker-transition-recovery/healthy-warmup/k6-summary.json"
+          },
+          "metrics": {
+            "throughput_rps": 807.021,
+            "requests_total": 8,
+            "unexpected_failure_rate": 0.0,
+            "latency_ms": {
+              "avg": 1.036,
+              "p50": 0.691,
+              "p95": 1.868,
+              "p99": 1.962
+            },
+            "status_counts": {
+              "200": 8,
+              "429": 0,
+              "500": 0,
+              "503": 0,
+              "other": 0
+            },
+            "unexpected_status_count": 0
+          },
+          "wall_time_seconds": 0.33
+        },
+        {
+          "name": "circuit-breaker-transition-recovery:failure-trip",
+          "kind": "single",
+          "description": "Forced 500s until the per-target breaker crosses the failure threshold.",
+          "timestamp": "2026-04-06T03:39:59.020584+05:30",
+          "git_commit": "d1edb38",
+          "git_branch": "feat/phase-8-docs-benchmarks",
+          "base_url": "http://127.0.0.1:8080",
+          "request": {
+            "method": "GET",
+            "path": "/api/payments/p-1",
+            "expected_statuses": [
+              500,
+              503
+            ]
+          },
+          "auth": {
+            "mode": "pool",
+            "pool_size": 32,
+            "subject_prefix": "bench-cb-user",
+            "role": "user"
+          },
+          "load": {
+            "vus": 1,
+            "iterations": 8
+          },
+          "command": "IRONGATE_BASE_URL='http://127.0.0.1:8080' IRONGATE_SCENARIO_NAME='circuit-breaker-transition-recovery:failure-trip' IRONGATE_METHOD='GET' IRONGATE_ROUTE_PATH='/api/payments/p-1' IRONGATE_EXPECTED_STATUSES='500,503' IRONGATE_VUS='1' IRONGATE_ITERATIONS='8' IRONGATE_AUTH_MODE='pool' IRONGATE_AUTH_POOL_SIZE='32' IRONGATE_LOGIN_SUBJECT_PREFIX='bench-cb-user' IRONGATE_LOGIN_ROLE='user' 'k6' 'run' '--summary-export' './benchmarks/results/20260406-033854-d1edb38/circuit-breaker-transition-recovery/failure-trip/k6-summary.json' '--out' 'json=./benchmarks/results/20260406-033854-d1edb38/circuit-breaker-transition-recovery/failure-trip/k6-metrics.json' './benchmarks/route.js'",
+          "environment": {
+            "benchmark_stack": {
+              "JWT_SECRET": "<redacted>",
+              "GRAFANA_ADMIN_USER": "<redacted>",
+              "GRAFANA_ADMIN_PASSWORD": "<redacted>",
+              "IRONGATE_TRUSTED_PROXIES": "<configure-at-runtime>"
+            },
+            "hardware": {
+              "platform": "macOS-15.3-arm64-arm-64bit-Mach-O",
+              "machine": "arm64",
+              "python": "3.14.2",
+              "cpu": "Apple M4",
+              "logical_cpu_count": "10",
+              "memory_gb": 16.0
+            },
+            "software": {
+              "k6": "k6 v1.7.1 (commit/9f82e6f1fc, go1.26.1, darwin/arm64)",
+              "docker_compose": "Docker Compose version v2.35.1-desktop.1",
+              "go": "go version go1.24.4 darwin/arm64"
+            }
+          },
+          "artifacts": {
+            "summary_json": "benchmarks/results/20260406-033854-d1edb38/circuit-breaker-transition-recovery/failure-trip/k6-summary.json"
+          },
+          "metrics": {
+            "throughput_rps": 798.164,
+            "requests_total": 8,
+            "unexpected_failure_rate": 0.0,
+            "latency_ms": {
+              "avg": 1.022,
+              "p50": 0.813,
+              "p95": 2.099,
+              "p99": 2.542
+            },
+            "status_counts": {
+              "200": 0,
+              "429": 0,
+              "500": 5,
+              "503": 3,
+              "other": 0
+            },
+            "unexpected_status_count": 0
+          },
+          "wall_time_seconds": 0.35
+        },
+        {
+          "name": "circuit-breaker-transition-recovery:open-circuit",
+          "kind": "single",
+          "description": "Requests after the breaker opens and the gateway fast-rejects the dead upstream.",
+          "timestamp": "2026-04-06T03:39:59.353051+05:30",
+          "git_commit": "d1edb38",
+          "git_branch": "feat/phase-8-docs-benchmarks",
+          "base_url": "http://127.0.0.1:8080",
+          "request": {
+            "method": "GET",
+            "path": "/api/payments/p-1",
+            "expected_statuses": [
+              503
+            ]
+          },
+          "auth": {
+            "mode": "pool",
+            "pool_size": 32,
+            "subject_prefix": "bench-cb-user",
+            "role": "user"
+          },
+          "load": {
+            "vus": 1,
+            "iterations": 4
+          },
+          "command": "IRONGATE_BASE_URL='http://127.0.0.1:8080' IRONGATE_SCENARIO_NAME='circuit-breaker-transition-recovery:open-circuit' IRONGATE_METHOD='GET' IRONGATE_ROUTE_PATH='/api/payments/p-1' IRONGATE_EXPECTED_STATUSES='503' IRONGATE_VUS='1' IRONGATE_ITERATIONS='4' IRONGATE_AUTH_MODE='pool' IRONGATE_AUTH_POOL_SIZE='32' IRONGATE_LOGIN_SUBJECT_PREFIX='bench-cb-user' IRONGATE_LOGIN_ROLE='user' 'k6' 'run' '--summary-export' './benchmarks/results/20260406-033854-d1edb38/circuit-breaker-transition-recovery/open-circuit/k6-summary.json' '--out' 'json=./benchmarks/results/20260406-033854-d1edb38/circuit-breaker-transition-recovery/open-circuit/k6-metrics.json' './benchmarks/route.js'",
+          "environment": {
+            "benchmark_stack": {
+              "JWT_SECRET": "<redacted>",
+              "GRAFANA_ADMIN_USER": "<redacted>",
+              "GRAFANA_ADMIN_PASSWORD": "<redacted>",
+              "IRONGATE_TRUSTED_PROXIES": "<configure-at-runtime>"
+            },
+            "hardware": {
+              "platform": "macOS-15.3-arm64-arm-64bit-Mach-O",
+              "machine": "arm64",
+              "python": "3.14.2",
+              "cpu": "Apple M4",
+              "logical_cpu_count": "10",
+              "memory_gb": 16.0
+            },
+            "software": {
+              "k6": "k6 v1.7.1 (commit/9f82e6f1fc, go1.26.1, darwin/arm64)",
+              "docker_compose": "Docker Compose version v2.35.1-desktop.1",
+              "go": "go version go1.24.4 darwin/arm64"
+            }
+          },
+          "artifacts": {
+            "summary_json": "benchmarks/results/20260406-033854-d1edb38/circuit-breaker-transition-recovery/open-circuit/k6-summary.json"
+          },
+          "metrics": {
+            "throughput_rps": 738.689,
+            "requests_total": 4,
+            "unexpected_failure_rate": 0.0,
+            "latency_ms": {
+              "avg": 1.039,
+              "p50": 0.743,
+              "p95": 1.781,
+              "p99": 1.923
+            },
+            "status_counts": {
+              "200": 0,
+              "429": 0,
+              "500": 0,
+              "503": 4,
+              "other": 0
+            },
+            "unexpected_status_count": 0
+          },
+          "wall_time_seconds": 0.33
+        },
+        {
+          "name": "circuit-breaker-transition-recovery:recovery",
+          "kind": "single",
+          "description": "Reset chaos, wait past the breaker timeout, then confirm traffic succeeds again.",
+          "timestamp": "2026-04-06T03:40:30.791788+05:30",
+          "git_commit": "d1edb38",
+          "git_branch": "feat/phase-8-docs-benchmarks",
+          "base_url": "http://127.0.0.1:8080",
+          "request": {
+            "method": "GET",
+            "path": "/api/payments/p-1",
+            "expected_statuses": [
+              200
+            ]
+          },
+          "auth": {
+            "mode": "pool",
+            "pool_size": 32,
+            "subject_prefix": "bench-cb-user",
+            "role": "user"
+          },
+          "load": {
+            "vus": 1,
+            "iterations": 5
+          },
+          "command": "IRONGATE_BASE_URL='http://127.0.0.1:8080' IRONGATE_SCENARIO_NAME='circuit-breaker-transition-recovery:recovery' IRONGATE_METHOD='GET' IRONGATE_ROUTE_PATH='/api/payments/p-1' IRONGATE_EXPECTED_STATUSES='200' IRONGATE_VUS='1' IRONGATE_ITERATIONS='5' IRONGATE_AUTH_MODE='pool' IRONGATE_AUTH_POOL_SIZE='32' IRONGATE_LOGIN_SUBJECT_PREFIX='bench-cb-user' IRONGATE_LOGIN_ROLE='user' 'k6' 'run' '--summary-export' './benchmarks/results/20260406-033854-d1edb38/circuit-breaker-transition-recovery/recovery/k6-summary.json' '--out' 'json=./benchmarks/results/20260406-033854-d1edb38/circuit-breaker-transition-recovery/recovery/k6-metrics.json' './benchmarks/route.js'",
+          "environment": {
+            "benchmark_stack": {
+              "JWT_SECRET": "<redacted>",
+              "GRAFANA_ADMIN_USER": "<redacted>",
+              "GRAFANA_ADMIN_PASSWORD": "<redacted>",
+              "IRONGATE_TRUSTED_PROXIES": "<configure-at-runtime>"
+            },
+            "hardware": {
+              "platform": "macOS-15.3-arm64-arm-64bit-Mach-O",
+              "machine": "arm64",
+              "python": "3.14.2",
+              "cpu": "Apple M4",
+              "logical_cpu_count": "10",
+              "memory_gb": 16.0
+            },
+            "software": {
+              "k6": "k6 v1.7.1 (commit/9f82e6f1fc, go1.26.1, darwin/arm64)",
+              "docker_compose": "Docker Compose version v2.35.1-desktop.1",
+              "go": "go version go1.24.4 darwin/arm64"
+            }
+          },
+          "artifacts": {
+            "summary_json": "benchmarks/results/20260406-033854-d1edb38/circuit-breaker-transition-recovery/recovery/k6-summary.json"
+          },
+          "metrics": {
+            "throughput_rps": 425.387,
+            "requests_total": 5,
+            "unexpected_failure_rate": 0.0,
+            "latency_ms": {
+              "avg": 1.589,
+              "p50": 0.982,
+              "p95": 3.475,
+              "p99": 3.838
+            },
+            "status_counts": {
+              "200": 5,
+              "429": 0,
+              "500": 0,
+              "503": 0,
+              "other": 0
+            },
+            "unexpected_status_count": 0
+          },
+          "wall_time_seconds": 0.43
+        }
+      ]
+    }
+  ]
+}

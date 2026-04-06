@@ -1,3 +1,9 @@
 bin/
 .DS_Store
 coverage.out
+benchmarks/__pycache__/
+benchmarks/results/**/k6-metrics.json
+artifacts/demo/*.gif
+artifacts/demo/*.log
+artifacts/demo/*.mp4
+artifacts/demo/*.typescript

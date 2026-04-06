@@ -1,6 +1,6 @@
 # IronGate — Technical Design Document
 
-> **Status:** Approved target design with current-main annotations
+> **Status:** Approved target design with shipped-runtime annotations
 > **Author:** Hitesh Sadhwani
 > **Last Updated:** April 2026
 >
@@ -11,11 +11,11 @@
 
 ## 1. Summary
 
-IronGate is being built as a configurable API gateway in Go using a two-tier middleware pipeline — the same pattern production gateways like Traefik use. The target outer chain (`http.Handler`) handles request-level concerns (tracing, routing, auth, rate limiting), while the target inner chain (`http.RoundTripper`) handles transport-level concerns (retry, load balancing, circuit breaking). This separation is what makes retry-aware load balancing and per-target circuit breaking possible.
+IronGate is designed as a configurable API gateway in Go using a two-tier middleware pipeline. The outer chain (`http.Handler`) handles request-level concerns such as tracing, routing, auth, and rate limiting. The inner chain (`http.RoundTripper`) handles transport-level concerns such as retry, load balancing, and circuit breaking. That split is what makes retry-aware load balancing and per-target circuit breaking possible.
 
-Current status on `main`: the two-tier split already exists, and tracing, routing, auth, Redis-backed rate limiting, proxy, retry, load balancing, circuit breaking, and Prometheus-backed observability are live.
+The current implementation already ships that two-tier split plus tracing, routing, auth, Redis-backed rate limiting, proxy, retry, load balancing, circuit breaking, Prometheus-backed observability, the benchmark harness, and recorded benchmark artifacts.
 
-This document covers the target architecture, algorithms, failure modes, and key tradeoffs. Section 8 links to the ADR set that captures those decisions.
+This document covers the target architecture, algorithms, failure modes, and key tradeoffs. The ADR section near the end links the main design choices back to their written decisions.
 
 ---
 
@@ -25,7 +25,7 @@ This document covers the target architecture, algorithms, failure modes, and key
 
 IronGate uses two distinct middleware layers with different Go interfaces.
 
-**Current `main` snapshot:**
+**Current shipped snapshot:**
 
 ```text
 Outer: [Tracing] -> [Router] -> [Metrics] -> [Auth] -> [RateLimiter] -> [Proxy]
@@ -97,8 +97,8 @@ See [ADR-002: Auth Before Rate Limiting](./ADR/002-auth-before-rate-limiting.md)
                    │           API GATEWAY (:8080)               │  │
                    │                                             │  │
                    │  ┌── OUTER CHAIN (http.Handler) ──────────┐ │  │
-                   │  │  [Tracing] → [Router] → [Auth]         │ │  │
-                   │  │  → [RateLimiter] → [Proxy]            │ │  │
+                   │  │  [Tracing] → [Router] → [Metrics]      │ │  │
+                   │  │  → [Auth] → [RateLimiter] → [Proxy]   │ │  │
                    │  └────────────────────────────────────────┘ │  │
                    │                    │                         │  │
                    │  ┌── INNER CHAIN (http.RoundTripper) ─────┐ │  │
@@ -386,7 +386,7 @@ See [ADR-003: Fail-Open Rate Limiting](./ADR/003-fail-open-rate-limiting.md).
 | Auth | `golang-jwt/jwt/v5` | Standard JWT library for Go. |
 | Hot Reload | `fsnotify` + `atomic.Pointer[RuntimeSnapshot]` | Filesystem event-based reloads that swap fully-built runtime snapshots without mutating live middleware. |
 | Load Testing | k6 | JavaScript-based, excellent reporting, open source. |
-| Containerization | Docker + Docker Compose | `docker-compose up` = local system (current `main` requires `JWT_SECRET`, `GRAFANA_ADMIN_USER`, and `GRAFANA_ADMIN_PASSWORD` in the environment). Reproducible. |
+| Containerization | Docker + Docker Compose | `docker-compose up` = local system (this repo expects `JWT_SECRET`, `GRAFANA_ADMIN_USER`, and `GRAFANA_ADMIN_PASSWORD` in the environment). Reproducible. |
 | TLS (prod) | Caddy | Auto Let's Encrypt. Zero-config HTTPS. |
 
 ---

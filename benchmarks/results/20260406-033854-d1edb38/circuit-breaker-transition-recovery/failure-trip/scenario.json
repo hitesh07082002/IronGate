@@ -1,0 +1,72 @@
+{
+  "name": "circuit-breaker-transition-recovery:failure-trip",
+  "kind": "single",
+  "description": "Forced 500s until the per-target breaker crosses the failure threshold.",
+  "timestamp": "2026-04-06T03:39:59.020584+05:30",
+  "git_commit": "d1edb38",
+  "git_branch": "feat/phase-8-docs-benchmarks",
+  "base_url": "http://127.0.0.1:8080",
+  "request": {
+    "method": "GET",
+    "path": "/api/payments/p-1",
+    "expected_statuses": [
+      500,
+      503
+    ]
+  },
+  "auth": {
+    "mode": "pool",
+    "pool_size": 32,
+    "subject_prefix": "bench-cb-user",
+    "role": "user"
+  },
+  "load": {
+    "vus": 1,
+    "iterations": 8
+  },
+  "command": "IRONGATE_BASE_URL='http://127.0.0.1:8080' IRONGATE_SCENARIO_NAME='circuit-breaker-transition-recovery:failure-trip' IRONGATE_METHOD='GET' IRONGATE_ROUTE_PATH='/api/payments/p-1' IRONGATE_EXPECTED_STATUSES='500,503' IRONGATE_VUS='1' IRONGATE_ITERATIONS='8' IRONGATE_AUTH_MODE='pool' IRONGATE_AUTH_POOL_SIZE='32' IRONGATE_LOGIN_SUBJECT_PREFIX='bench-cb-user' IRONGATE_LOGIN_ROLE='user' 'k6' 'run' '--summary-export' './benchmarks/results/20260406-033854-d1edb38/circuit-breaker-transition-recovery/failure-trip/k6-summary.json' '--out' 'json=./benchmarks/results/20260406-033854-d1edb38/circuit-breaker-transition-recovery/failure-trip/k6-metrics.json' './benchmarks/route.js'",
+  "environment": {
+    "benchmark_stack": {
+      "JWT_SECRET": "<redacted>",
+      "GRAFANA_ADMIN_USER": "<redacted>",
+      "GRAFANA_ADMIN_PASSWORD": "<redacted>",
+      "IRONGATE_TRUSTED_PROXIES": "<configure-at-runtime>"
+    },
+    "hardware": {
+      "platform": "macOS-15.3-arm64-arm-64bit-Mach-O",
+      "machine": "arm64",
+      "python": "3.14.2",
+      "cpu": "Apple M4",
+      "logical_cpu_count": "10",
+      "memory_gb": 16.0
+    },
+    "software": {
+      "k6": "k6 v1.7.1 (commit/9f82e6f1fc, go1.26.1, darwin/arm64)",
+      "docker_compose": "Docker Compose version v2.35.1-desktop.1",
+      "go": "go version go1.24.4 darwin/arm64"
+    }
+  },
+  "artifacts": {
+    "summary_json": "benchmarks/results/20260406-033854-d1edb38/circuit-breaker-transition-recovery/failure-trip/k6-summary.json"
+  },
+  "metrics": {
+    "throughput_rps": 798.164,
+    "requests_total": 8,
+    "unexpected_failure_rate": 0.0,
+    "latency_ms": {
+      "avg": 1.022,
+      "p50": 0.813,
+      "p95": 2.099,
+      "p99": 2.542
+    },
+    "status_counts": {
+      "200": 0,
+      "429": 0,
+      "500": 5,
+      "503": 3,
+      "other": 0
+    },
+    "unexpected_status_count": 0
+  },
+  "wall_time_seconds": 0.35
+}

@@ -20,6 +20,7 @@ services:
       - "8080:8080"
     environment:
       JWT_SECRET: "${JWT_SECRET:?JWT_SECRET must be set}"
+      IRONGATE_TRUSTED_PROXIES: "${IRONGATE_TRUSTED_PROXIES:-}"
 
   prometheus:
     image: prom/prometheus:v2.53.1
@@ -64,6 +65,7 @@ services:
       dockerfile: services/user-service/Dockerfile
     environment:
       JWT_SECRET: "${JWT_SECRET:?JWT_SECRET must be set}"
+      IRONGATE_ALLOW_LOGIN_OVERRIDES: "${IRONGATE_ALLOW_LOGIN_OVERRIDES:-false}"
 
   user-service-2:
     build:
@@ -72,6 +74,7 @@ services:
     environment:
       PORT: 8091
       JWT_SECRET: "${JWT_SECRET:?JWT_SECRET must be set}"
+      IRONGATE_ALLOW_LOGIN_OVERRIDES: "${IRONGATE_ALLOW_LOGIN_OVERRIDES:-false}"
 
   order-service-1:
     build:
@@ -89,3 +92,5 @@ services:
     build:
       context: .
       dockerfile: services/payment-service/Dockerfile
+    ports:
+      - "127.0.0.1:18083:8083"
