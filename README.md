@@ -73,6 +73,8 @@ Run the same smoke benchmark later, with the local stack still running:
 make load-test
 ```
 
+Need the full curl-based path instead of `./demo.sh`? Use [`docs/demo-walkthrough.md`](./docs/demo-walkthrough.md).
+
 ## Production Deployment
 
 Production for this repo is intentionally simple:
@@ -101,25 +103,6 @@ make check-production
 ```
 
 After bootstrap, day-to-day deploys use the dedicated `irongate` deploy user by default. The full operator workflow, safety rails, and release layout live in [`deploy/README.md`](./deploy/README.md).
-
-## Manual Walkthrough
-
-```bash
-export JWT_SECRET=demo-secret
-export GRAFANA_ADMIN_USER=admin
-export GRAFANA_ADMIN_PASSWORD=admin
-docker compose up -d --build
-until curl -fsS http://127.0.0.1:8080/ready; do sleep 2; done
-TOKEN="$(curl -fsS -X POST http://127.0.0.1:8080/api/users/login | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')"
-curl -fsS -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8080/api/users
-curl -fsS -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8080/api/orders
-curl -fsS -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8080/api/payments/p-1
-curl -fsS http://127.0.0.1:8080/health
-curl -fsS http://127.0.0.1:8080/metrics | sed -n '1,20p'
-docker compose down
-```
-
-If your machine only has the legacy `docker-compose` binary, substitute `docker-compose` for `docker compose`.
 
 ## What IronGate Includes
 
@@ -167,42 +150,16 @@ make benchmark
 ```
 
 `make benchmark` writes a timestamped result bundle under `benchmarks/results/`.
+The committed benchmark snapshot and performance notes live in [`docs/benchmarks.md`](./docs/benchmarks.md).
 
 ## Demo Capture
 
 For a shareable terminal transcript or video, use [`scripts/capture-demo.sh`](./scripts/capture-demo.sh). Full capture instructions live in [`artifacts/demo/README.md`](./artifacts/demo/README.md).
 
-## Benchmark Snapshot
-
-Recorded benchmark bundle: [`benchmarks/results/20260406-033854-d1edb38/`](./benchmarks/results/20260406-033854-d1edb38/README.md)
-
-Committed run environment:
-
-- Apple M4, 10 logical CPU cores, 16 GB RAM
-- `k6 v1.7.1`
-- Docker Compose `v2.35.1`
-- Go `1.24.4`
-
-Main scenario highlights from that run:
-
-| Scenario | Contract | Result |
-|---|---|---:|
-| Baseline public routing | `POST /api/users/login`, 24 VUs, 20s, distributed client IPs | `3799.53 req/s`, `p50 4.82 ms`, `p95 12.90 ms`, `p99 31.96 ms` |
-| Authenticated + rate-limited traffic | `GET /api/payments/p-1`, 8 VUs, 20s, single authenticated identity | `111,042` rate-limited `429` responses after the first `20` successful requests |
-| Full pipeline under normal conditions | `GET /api/orders`, 24 VUs, 20s, 1024 authenticated demo users, 100 ms pacing | `230.15 req/s`, `p50 2.92 ms`, `p95 6.47 ms`, `p99 11.08 ms` |
-
-Circuit-breaker proof artifact: [`circuit-breaker-behavior.svg`](./benchmarks/results/20260406-033854-d1edb38/circuit-breaker-transition-recovery/circuit-breaker-behavior.svg)
-
-Benchmark note: the local benchmark stack sets `IRONGATE_TRUSTED_PROXIES=0.0.0.0/0,::/0` so one host can emulate many client IPs through `X-Forwarded-For`, and it enables login-claim overrides only inside the benchmark Compose stack so auth scenarios can mint distinct demo identities. Those are benchmark-only local settings. The default runtime still trusts no proxies and rejects login claim overrides unless explicitly configured.
-
 ## Troubleshooting
 
-- If `./demo.sh` says Docker is not reachable, start Docker Desktop or Docker Engine first.
-- If `http://127.0.0.1:8080` is already in use, stop the conflicting service before running the demo.
-- If `./demo.sh` says `k6` is required, run `mise install` in the repo root and rerun it.
-- If you want to inspect Prometheus or Grafana after the walkthrough, rerun `./demo.sh --keep-stack`, then stop it with `./demo.sh --teardown`.
-- If `make load-test` says the gateway is not reachable, start the local stack first and rerun it.
-- If you are deploying to production, keep `IRONGATE_GATEWAY_BIND_HOST=127.0.0.1` so the gateway is only reachable through Caddy.
+Local troubleshooting lives in [`docs/troubleshooting.md`](./docs/troubleshooting.md).
+Production troubleshooting stays in [`deploy/README.md`](./deploy/README.md).
 
 ## Docs Map
 
@@ -210,6 +167,9 @@ Benchmark note: the local benchmark stack sets `IRONGATE_TRUSTED_PROXIES=0.0.0.0
 - [`PROJECT_SPEC.md`](./PROJECT_SPEC.md): full project scope and success criteria
 - [`DESIGN_DOC.md`](./DESIGN_DOC.md): target-state design and algorithms
 - [`PROGRESS.md`](./PROGRESS.md): shipped phases and open stretch goals
+- [`docs/demo-walkthrough.md`](./docs/demo-walkthrough.md): manual local walkthrough and inspection path
+- [`docs/benchmarks.md`](./docs/benchmarks.md): benchmark commands, committed snapshot, and performance notes
+- [`docs/troubleshooting.md`](./docs/troubleshooting.md): local troubleshooting and common demo-path fixes
 - [`docs/phase9-planning/PHASE9_CHAOS_OBSERVATORY_SPEC_v2.2.md`](./docs/phase9-planning/PHASE9_CHAOS_OBSERVATORY_SPEC_v2.2.md): approved Phase 9 planning spec
 - [`docs/phase9-planning/PHASE9_IMPLEMENTATION_PLAN_v1.2.md`](./docs/phase9-planning/PHASE9_IMPLEMENTATION_PLAN_v1.2.md): ordered Phase 9 implementation plan
 - [`docs/phase9-planning/DECISIONS_LOCK.md`](./docs/phase9-planning/DECISIONS_LOCK.md): locked Phase 9 implementation decisions
