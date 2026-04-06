@@ -70,7 +70,7 @@ Gateway runtime config lives in `configs/gateway.yaml`. Current route-level sett
 - Production URL: https://irongate.hiteshsadhwani.xyz
 - Deploy workflow: local SSH deploy via `./scripts/deploy-production.sh`
 - Deploy status command: `curl -fsS https://irongate.hiteshsadhwani.xyz/ready`
-- Merge method: merge
+- Merge method: squash
 - Project type: API
 - Post-deploy health check: `./scripts/check-production-health.sh`
 
