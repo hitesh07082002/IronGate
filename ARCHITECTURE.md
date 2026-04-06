@@ -485,15 +485,16 @@ IRONGATE_TEST_REDIS_ADDR=127.0.0.1:6379 make coverage
 IRONGATE_TEST_REDIS_ADDR=127.0.0.1:6379 make test-race
 make benchmark-test
 make load-test
-mise x k6@1.7.1 -- make benchmark
+make benchmark
 ```
 
 `make test`, `make coverage`, and `make test-race` require a running Redis instance when you want the Redis-backed integration tests to execute locally. Without `IRONGATE_TEST_REDIS_ADDR`, those Redis integration tests are skipped.
 
 `make coverage` enforces a repo-wide statement coverage floor of 70%.
 `make benchmark-test` exercises the Python benchmark runner without requiring a live stack.
+Run `mise install` once in the repo root to install the pinned `k6` toolchain used by the benchmark commands.
 `make load-test` requires `k6` plus a reachable gateway, defaulting to `http://127.0.0.1:8080`.
-`make benchmark` requires `k6`, boots the benchmark contract from [`benchmarks/scenarios.json`](./benchmarks/scenarios.json), and records machine-readable bundles under [`benchmarks/results/`](./benchmarks/results/README.md).
+`make benchmark` uses the same `k6` setup, boots the benchmark contract from [`benchmarks/scenarios.json`](./benchmarks/scenarios.json), and records machine-readable bundles under [`benchmarks/results/`](./benchmarks/results/README.md).
 [`demo.sh`](./demo.sh) boots the local Compose stack, waits for `/ready`, exercises protected routes, samples `/metrics`, and then runs the k6 smoke test.
 [`scripts/capture-demo.sh`](./scripts/capture-demo.sh) always captures the demo transcript and optionally records an MP4 on macOS when `ffmpeg` plus an `avfoundation` `IRONGATE_CAPTURE_SOURCE` are configured; [`artifacts/demo/README.md`](./artifacts/demo/README.md) covers Linux and Windows alternatives.
 

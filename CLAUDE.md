@@ -53,13 +53,14 @@ make lint       # gofmt check + go vet
 make all        # alias to build
 make build      # compile gateway binary
 make benchmark-test  # exercise the Python benchmark runner contract
-mise x k6@1.7.1 -- make benchmark  # run the full benchmark suite
+make benchmark  # run the full benchmark suite
 ./demo.sh       # local under-five-minute demo flow
 make clean      # remove generated binaries and coverage artifacts
 make run        # start gateway on :8080
 ```
 
 `make test`, `make coverage`, and `make test-race` require a running Redis instance when you want the Redis-backed integration tests to execute locally. Without `IRONGATE_TEST_REDIS_ADDR`, those Redis integration tests are skipped.
+Run `mise install` once in the repo root to install the pinned `k6` toolchain used by `make benchmark`, `make load-test`, and `./demo.sh`.
 
 ## Config
 

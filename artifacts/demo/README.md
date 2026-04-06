@@ -12,13 +12,17 @@ The project does not commit a large binary demo asset by default. The source of 
 ## Capture A Fresh 2-Minute Demo
 
 1. Make sure Docker is running.
-2. Confirm the walkthrough itself works first:
+2. Install the pinned `k6` toolchain once from the repo root:
+
+   ```bash
+   mise install
+   ```
+
+3. Confirm the walkthrough itself works first:
 
    ```bash
    ./demo.sh
    ```
-
-   `./demo.sh` now succeeds even if `k6` is not installed locally. In that case it skips the optional smoke benchmark and prints the follow-up command.
 
    If you want the stack left running while you prepare capture tools or inspect Grafana/Prometheus first, use:
 
@@ -31,7 +35,7 @@ The project does not commit a large binary demo asset by default. The source of 
    ```bash
    ./demo.sh --teardown
    ```
-3. If you want video capture, install `ffmpeg`.
+4. If you want video capture, install `ffmpeg`.
 
    macOS uses the built-in `avfoundation` path shown below:
 
@@ -44,7 +48,7 @@ The project does not commit a large binary demo asset by default. The source of 
 
    Windows note: use a Windows capture source such as `gdigrab` or a recorder like OBS, then keep `./scripts/capture-demo.sh` in transcript-only mode.
 
-4. On macOS, pick the terminal display source from the printed device list and export it, for example:
+5. On macOS, pick the terminal display source from the printed device list and export it, for example:
 
    ```bash
    export IRONGATE_CAPTURE_SOURCE="1:none"
@@ -52,7 +56,7 @@ The project does not commit a large binary demo asset by default. The source of 
 
    Linux and Windows users should either leave `IRONGATE_CAPTURE_SOURCE` unset and rely on the transcript/log pair, or adapt the ffmpeg invocation above to their platform-specific capture device.
 
-5. Run:
+6. Run:
 
    ```bash
    ./scripts/capture-demo.sh
