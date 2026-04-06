@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import platform
+import shlex
 import shutil
 import subprocess
 import sys
@@ -78,13 +79,14 @@ def run_command(args: argparse.Namespace, scenarios: dict[str, Any]) -> int:
         "GRAFANA_ADMIN_USER": os.environ.get("GRAFANA_ADMIN_USER", DEFAULT_GRAFANA_USER),
         "GRAFANA_ADMIN_PASSWORD": os.environ.get("GRAFANA_ADMIN_PASSWORD", DEFAULT_GRAFANA_PASSWORD),
         "IRONGATE_TRUSTED_PROXIES": os.environ.get("IRONGATE_TRUSTED_PROXIES", DEFAULT_TRUSTED_PROXIES),
+        "IRONGATE_ALLOW_LOGIN_OVERRIDES": os.environ.get("IRONGATE_ALLOW_LOGIN_OVERRIDES", "true"),
     }
 
     stack_started = False
     if not args.skip_stack:
         compose_up(benchmark_env)
-        wait_for_ready(args.base_url)
         stack_started = True
+        wait_for_ready(args.base_url)
 
     try:
         context = RunContext(
@@ -149,7 +151,10 @@ def load_scenarios() -> dict[str, Any]:
 
 def determine_result_dir(requested: str | None, git_commit: str) -> Path:
     if requested:
-        return Path(requested).expanduser().resolve()
+        path = Path(requested).expanduser()
+        if not path.is_absolute():
+            path = ROOT / path
+        return path.resolve()
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     return (RESULTS_ROOT / f"{stamp}-{git_commit}").resolve()
 
@@ -194,7 +199,6 @@ def run_single_scenario(
     *,
     save_event_stream: bool,
 ) -> dict[str, Any]:
-    token_pool_path = prepare_token_pool(scenario.get("auth"), context, scenario_dir / "tokens.json")
     result = execute_request_run(
         name=name,
         description=scenario["description"],
@@ -203,7 +207,7 @@ def run_single_scenario(
         auth_config=scenario.get("auth"),
         load_config=scenario["load"],
         context=context,
-        token_pool_path=token_pool_path,
+        token_pool_path=None,
         save_event_stream=save_event_stream,
     )
     return result
@@ -219,32 +223,31 @@ def run_phased_scenario(
 ) -> dict[str, Any]:
     phase_summaries: list[dict[str, Any]] = []
     chaos = scenario["chaos"]
-    token_pool_path = prepare_token_pool(scenario.get("auth"), context, scenario_dir / "tokens.json")
+    try:
+        for phase in scenario["phases"]:
+            sleep_before = phase.get("sleep_before")
+            if sleep_before:
+                time.sleep(parse_duration_seconds(sleep_before))
 
-    for phase in scenario["phases"]:
-        sleep_before = phase.get("sleep_before")
-        if sleep_before:
-            time.sleep(parse_duration_seconds(sleep_before))
-
-        apply_chaos_action(chaos, phase["chaos_action"])
-        phase_name = phase["name"]
-        phase_dir = scenario_dir / phase_name
-        phase_dir.mkdir(parents=True, exist_ok=True)
-        phase_summaries.append(
-            execute_request_run(
-                name=f"{name}:{phase_name}",
-                description=phase["description"],
-                scenario_dir=phase_dir,
-                request_config={**scenario["request"], "expected_statuses": phase["expected_statuses"]},
-                auth_config=scenario.get("auth"),
-                load_config=phase["load"],
-                context=context,
-                token_pool_path=token_pool_path,
-                save_event_stream=save_event_stream,
+            apply_chaos_action(chaos, phase["chaos_action"])
+            phase_name = phase["name"]
+            phase_dir = scenario_dir / phase_name
+            phase_dir.mkdir(parents=True, exist_ok=True)
+            phase_summaries.append(
+                execute_request_run(
+                    name=f"{name}:{phase_name}",
+                    description=phase["description"],
+                    scenario_dir=phase_dir,
+                    request_config={**scenario["request"], "expected_statuses": phase["expected_statuses"]},
+                    auth_config=scenario.get("auth"),
+                    load_config=phase["load"],
+                    context=context,
+                    token_pool_path=None,
+                    save_event_stream=save_event_stream,
+                )
             )
-        )
-
-    apply_chaos_action(chaos, {"type": "reset"})
+    finally:
+        apply_chaos_action(chaos, {"type": "reset"})
 
     metadata = {
         "name": name,
@@ -294,7 +297,7 @@ def execute_request_run(
     subprocess.run(command, cwd=ROOT, env=env, check=True)
     wall_time_seconds = time.monotonic() - start
 
-    summary = json.loads(summary_path.read_text())
+    summary = sanitize_k6_summary_file(summary_path)
     metrics = summarize_metrics(summary)
     metadata = {
         "name": name,
@@ -309,18 +312,18 @@ def execute_request_run(
         "load": load_config,
         "command": format_command(command, env),
         "environment": {
-            "benchmark_stack": context.benchmark_env,
+            "benchmark_stack": sanitize_benchmark_stack(context.benchmark_env),
             "hardware": context.hardware,
             "software": context.software,
         },
         "artifacts": benchmark_artifacts(
             summary_path=summary_path,
             metrics_path=metrics_path if save_event_stream else None,
-            token_pool_path=token_pool_path,
         ),
         "metrics": metrics,
         "wall_time_seconds": round(wall_time_seconds, 2),
     }
+    metadata = sanitize_scenario_metadata(metadata)
     write_json(scenario_dir / "scenario.json", metadata)
     write_text(scenario_dir / "summary.md", single_summary_markdown(metadata))
     return metadata
@@ -335,6 +338,9 @@ def build_k6_env(
     token_pool_path: Path | None,
 ) -> dict[str, str]:
     env = os.environ.copy()
+    for key in list(env):
+        if key.startswith("IRONGATE_"):
+            del env[key]
     env.update(
         {
             "IRONGATE_BASE_URL": context.base_url,
@@ -373,50 +379,6 @@ def build_k6_env(
     return env
 
 
-def prepare_token_pool(auth_config: dict[str, Any] | None, context: RunContext, destination: Path) -> Path | None:
-    auth = auth_config or {"mode": "none"}
-    mode = auth.get("mode", "none")
-    if mode == "none":
-        return None
-
-    if mode == "static":
-        count = 1
-    elif mode == "pool":
-        count = int(auth["pool_size"])
-    else:
-        raise RuntimeError(f"unsupported auth mode {mode!r}")
-
-    subject_prefix = auth.get("subject_prefix", "bench-user")
-    role = auth.get("role", "user")
-    tokens = []
-    for index in range(count):
-        tokens.append(mint_login_token(context.base_url, f"{subject_prefix}-{index}", role, index))
-
-    destination.write_text(json.dumps(tokens))
-    return destination
-
-
-def mint_login_token(base_url: str, subject: str, role: str, seed: int) -> str:
-    payload = json.dumps({"subject": subject, "role": role}).encode("utf-8")
-    request = urllib.request.Request(
-        url=f"{base_url.rstrip('/')}/api/users/login",
-        data=payload,
-        method="POST",
-        headers={
-            "Content-Type": "application/json",
-            "X-Forwarded-For": benchmark_ip(seed),
-        },
-    )
-    with urllib.request.urlopen(request, timeout=5) as response:
-        if response.status != 200:
-            raise RuntimeError(f"login returned {response.status} for {subject}")
-        body = json.loads(response.read().decode("utf-8"))
-        token = body.get("token", "")
-        if not token:
-            raise RuntimeError(f"login did not return token for {subject}")
-        return token
-
-
 def summarize_metrics(summary: dict[str, Any]) -> dict[str, Any]:
     metrics = summary["metrics"]
 
@@ -443,7 +405,7 @@ def summarize_metrics(summary: dict[str, Any]) -> dict[str, Any]:
     return {
         "throughput_rps": round(float(metric_values("http_reqs").get("rate", 0.0)), 3),
         "requests_total": int(metric_values("http_reqs").get("count", 0)),
-        "unexpected_failure_rate": round(float(metric_values("http_req_failed").get("rate", 0.0)), 5),
+        "unexpected_failure_rate": round(float(metric_values("http_req_failed").get("value", metric_values("http_req_failed").get("rate", 0.0))), 5),
         "latency_ms": {
             "avg": trend("http_req_duration", "avg"),
             "p50": trend("http_req_duration", "p(50)"),
@@ -509,6 +471,7 @@ def format_command(command: list[str], env: dict[str, str]) -> str:
         "IRONGATE_VUS",
         "IRONGATE_DURATION",
         "IRONGATE_ITERATIONS",
+        "IRONGATE_SLEEP_MS",
         "IRONGATE_XFF_MODE",
         "IRONGATE_AUTH_MODE",
         "IRONGATE_AUTH_POOL_SIZE",
@@ -516,9 +479,43 @@ def format_command(command: list[str], env: dict[str, str]) -> str:
         "IRONGATE_LOGIN_ROLE",
         "IRONGATE_TOKEN_POOL_PATH",
     ]
-    parts = [f"{key}={shell_quote(env[key])}" for key in relevant if env.get(key)]
-    parts.extend(shell_quote(part) for part in command)
+    parts = []
+    for key in relevant:
+        value = env.get(key)
+        if not value:
+            continue
+        parts.append(f"{key}={shell_quote(normalize_env_value(key, value))}")
+    parts.extend(shell_quote(normalize_command_part(part)) for part in command)
     return " ".join(parts)
+
+
+def normalize_env_value(key: str, value: str) -> str:
+    if key == "IRONGATE_TOKEN_POOL_PATH":
+        return normalize_cli_path(value)
+    return value
+
+
+def normalize_command_part(part: str) -> str:
+    if part.startswith("json="):
+        return f"json={normalize_cli_path(part.removeprefix('json='))}"
+    if os.path.isabs(part):
+        return normalize_cli_path(part)
+    return part
+
+
+def normalize_cli_path(raw: str) -> str:
+    path = Path(raw).expanduser()
+    try:
+        relative = path.relative_to(ROOT)
+        return f"./{relative.as_posix()}"
+    except ValueError:
+        pass
+
+    try:
+        relative = path.relative_to(Path.home())
+        return f"$HOME/{relative.as_posix()}"
+    except ValueError:
+        return path.name or raw
 
 
 def shell_quote(value: str) -> str:
@@ -557,13 +554,6 @@ def safe_command_output(args: list[str]) -> str:
     return completed.stdout.strip() or completed.stderr.strip() or "unavailable"
 
 
-def benchmark_ip(seed: int) -> str:
-    normalized = abs(int(seed))
-    third = (normalized // 250) % 250
-    fourth = normalized % 250
-    return f"198.18.{third + 1}.{fourth + 1}"
-
-
 def write_run_context(result_dir: Path, context: RunContext) -> None:
     payload = {
         "git_commit": context.git_commit,
@@ -571,7 +561,7 @@ def write_run_context(result_dir: Path, context: RunContext) -> None:
         "base_url": context.base_url,
         "hardware": context.hardware,
         "software": context.software,
-        "benchmark_stack": context.benchmark_env,
+        "benchmark_stack": sanitize_benchmark_stack(context.benchmark_env),
         "generated_at": datetime.now().astimezone().isoformat(),
     }
     write_json(result_dir / "run-context.json", payload)
@@ -580,13 +570,17 @@ def write_run_context(result_dir: Path, context: RunContext) -> None:
 def write_suite_manifest(result_dir: Path, summaries: list[dict[str, Any]]) -> None:
     payload = {
         "generated_at": datetime.now().astimezone().isoformat(),
-        "scenarios": summaries,
+        "scenarios": [sanitize_scenario_metadata(summary) for summary in summaries],
     }
     write_json(result_dir / "suite.json", payload)
 
 
 def render_result_directory(result_dir: Path) -> None:
     result_dir = result_dir.resolve()
+    run_context_path = result_dir / "run-context.json"
+    if run_context_path.exists():
+        write_json(run_context_path, sanitize_run_context_payload(json.loads(run_context_path.read_text())))
+
     suite = json.loads((result_dir / "suite.json").read_text())
     suite = refresh_suite_from_raw(result_dir, suite)
     scenarios = suite["scenarios"]
@@ -618,16 +612,18 @@ def refresh_suite_from_raw(result_dir: Path, suite: dict[str, Any]) -> dict[str,
     for scenario in suite.get("scenarios", []):
         if scenario["kind"] == "single":
             scenario_dir = result_dir / scenario["name"]
-            raw_summary = json.loads((scenario_dir / "k6-summary.json").read_text())
-            scenario["metrics"] = summarize_metrics(raw_summary)
-            scenario["artifacts"] = benchmark_artifacts(
+            raw_metadata_path = scenario_dir / "scenario.json"
+            raw_metadata = json.loads(raw_metadata_path.read_text()) if raw_metadata_path.exists() else scenario
+            raw_summary = sanitize_k6_summary_file(scenario_dir / "k6-summary.json")
+            raw_metadata["metrics"] = summarize_metrics(raw_summary)
+            raw_metadata["artifacts"] = benchmark_artifacts(
                 summary_path=scenario_dir / "k6-summary.json",
-                metrics_path=scenario_dir / "k6-metrics.json",
-                token_pool_path=(scenario_dir / "tokens.json") if (scenario_dir / "tokens.json").exists() else None,
+                metrics_path=(scenario_dir / "k6-metrics.json") if (scenario_dir / "k6-metrics.json").exists() else None,
             )
-            write_json(scenario_dir / "scenario.json", scenario)
-            write_text(scenario_dir / "summary.md", single_summary_markdown(scenario))
-            refreshed.append(scenario)
+            raw_metadata = sanitize_scenario_metadata(raw_metadata)
+            write_json(scenario_dir / "scenario.json", raw_metadata)
+            write_text(scenario_dir / "summary.md", single_summary_markdown(raw_metadata))
+            refreshed.append(raw_metadata)
             continue
 
         scenario_dir = result_dir / scenario["name"]
@@ -636,18 +632,21 @@ def refresh_suite_from_raw(result_dir: Path, suite: dict[str, Any]) -> dict[str,
         for phase in raw_metadata.get("phases", []):
             phase_name = phase["name"].split(":", 1)[1] if ":" in phase["name"] else phase["name"]
             phase_dir = scenario_dir / phase_name
-            raw_summary = json.loads((phase_dir / "k6-summary.json").read_text())
-            phase["metrics"] = summarize_metrics(raw_summary)
-            phase["artifacts"] = benchmark_artifacts(
+            raw_phase_path = phase_dir / "scenario.json"
+            raw_phase = json.loads(raw_phase_path.read_text()) if raw_phase_path.exists() else phase
+            raw_summary = sanitize_k6_summary_file(phase_dir / "k6-summary.json")
+            raw_phase["metrics"] = summarize_metrics(raw_summary)
+            raw_phase["artifacts"] = benchmark_artifacts(
                 summary_path=phase_dir / "k6-summary.json",
-                metrics_path=phase_dir / "k6-metrics.json",
-                token_pool_path=(scenario_dir / "tokens.json") if (scenario_dir / "tokens.json").exists() else None,
+                metrics_path=(phase_dir / "k6-metrics.json") if (phase_dir / "k6-metrics.json").exists() else None,
             )
-            write_json(phase_dir / "scenario.json", phase)
-            write_text(phase_dir / "summary.md", single_summary_markdown(phase))
-            phase_entries.append(phase)
+            raw_phase = sanitize_scenario_metadata(raw_phase)
+            write_json(phase_dir / "scenario.json", raw_phase)
+            write_text(phase_dir / "summary.md", single_summary_markdown(raw_phase))
+            phase_entries.append(raw_phase)
 
         raw_metadata["phases"] = phase_entries
+        raw_metadata = sanitize_scenario_metadata(raw_metadata)
         write_json(scenario_dir / "scenario.json", raw_metadata)
         write_text(scenario_dir / "summary.md", phased_summary_markdown(raw_metadata))
         refreshed.append(raw_metadata)
@@ -960,14 +959,12 @@ def relative_markdown_path(path: Path) -> str:
     return display_path(path)
 
 
-def benchmark_artifacts(*, summary_path: Path, metrics_path: Path | None, token_pool_path: Path | None) -> dict[str, str]:
+def benchmark_artifacts(*, summary_path: Path, metrics_path: Path | None) -> dict[str, str]:
     artifacts: dict[str, str] = {
         "summary_json": display_path(summary_path),
     }
     if metrics_path is not None and metrics_path.exists():
         artifacts["metrics_json"] = display_path(metrics_path)
-    if token_pool_path is not None and token_pool_path.exists():
-        artifacts["token_pool_json"] = display_path(token_pool_path)
     return artifacts
 
 
@@ -980,6 +977,91 @@ def display_path(path: Path) -> str:
 
 def relative_link(base_dir: Path, path: Path) -> str:
     return path.relative_to(base_dir).as_posix()
+
+
+def sanitize_run_context_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    benchmark_stack = payload.get("benchmark_stack")
+    if isinstance(benchmark_stack, dict):
+        payload["benchmark_stack"] = sanitize_benchmark_stack(benchmark_stack)
+    return payload
+
+
+def sanitize_scenario_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    command = metadata.get("command")
+    if isinstance(command, str):
+        metadata["command"] = sanitize_command_string(command)
+
+    environment = metadata.get("environment")
+    if isinstance(environment, dict):
+        benchmark_stack = environment.get("benchmark_stack")
+        if isinstance(benchmark_stack, dict):
+            environment["benchmark_stack"] = sanitize_benchmark_stack(benchmark_stack)
+
+    artifacts = metadata.get("artifacts")
+    if isinstance(artifacts, dict):
+        artifacts.pop("token_pool_json", None)
+
+    phases = metadata.get("phases")
+    if isinstance(phases, list):
+        metadata["phases"] = [sanitize_scenario_metadata(phase) if isinstance(phase, dict) else phase for phase in phases]
+
+    return metadata
+
+
+def sanitize_benchmark_stack(benchmark_stack: dict[str, Any]) -> dict[str, Any]:
+    sanitized: dict[str, Any] = {}
+    for key, value in benchmark_stack.items():
+        if key in {"JWT_SECRET", "GRAFANA_ADMIN_USER", "GRAFANA_ADMIN_PASSWORD"}:
+            sanitized[key] = "<redacted>"
+            continue
+        if key == "IRONGATE_TRUSTED_PROXIES":
+            sanitized[key] = "<configure-at-runtime>"
+            continue
+        sanitized[key] = value
+    return sanitized
+
+
+def sanitize_command_string(command: str) -> str:
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        return command.replace(f"{ROOT.as_posix()}/", "./").replace(f"{Path.home().as_posix()}/", "$HOME/")
+
+    env: dict[str, str] = {}
+    command_parts: list[str] = []
+    parsing_env = True
+    for part in parts:
+        if parsing_env and "=" in part and not part.startswith("-"):
+            key, value = part.split("=", 1)
+            if key.startswith("IRONGATE_"):
+                env[key] = value
+                continue
+        parsing_env = False
+        command_parts.append(part)
+
+    env.pop("IRONGATE_TOKEN_POOL_PATH", None)
+    if not command_parts:
+        return command
+    return format_command(command_parts, env)
+
+
+def sanitize_k6_summary_file(path: Path) -> dict[str, Any]:
+    summary = json.loads(path.read_text())
+    summary = sanitize_k6_summary(summary)
+    write_json(path, summary)
+    return summary
+
+
+def sanitize_k6_summary(summary: dict[str, Any]) -> dict[str, Any]:
+    setup_data = summary.get("setup_data")
+    if not isinstance(setup_data, dict):
+        return summary
+
+    tokens = setup_data.get("tokens")
+    if isinstance(tokens, list):
+        setup_data["tokens"] = []
+        setup_data["token_count"] = len(tokens)
+    return summary
 
 
 def write_json(path: Path, payload: Any) -> None:

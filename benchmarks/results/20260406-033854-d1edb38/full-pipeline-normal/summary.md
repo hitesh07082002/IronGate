@@ -4,7 +4,7 @@ Protected order traffic with a pool of authenticated demo users to exercise auth
 
 ## Run Contract
 
-- Command: `IRONGATE_BASE_URL='http://127.0.0.1:8080' IRONGATE_SCENARIO_NAME='full-pipeline-normal' IRONGATE_METHOD='GET' IRONGATE_ROUTE_PATH='/api/orders' IRONGATE_EXPECTED_STATUSES='200' IRONGATE_VUS='24' IRONGATE_DURATION='20s' IRONGATE_AUTH_MODE='pool' IRONGATE_AUTH_POOL_SIZE='1024' IRONGATE_LOGIN_SUBJECT_PREFIX='bench-order-user' IRONGATE_LOGIN_ROLE='user' IRONGATE_TOKEN_POOL_PATH='/Users/hiteshsadhwani/Desktop/Personal_Project/IronGate/benchmarks/results/20260406-033854-d1edb38/full-pipeline-normal/tokens.json' 'k6' 'run' '--summary-export' '/Users/hiteshsadhwani/Desktop/Personal_Project/IronGate/benchmarks/results/20260406-033854-d1edb38/full-pipeline-normal/k6-summary.json' '--out' 'json=/Users/hiteshsadhwani/Desktop/Personal_Project/IronGate/benchmarks/results/20260406-033854-d1edb38/full-pipeline-normal/k6-metrics.json' '/Users/hiteshsadhwani/Desktop/Personal_Project/IronGate/benchmarks/route.js'`
+- Command: `IRONGATE_BASE_URL='http://127.0.0.1:8080' IRONGATE_SCENARIO_NAME='full-pipeline-normal' IRONGATE_METHOD='GET' IRONGATE_ROUTE_PATH='/api/orders' IRONGATE_EXPECTED_STATUSES='200' IRONGATE_VUS='24' IRONGATE_DURATION='20s' IRONGATE_AUTH_MODE='pool' IRONGATE_AUTH_POOL_SIZE='1024' IRONGATE_LOGIN_SUBJECT_PREFIX='bench-order-user' IRONGATE_LOGIN_ROLE='user' 'k6' 'run' '--summary-export' './benchmarks/results/20260406-033854-d1edb38/full-pipeline-normal/k6-summary.json' '--out' 'json=./benchmarks/results/20260406-033854-d1edb38/full-pipeline-normal/k6-metrics.json' './benchmarks/route.js'`
 - Request: `GET /api/orders`
 - Expected statuses: `200`
 - Auth mode: `pool`

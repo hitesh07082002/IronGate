@@ -83,7 +83,7 @@ The under-five-minute demo path is:
 4. protected `/api/users`, `/api/orders`, and `/api/payments/p-1` requests
 5. a `/metrics` sample plus the k6 smoke test
 
-The 2-minute capture workflow is scripted in [`scripts/capture-demo.sh`](./scripts/capture-demo.sh). Generated transcripts and optional MP4/GIF outputs live under [`artifacts/demo/`](./artifacts/demo/README.md); large binaries are intentionally not committed.
+The 2-minute capture workflow is scripted in [`scripts/capture-demo.sh`](./scripts/capture-demo.sh). Generated transcripts always land under [`artifacts/demo/`](./artifacts/demo/README.md), and the built-in MP4 path is wired for macOS `ffmpeg`/`avfoundation`; large binaries are intentionally not committed.
 
 ## Benchmark Summary
 
@@ -112,7 +112,7 @@ Circuit-breaker proof artifact:
 - Open circuit: `4x 503`
 - Recovery after timeout: `5x 200`
 
-Benchmark note: the local benchmark stack sets `IRONGATE_TRUSTED_PROXIES=0.0.0.0/0,::/0` so one host can emulate many client IPs through `X-Forwarded-For`. That is a benchmark-only local setting. The default runtime still trusts no proxies unless explicitly configured.
+Benchmark note: the local benchmark stack sets `IRONGATE_TRUSTED_PROXIES=0.0.0.0/0,::/0` so one host can emulate many client IPs through `X-Forwarded-For`, and it enables login-claim overrides only inside the benchmark Compose stack so auth scenarios can mint distinct demo identities. Those are benchmark-only local settings. The default runtime still trusts no proxies and rejects login claim overrides unless explicitly configured.
 
 ## Docs
 

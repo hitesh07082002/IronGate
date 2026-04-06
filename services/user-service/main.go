@@ -73,26 +73,20 @@ func newHandler(jwtSecret string) http.Handler {
 func loginHandler(jwtSecret string, user map[string]any) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if strings.TrimSpace(jwtSecret) == "" {
-			common.WriteJSON(w, http.StatusInternalServerError, map[string]string{
-				"error": "jwt secret not configured",
-			})
+			writeLoginError(w, r, http.StatusInternalServerError, "jwt secret not configured")
 			return
 		}
 
 		subject, role, err := resolveLoginClaims(r, user)
 		if err != nil {
-			common.WriteJSON(w, http.StatusBadRequest, map[string]string{
-				"error": "invalid login request",
-			})
+			writeLoginError(w, r, http.StatusBadRequest, "invalid login request")
 			return
 		}
 
 		token, err := signLoginToken(jwtSecret, subject, role, time.Now())
 		if err != nil {
 			slog.Error("failed to sign login token", "error", err)
-			common.WriteJSON(w, http.StatusInternalServerError, map[string]string{
-				"error": "failed to sign token",
-			})
+			writeLoginError(w, r, http.StatusInternalServerError, "failed to sign token")
 			return
 		}
 
@@ -103,8 +97,14 @@ func loginHandler(jwtSecret string, user map[string]any) http.HandlerFunc {
 }
 
 func resolveLoginClaims(r *http.Request, user map[string]any) (string, string, error) {
-	subject := strings.TrimSpace(fmt.Sprint(user["id"]))
-	role := strings.TrimSpace(fmt.Sprint(user["role"]))
+	subject, err := requiredUserClaim(user, "id")
+	if err != nil {
+		return "", "", err
+	}
+	role, err := requiredUserClaim(user, "role")
+	if err != nil {
+		return "", "", err
+	}
 	if r == nil || r.Body == nil {
 		return subject, role, nil
 	}
@@ -132,14 +132,59 @@ func resolveLoginClaims(r *http.Request, user map[string]any) (string, string, e
 		return "", "", err
 	}
 
-	if override := strings.TrimSpace(payload.Subject); override != "" {
-		subject = override
+	overrideSubject := strings.TrimSpace(payload.Subject)
+	overrideRole := strings.TrimSpace(payload.Role)
+	if (overrideSubject != "" || overrideRole != "") && !loginOverridesEnabled() {
+		return "", "", fmt.Errorf("login overrides are disabled")
 	}
-	if override := strings.TrimSpace(payload.Role); override != "" {
-		role = override
+
+	if overrideSubject != "" {
+		subject = overrideSubject
+	}
+	if overrideRole != "" {
+		role = overrideRole
 	}
 
 	return subject, role, nil
+}
+
+func requiredUserClaim(user map[string]any, key string) (string, error) {
+	raw, ok := user[key]
+	if !ok {
+		return "", fmt.Errorf("%s missing", key)
+	}
+
+	value, ok := raw.(string)
+	if !ok {
+		return "", fmt.Errorf("%s must be a string", key)
+	}
+
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", fmt.Errorf("%s must be set", key)
+	}
+
+	return value, nil
+}
+
+func loginOverridesEnabled() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("IRONGATE_ALLOW_LOGIN_OVERRIDES")), "true")
+}
+
+func writeLoginError(w http.ResponseWriter, r *http.Request, status int, message string) {
+	common.WriteJSON(w, status, map[string]any{
+		"error":      message,
+		"code":       status,
+		"request_id": requestID(r),
+	})
+}
+
+func requestID(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+
+	return strings.TrimSpace(r.Header.Get("X-Request-ID"))
 }
 
 func signLoginToken(jwtSecret, subject, role string, issuedAt time.Time) (string, error) {

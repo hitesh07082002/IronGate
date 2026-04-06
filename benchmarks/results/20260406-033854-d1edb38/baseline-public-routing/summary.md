@@ -4,7 +4,7 @@ Public login traffic routed through the gateway with distributed client IPs so t
 
 ## Run Contract
 
-- Command: `IRONGATE_BASE_URL='http://127.0.0.1:8080' IRONGATE_SCENARIO_NAME='baseline-public-routing' IRONGATE_METHOD='POST' IRONGATE_ROUTE_PATH='/api/users/login' IRONGATE_EXPECTED_STATUSES='200' IRONGATE_VUS='24' IRONGATE_DURATION='20s' IRONGATE_XFF_MODE='per_request' IRONGATE_AUTH_MODE='none' 'k6' 'run' '--summary-export' '/Users/hiteshsadhwani/Desktop/Personal_Project/IronGate/benchmarks/results/20260406-033854-d1edb38/baseline-public-routing/k6-summary.json' '--out' 'json=/Users/hiteshsadhwani/Desktop/Personal_Project/IronGate/benchmarks/results/20260406-033854-d1edb38/baseline-public-routing/k6-metrics.json' '/Users/hiteshsadhwani/Desktop/Personal_Project/IronGate/benchmarks/route.js'`
+- Command: `IRONGATE_BASE_URL='http://127.0.0.1:8080' IRONGATE_SCENARIO_NAME='baseline-public-routing' IRONGATE_METHOD='POST' IRONGATE_ROUTE_PATH='/api/users/login' IRONGATE_EXPECTED_STATUSES='200' IRONGATE_VUS='24' IRONGATE_DURATION='20s' IRONGATE_XFF_MODE='per_request' IRONGATE_AUTH_MODE='none' 'k6' 'run' '--summary-export' './benchmarks/results/20260406-033854-d1edb38/baseline-public-routing/k6-summary.json' '--out' 'json=./benchmarks/results/20260406-033854-d1edb38/baseline-public-routing/k6-metrics.json' './benchmarks/route.js'`
 - Request: `POST /api/users/login`
 - Expected statuses: `200`
 - Auth mode: `none`

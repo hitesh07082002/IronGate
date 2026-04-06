@@ -23,13 +23,13 @@
     "vus": 8,
     "duration": "20s"
   },
-  "command": "IRONGATE_BASE_URL='http://127.0.0.1:8080' IRONGATE_SCENARIO_NAME='authenticated-rate-limited-traffic' IRONGATE_METHOD='GET' IRONGATE_ROUTE_PATH='/api/payments/p-1' IRONGATE_EXPECTED_STATUSES='200,429' IRONGATE_VUS='8' IRONGATE_DURATION='20s' IRONGATE_AUTH_MODE='static' IRONGATE_LOGIN_SUBJECT_PREFIX='bench-rate-limit-user' IRONGATE_LOGIN_ROLE='user' IRONGATE_TOKEN_POOL_PATH='/Users/hiteshsadhwani/Desktop/Personal_Project/IronGate/benchmarks/results/20260406-033854-d1edb38/authenticated-rate-limited-traffic/tokens.json' 'k6' 'run' '--summary-export' '/Users/hiteshsadhwani/Desktop/Personal_Project/IronGate/benchmarks/results/20260406-033854-d1edb38/authenticated-rate-limited-traffic/k6-summary.json' '--out' 'json=/Users/hiteshsadhwani/Desktop/Personal_Project/IronGate/benchmarks/results/20260406-033854-d1edb38/authenticated-rate-limited-traffic/k6-metrics.json' '/Users/hiteshsadhwani/Desktop/Personal_Project/IronGate/benchmarks/route.js'",
+  "command": "IRONGATE_BASE_URL='http://127.0.0.1:8080' IRONGATE_SCENARIO_NAME='authenticated-rate-limited-traffic' IRONGATE_METHOD='GET' IRONGATE_ROUTE_PATH='/api/payments/p-1' IRONGATE_EXPECTED_STATUSES='200,429' IRONGATE_VUS='8' IRONGATE_DURATION='20s' IRONGATE_AUTH_MODE='static' IRONGATE_LOGIN_SUBJECT_PREFIX='bench-rate-limit-user' IRONGATE_LOGIN_ROLE='user' 'k6' 'run' '--summary-export' './benchmarks/results/20260406-033854-d1edb38/authenticated-rate-limited-traffic/k6-summary.json' '--out' 'json=./benchmarks/results/20260406-033854-d1edb38/authenticated-rate-limited-traffic/k6-metrics.json' './benchmarks/route.js'",
   "environment": {
     "benchmark_stack": {
-      "JWT_SECRET": "demo-secret",
-      "GRAFANA_ADMIN_USER": "admin",
-      "GRAFANA_ADMIN_PASSWORD": "admin",
-      "IRONGATE_TRUSTED_PROXIES": "0.0.0.0/0,::/0"
+      "JWT_SECRET": "<redacted>",
+      "GRAFANA_ADMIN_USER": "<redacted>",
+      "GRAFANA_ADMIN_PASSWORD": "<redacted>",
+      "IRONGATE_TRUSTED_PROXIES": "<configure-at-runtime>"
     },
     "hardware": {
       "platform": "macOS-15.3-arm64-arm-64bit-Mach-O",
@@ -46,8 +46,7 @@
     }
   },
   "artifacts": {
-    "summary_json": "benchmarks/results/20260406-033854-d1edb38/authenticated-rate-limited-traffic/k6-summary.json",
-    "token_pool_json": "benchmarks/results/20260406-033854-d1edb38/authenticated-rate-limited-traffic/tokens.json"
+    "summary_json": "benchmarks/results/20260406-033854-d1edb38/authenticated-rate-limited-traffic/k6-summary.json"
   },
   "metrics": {
     "throughput_rps": 5552.439,

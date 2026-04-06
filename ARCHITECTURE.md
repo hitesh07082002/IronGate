@@ -493,7 +493,7 @@ mise x k6@1.7.1 -- make benchmark
 `make load-test` requires `k6` plus a reachable gateway, defaulting to `http://127.0.0.1:8080`.
 `make benchmark` requires `k6`, boots the benchmark contract from [`benchmarks/scenarios.json`](./benchmarks/scenarios.json), and records machine-readable bundles under [`benchmarks/results/`](./benchmarks/results/README.md).
 [`demo.sh`](./demo.sh) boots the local Compose stack, waits for `/ready`, exercises protected routes, samples `/metrics`, and then runs the k6 smoke test.
-[`scripts/capture-demo.sh`](./scripts/capture-demo.sh) captures the demo transcript and optionally an MP4 when `ffmpeg` is installed and `IRONGATE_CAPTURE_SOURCE` is configured.
+[`scripts/capture-demo.sh`](./scripts/capture-demo.sh) always captures the demo transcript and optionally records an MP4 on macOS when `ffmpeg` plus an `avfoundation` `IRONGATE_CAPTURE_SOURCE` are configured; [`artifacts/demo/README.md`](./artifacts/demo/README.md) covers Linux and Windows alternatives.
 
 Key test coverage lives in:
 

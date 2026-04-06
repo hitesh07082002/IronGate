@@ -1,7 +1,7 @@
 # Benchmark Run
 
 - Result directory: `benchmarks/results/20260406-033854-d1edb38`
-- Generated at: `2026-04-06T04:10:09.910584+05:30`
+- Generated at: `2026-04-06T11:06:58.510262+05:30`
 - [Run context](run-context.json)
 
 ## Artifacts

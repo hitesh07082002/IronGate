@@ -16,10 +16,10 @@
     "go": "go version go1.24.4 darwin/arm64"
   },
   "benchmark_stack": {
-    "JWT_SECRET": "demo-secret",
-    "GRAFANA_ADMIN_USER": "admin",
-    "GRAFANA_ADMIN_PASSWORD": "admin",
-    "IRONGATE_TRUSTED_PROXIES": "0.0.0.0/0,::/0"
+    "JWT_SECRET": "<redacted>",
+    "GRAFANA_ADMIN_USER": "<redacted>",
+    "GRAFANA_ADMIN_PASSWORD": "<redacted>",
+    "IRONGATE_TRUSTED_PROXIES": "<configure-at-runtime>"
   },
   "generated_at": "2026-04-06T03:38:55.109538+05:30"
 }

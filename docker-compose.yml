@@ -65,6 +65,7 @@ services:
       dockerfile: services/user-service/Dockerfile
     environment:
       JWT_SECRET: "${JWT_SECRET:?JWT_SECRET must be set}"
+      IRONGATE_ALLOW_LOGIN_OVERRIDES: "${IRONGATE_ALLOW_LOGIN_OVERRIDES:-false}"
 
   user-service-2:
     build:
@@ -73,6 +74,7 @@ services:
     environment:
       PORT: 8091
       JWT_SECRET: "${JWT_SECRET:?JWT_SECRET must be set}"
+      IRONGATE_ALLOW_LOGIN_OVERRIDES: "${IRONGATE_ALLOW_LOGIN_OVERRIDES:-false}"
 
   order-service-1:
     build:
