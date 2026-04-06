@@ -3,6 +3,18 @@ import { check, sleep } from 'k6';
 
 const baseURL = __ENV.IRONGATE_BASE_URL || 'http://127.0.0.1:8080';
 
+function extractToken(response) {
+  if (!response || !response.body) {
+    return '';
+  }
+
+  try {
+    return response.json('token') || '';
+  } catch (_) {
+    return '';
+  }
+}
+
 export const options = {
   vus: 1,
   iterations: 5,
@@ -14,13 +26,21 @@ export const options = {
 
 export function setup() {
   const loginResponse = http.post(`${baseURL}/api/users/login`, '');
+  const token = extractToken(loginResponse);
   check(loginResponse, {
     'login status is 200': (response) => response.status === 200,
-    'login returns token': (response) => Boolean(response.json('token')),
+    'login returns token': () => Boolean(token),
   });
 
+  if (!token) {
+    throw new Error(
+      `smoke setup failed against ${baseURL}: expected POST /api/users/login to return a token. ` +
+      'If you are testing locally, start the stack first with ./demo.sh --keep-stack or docker compose up -d --build.',
+    );
+  }
+
   return {
-    token: loginResponse.json('token'),
+    token,
   };
 }
 

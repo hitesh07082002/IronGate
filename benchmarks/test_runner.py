@@ -73,6 +73,23 @@ class EnsureDependenciesTests(unittest.TestCase):
         with mock.patch.object(runner.shutil, "which", side_effect=lambda name: binaries.get(name)):
             runner.ensure_dependencies(skip_stack=True)
 
+    def test_skip_stack_accepts_k6_via_mise_exec(self):
+        binaries = {"k6": None, "mise": "/usr/bin/mise", "python3": "/usr/bin/python3"}
+
+        with mock.patch.object(runner.shutil, "which", side_effect=lambda name: binaries.get(name)):
+            with mock.patch.object(runner.subprocess, "run") as run_mock:
+                run_mock.return_value = mock.Mock(returncode=0)
+
+                runner.ensure_dependencies(skip_stack=True)
+
+        run_mock.assert_called_once_with(
+            ["/usr/bin/mise", "exec", "--", "k6", "version"],
+            cwd=runner.ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
     def test_managed_stack_requires_compose_plugin_or_legacy_binary(self):
         binaries = {"k6": "/tmp/k6", "python3": "/usr/bin/python3", "docker": None, "docker-compose": None}
 

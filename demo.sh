@@ -88,6 +88,11 @@ if [[ "${ACTION}" == "teardown" ]]; then
 fi
 
 require_command curl
+require_command make
+if ! command -v k6 >/dev/null 2>&1 && ! (command -v mise >/dev/null 2>&1 && mise exec -- k6 version >/dev/null 2>&1); then
+  echo "k6 is required for ./demo.sh. Run 'mise install' in the repo root first." >&2
+  exit 1
+fi
 
 cleanup() {
   if [[ "${KEEP_STACK_RUNNING}" != "true" ]]; then
@@ -167,17 +172,9 @@ echo "GET ${BASE_URL}/metrics"
 METRICS_SAMPLE="$(curl -fsS "${BASE_URL}/metrics")"
 printf '%s\n' "${METRICS_SAMPLE}" | sed -n '1,10p'
 
-section "Optional Smoke Benchmark"
-if command -v k6 >/dev/null 2>&1 && command -v make >/dev/null 2>&1; then
-  echo "Running k6 smoke test..."
-  IRONGATE_BASE_URL="${BASE_URL}" make load-test
-elif command -v k6 >/dev/null 2>&1; then
-  echo "Skipping k6 smoke test because make is not installed."
-  echo "Install make, then run 'IRONGATE_BASE_URL=${BASE_URL} make load-test'."
-else
-  echo "Skipping k6 smoke test because k6 is not installed."
-  echo "Run 'mise x k6@1.7.1 -- make load-test' later for the optional benchmark smoke."
-fi
+section "Smoke Benchmark"
+echo "Running k6 smoke test..."
+IRONGATE_BASE_URL="${BASE_URL}" make load-test
 
 section "Done"
 echo "Demo completed successfully."

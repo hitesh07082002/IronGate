@@ -131,9 +131,33 @@ def select_scenarios(scenarios: dict[str, Any], selected: str) -> dict[str, Any]
     return {selected: scenarios[selected]}
 
 
+def resolve_k6_command() -> list[str] | None:
+    direct = shutil.which("k6")
+    if direct is not None:
+        return [direct]
+
+    mise = shutil.which("mise")
+    if mise is None:
+        return None
+
+    probe = subprocess.run(
+        [mise, "exec", "--", "k6", "version"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if probe.returncode == 0:
+        return [mise, "exec", "--", "k6"]
+    return None
+
+
 def ensure_dependencies(*, skip_stack: bool) -> None:
-    required = ["k6", "python3"]
-    missing = [binary for binary in required if shutil.which(binary) is None]
+    missing: list[str] = []
+    if resolve_k6_command() is None:
+        missing.append("k6")
+    if shutil.which("python3") is None:
+        missing.append("python3")
     if not skip_stack and detect_compose_command() is None:
         missing.append("docker compose (plugin) or docker-compose")
     if missing:
@@ -320,8 +344,11 @@ def execute_request_run(
     summary_path = scenario_dir / "k6-summary.json"
     metrics_path = scenario_dir / "k6-metrics.json"
     env = build_k6_env(name, request_config, auth_config, load_config, context, token_pool_path)
+    k6_command = resolve_k6_command()
+    if k6_command is None:
+        raise SystemExit("missing required tooling: k6")
     command = [
-        "k6",
+        *k6_command,
         "run",
         "--summary-export",
         str(summary_path),
@@ -582,8 +609,9 @@ def collect_hardware_info() -> dict[str, Any]:
 
 def collect_software_info() -> dict[str, str]:
     compose_command = detect_compose_command()
+    k6_command = resolve_k6_command()
     return {
-        "k6": safe_command_output(["k6", "version"]),
+        "k6": safe_command_output([*k6_command, "version"]) if k6_command else "unavailable",
         "docker_compose": safe_command_output([*compose_command, "version"]) if compose_command else "unavailable",
         "go": safe_command_output(["go", "version"]),
     }
