@@ -209,7 +209,12 @@ func (m *Manager) buildSnapshot(next *config.Config, previous *Snapshot) (*Snaps
 	}
 
 	rateLimitStore := m.rateLimitStoreFactor(cfg, previous)
-	breakerRegistry := nextCircuitBreakerRegistry(cfg.CircuitBreaker, previous, m.metricsRegistry.RegisterCollector)
+	breakerRegistry := nextCircuitBreakerRegistry(
+		cfg.CircuitBreaker,
+		previous,
+		m.metricsRegistry.RegisterCollector,
+		m.metricsRegistry.UnregisterCollector,
+	)
 	tracingTracer := telemetry.TracerOrNoop(m.tracerProvider, "irongate.middleware.tracing")
 	routerTracer := telemetry.TracerOrNoop(m.tracerProvider, "irongate.middleware.router")
 	authTracer := telemetry.TracerOrNoop(m.tracerProvider, "irongate.middleware.auth")
@@ -287,7 +292,12 @@ func defaultRateLimitStoreFactory(cfg *config.Config, previous *Snapshot) rateli
 	return ratelimit.NewRedisStore(cfg.Redis)
 }
 
-func nextCircuitBreakerRegistry(cfg config.CBConfig, previous *Snapshot, registerCollector func(prometheus.Collector) error) *circuitbreaker.Registry {
+func nextCircuitBreakerRegistry(
+	cfg config.CBConfig,
+	previous *Snapshot,
+	registerCollector func(prometheus.Collector) error,
+	unregisterCollector func(prometheus.Collector) bool,
+) *circuitbreaker.Registry {
 	if previous == nil || previous.CircuitBreaker == nil {
 		return circuitbreaker.NewRegistry(cfg, registerCollector)
 	}
@@ -295,7 +305,11 @@ func nextCircuitBreakerRegistry(cfg config.CBConfig, previous *Snapshot, registe
 		return previous.CircuitBreaker
 	}
 
-	return previous.CircuitBreaker.CloneWithConfig(cfg)
+	if unregisterCollector != nil {
+		unregisterCollector(previous.CircuitBreaker.Collector())
+	}
+
+	return previous.CircuitBreaker.CloneWithConfig(cfg, registerCollector)
 }
 
 func hasRateLimitedRoutes(routes []config.RouteConfig) bool {

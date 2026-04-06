@@ -86,8 +86,9 @@ func NewBaseTransport() http.RoundTripper {
 }
 
 func (lt *LoadBalancerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	_, span := transportTracerOrNoop(lt.tracer, "irongate.transport").Start(req.Context(), "irongate.transport.loadbalancer")
+	ctx, span := transportTracerOrNoop(lt.tracer, "irongate.transport").Start(req.Context(), "irongate.transport.loadbalancer")
 	defer span.End()
+	req = req.Clone(ctx)
 
 	route := middleware.GetRouteConfig(req)
 	if route == nil {
@@ -121,7 +122,7 @@ func (lt *LoadBalancerTransport) RoundTrip(req *http.Request) (*http.Response, e
 		attribute.String("lb.selected", targetAddress(selection.Target)),
 	)
 
-	outbound := req.Clone(req.Context())
+	outbound := req.Clone(ctx)
 	outbound.URL.Scheme = "http"
 	outbound.URL.Host = targetAddress(selection.Target)
 	outbound.Host = outbound.URL.Host
@@ -162,8 +163,9 @@ func (lt *LoadBalancerTransport) RoundTrip(req *http.Request) (*http.Response, e
 }
 
 func (ct *CircuitBreakerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	_, span := transportTracerOrNoop(ct.tracer, "irongate.transport").Start(req.Context(), "irongate.transport.circuitbreaker")
+	ctx, span := transportTracerOrNoop(ct.tracer, "irongate.transport").Start(req.Context(), "irongate.transport.circuitbreaker")
 	defer span.End()
+	req = req.Clone(ctx)
 
 	service := routeService(req)
 	routeTargets := ct.targetsForService(service, routeTargets(req))
@@ -176,7 +178,7 @@ func (ct *CircuitBreakerTransport) RoundTrip(req *http.Request) (*http.Response,
 		return nil, fmt.Errorf("upstream target missing from request")
 	}
 
-	breaker := ct.registry.Breaker(target)
+	breaker := ct.registry.BreakerForService(target, service)
 	allowed := breaker.Allow()
 	span.SetAttributes(
 		attribute.String("cb.target", target),

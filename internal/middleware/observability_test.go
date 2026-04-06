@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	dto "github.com/prometheus/client_model/go"
 	"go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -119,6 +120,85 @@ func TestMetricsMiddlewareRecordsExemplarForSampledSpan(t *testing.T) {
 
 	if body := metricsResp.Body.String(); !strings.Contains(body, `traceID="`+traceID+`"`) {
 		t.Fatalf("expected exemplar traceID %s in metrics output, got %s", traceID, body)
+	}
+}
+
+func TestMiddlewareSpansPropagateContextDownstream(t *testing.T) {
+	recorder := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder), sdktrace.WithSampler(sdktrace.AlwaysSample()))
+	registry := metrics.NewRegistry()
+	store := &stubRateLimitStore{
+		decision: ratelimit.Decision{
+			Allowed:   true,
+			Remaining: 4,
+			ResetAt:   time.Now().Add(time.Minute),
+		},
+	}
+	secret := "test-secret"
+	now := time.Now()
+	routes := []config.RouteConfig{{
+		Path:         "/api/orders",
+		Service:      "order-service",
+		AuthRequired: true,
+		RateLimit: &config.RateLimitConfig{
+			Requests: 5,
+			Window:   time.Minute,
+		},
+	}}
+
+	handler := Tracing(testRateLimitLogger(), tp.Tracer("irongate.middleware.tracing"))(
+		Router(routes, tp.Tracer("irongate.middleware.router"))(
+			Auth(config.AuthConfig{
+				JWTSecret:    secret,
+				JWTAlgorithm: "HS256",
+			}, tp.Tracer("irongate.middleware.auth"))(
+				RateLimiterWithMetrics(store, testRateLimitLogger(), registry, RateLimiterOptions{}, tp.Tracer("irongate.middleware.ratelimiter"))(
+					http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+						_, downstream := tp.Tracer("downstream").Start(req.Context(), "downstream")
+						downstream.End()
+						w.WriteHeader(http.StatusNoContent)
+					}),
+				),
+			),
+		),
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/orders", nil)
+	req.RemoteAddr = "127.0.0.1:1234"
+	req.Header.Set("Authorization", bearerAuthorization(t, secret, jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub":  "u-42",
+		"role": "admin",
+		"iat":  now.Unix(),
+		"exp":  now.Add(time.Hour).Unix(),
+	}))
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", resp.Code)
+	}
+
+	spans := recorder.Ended()
+	tracingSpan := findEndedSpanByName(t, spans, "irongate.middleware.tracing")
+	routerSpan := findEndedSpanByName(t, spans, "irongate.middleware.router")
+	authSpan := findEndedSpanByName(t, spans, "irongate.middleware.auth")
+	rateLimitSpan := findEndedSpanByName(t, spans, "irongate.middleware.ratelimiter")
+	downstreamSpan := findEndedSpanByName(t, spans, "downstream")
+
+	assertParentSpan(t, routerSpan, tracingSpan)
+	assertParentSpan(t, authSpan, routerSpan)
+	assertParentSpan(t, rateLimitSpan, authSpan)
+	assertParentSpan(t, downstreamSpan, rateLimitSpan)
+}
+
+func assertParentSpan(t *testing.T, child, parent sdktrace.ReadOnlySpan) {
+	t.Helper()
+
+	if child.Parent().SpanID() != parent.SpanContext().SpanID() {
+		t.Fatalf("expected %s parent %s, got %s", child.Name(), parent.Name(), child.Parent().SpanID())
+	}
+	if child.Parent().TraceID() != parent.SpanContext().TraceID() {
+		t.Fatalf("expected %s to share trace with %s", child.Name(), parent.Name())
 	}
 }
 

@@ -62,3 +62,17 @@ func TestTracerOrNoop_RealProvider(t *testing.T) {
 		t.Fatalf("expected one ended span from real tracer provider, got %d", got)
 	}
 }
+
+func TestOTLPInsecure_DefaultsFalse(t *testing.T) {
+	t.Setenv(otlpInsecureEnvVar, "")
+	if otlpInsecure() {
+		t.Fatal("expected OTLP insecure mode disabled by default")
+	}
+}
+
+func TestOTLPInsecure_True(t *testing.T) {
+	t.Setenv(otlpInsecureEnvVar, "true")
+	if !otlpInsecure() {
+		t.Fatal("expected OTLP insecure mode when env var is true")
+	}
+}

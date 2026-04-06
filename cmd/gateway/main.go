@@ -40,6 +40,11 @@ type buildHandlerOptions struct {
 	tracerProvider  trace.TracerProvider
 }
 
+type serverError struct {
+	name string
+	err  error
+}
+
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
@@ -98,15 +103,6 @@ func main() {
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 	}
-	go func() {
-		if err := adminServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			slog.Error("admin server stopped", "error", err)
-		}
-	}()
-	defer func() {
-		_ = adminServer.Shutdown(context.Background())
-	}()
-
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),
 		Handler:      manager,
@@ -129,22 +125,23 @@ func main() {
 		}
 	}()
 
-	serverErrors := make(chan error, 1)
-	go func() {
-		serverErrors <- server.ListenAndServe()
-	}()
+	serverErrors := make(chan serverError, 2)
+	serveAsync("admin", adminServer, serverErrors)
+	serveAsync("gateway", server, serverErrors)
 
 	signalCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
 
 	select {
-	case err := <-serverErrors:
+	case serverErr := <-serverErrors:
 		cancelWatcher()
-		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			slog.Error("gateway stopped", "error", err)
-			os.Exit(1)
-		}
-		return
+		manager.BeginShutdown()
+		shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), shutdownTimeout(cfg.Server.WriteTimeout))
+		defer cancelShutdown()
+		_ = adminServer.Shutdown(shutdownCtx)
+		_ = server.Shutdown(shutdownCtx)
+		slog.Error(serverErr.name+" server stopped", "error", serverErr.err)
+		os.Exit(1)
 	case <-signalCtx.Done():
 	}
 
@@ -159,11 +156,6 @@ func main() {
 	}
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		slog.Error("graceful shutdown failed", "error", err)
-		os.Exit(1)
-	}
-
-	if err := <-serverErrors; err != nil && !errors.Is(err, http.ErrServerClosed) {
-		slog.Error("gateway stopped", "error", err)
 		os.Exit(1)
 	}
 }
@@ -278,8 +270,8 @@ func newAdminHandler(adminToken string, cbGetter func() *circuitbreaker.Registry
 	adminMux := http.NewServeMux()
 	adminMux.HandleFunc("POST /admin/circuit-breakers/reset", func(w http.ResponseWriter, r *http.Request) {
 		r = stampAdminRequest(w, r)
-		auth := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if adminToken == "" || !hmac.Equal([]byte(strings.TrimSpace(auth)), []byte(adminToken)) {
+		auth, ok := adminBearerToken(r.Header.Get("Authorization"))
+		if adminToken == "" || !ok || !hmac.Equal([]byte(auth), []byte(strings.TrimSpace(adminToken))) {
 			response.WriteError(w, r, http.StatusUnauthorized, "unauthorized")
 			return
 		}
@@ -296,6 +288,28 @@ func newAdminHandler(adminToken string, cbGetter func() *circuitbreaker.Registry
 	})
 
 	return adminMux
+}
+
+func serveAsync(name string, server *http.Server, errs chan<- serverError) {
+	go func() {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errs <- serverError{name: name, err: err}
+		}
+	}()
+}
+
+func adminBearerToken(header string) (string, bool) {
+	scheme, token, ok := strings.Cut(strings.TrimSpace(header), " ")
+	if !ok || scheme != "Bearer" {
+		return "", false
+	}
+
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return "", false
+	}
+
+	return token, true
 }
 
 func stampAdminRequest(w http.ResponseWriter, r *http.Request) *http.Request {

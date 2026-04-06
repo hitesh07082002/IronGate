@@ -23,6 +23,7 @@ import (
 
 const (
 	otlpEndpointEnvVar = "OTEL_EXPORTER_OTLP_ENDPOINT"
+	otlpInsecureEnvVar = "OTEL_EXPORTER_OTLP_INSECURE"
 	otelSamplerEnvVar  = "OTEL_TRACES_SAMPLER"
 
 	alwaysOnSampler = "always_on"
@@ -40,14 +41,17 @@ func Init(ctx context.Context, serviceName, version string) (trace.TracerProvide
 		ctx = context.Background()
 	}
 
-	exporter, err := otlptracegrpc.New(
-		ctx,
+	opts := []otlptracegrpc.Option{
 		otlptracegrpc.WithEndpoint(endpoint),
-		otlptracegrpc.WithInsecure(),
 		otlptracegrpc.WithDialOption(grpc.WithConnectParams(grpc.ConnectParams{
 			MinConnectTimeout: otlpDialTimeout,
 		})),
-	)
+	}
+	if otlpInsecure() {
+		opts = append(opts, otlptracegrpc.WithInsecure())
+	}
+
+	exporter, err := otlptracegrpc.New(ctx, opts...)
 	if err != nil {
 		slog.Warn("failed to initialize OpenTelemetry exporter", "error", err)
 		return noop.NewTracerProvider(), func(context.Context) error { return nil }
@@ -95,6 +99,10 @@ func traceSampler() sdktrace.Sampler {
 	}
 
 	return sdktrace.ParentBased(sdktrace.TraceIDRatioBased(0.1))
+}
+
+func otlpInsecure() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv(otlpInsecureEnvVar)), "true")
 }
 
 type warnOnceExporter struct {

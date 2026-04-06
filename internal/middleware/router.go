@@ -42,8 +42,9 @@ func Router(routes []config.RouteConfig, tracer trace.Tracer) Middleware {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			_, span := tracer.Start(req.Context(), "irongate.middleware.router")
+			spanCtx, span := tracer.Start(req.Context(), "irongate.middleware.router")
 			defer span.End()
+			req = req.WithContext(spanCtx)
 
 			route := r.match(req.URL.Path)
 			if route == nil {
@@ -64,7 +65,7 @@ func Router(routes []config.RouteConfig, tracer trace.Tracer) Middleware {
 				return
 			}
 
-			ctx := context.WithValue(req.Context(), RouteConfigKey, route)
+			ctx := context.WithValue(spanCtx, RouteConfigKey, route)
 			next.ServeHTTP(w, req.WithContext(ctx))
 		})
 	}

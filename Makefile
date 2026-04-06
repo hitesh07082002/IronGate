@@ -1,9 +1,10 @@
 .PHONY: all clean lint build test test-race coverage run docker-up docker-down load-test benchmark benchmark-scenario benchmark-render benchmark-test bootstrap-production deploy-production check-production observatory-up observatory-down observatory-logs
 
 GO_TEST_FLAGS ?=
-COVERAGE_MIN ?= 70
+COVERAGE_MIN ?= 75
 DOCKER_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then printf '%s' 'docker compose'; elif command -v docker-compose >/dev/null 2>&1; then printf '%s' 'docker-compose'; fi)
 K6_CMD ?= $(shell if command -v k6 >/dev/null 2>&1; then printf '%s' 'k6'; elif command -v mise >/dev/null 2>&1 && mise exec -- k6 version >/dev/null 2>&1; then printf '%s' 'mise exec -- k6'; fi)
+TEST_PACKAGES ?= $(shell go list -f '{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}}{{end}}' ./... | sed '/^$$/d')
 
 all: build
 
@@ -25,7 +26,7 @@ test-race:
 	go test ./... -v -race $(GO_TEST_FLAGS)
 
 coverage:
-	go test ./... -covermode=atomic -coverprofile=coverage.out -coverpkg=./... $(GO_TEST_FLAGS)
+	go test $(TEST_PACKAGES) -covermode=atomic -coverprofile=coverage.out -coverpkg=./... $(GO_TEST_FLAGS)
 	@set -eu; \
 		cover_out="$$(go tool cover -func=coverage.out)"; \
 		printf '%s\n' "$$cover_out"; \

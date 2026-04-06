@@ -219,7 +219,9 @@ The default checked-in dashboard intentionally focuses on the primary service tr
 - Headers propagated to upstream: `X-Request-ID`, `X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto`, `X-User-ID`, `X-User-Role`
 - On protected routes, the original `Authorization` bearer token is not forwarded after gateway auth succeeds
 - Trusted request-ID propagation is a possible future enhancement, but it is not the current behavior
-- Not OpenTelemetry — lightweight correlation-ID propagation is sufficient for this scope
+- Phase 9 Milestone 1 also ships OpenTelemetry export hooks, W3C trace propagation, the Tempo/collector observatory overlay, and Prometheus exemplars tied to sampled traces
+- `gateway_circuit_state`, the circuit-breaker reset admin endpoint, and the observatory overlay are part of that shipped M1 tracing/observability slice
+- [`PROGRESS.md`](./PROGRESS.md) is the canonical shipped-vs-planned status reference when future-phase docs describe a larger tracing/demo target
 
 ### 4.9 Standard Error Response Format
 

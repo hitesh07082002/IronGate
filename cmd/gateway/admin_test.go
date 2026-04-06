@@ -111,6 +111,19 @@ func TestAdminReset_WrongToken(t *testing.T) {
 	}
 }
 
+func TestAdminReset_RequiresBearerScheme(t *testing.T) {
+	handler := newAdminHandler("admin-token", nil)
+	req := httptest.NewRequest(http.MethodPost, "/admin/circuit-breakers/reset", nil)
+	req.Header.Set("Authorization", "admin-token")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d with body %s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestAdminReset_AfterReload(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeTestJSON(w, http.StatusOK, map[string]string{"instance": "admin"})
@@ -179,5 +192,53 @@ func TestAdminReset_AfterReload(t *testing.T) {
 	}
 	if currentRegistry.Breaker(target).State() != circuitbreaker.StateClosed {
 		t.Fatalf("expected current breaker closed after reset, got %s", currentRegistry.Breaker(target).State())
+	}
+}
+
+func TestAdminBearerToken(t *testing.T) {
+	testCases := []struct {
+		name   string
+		header string
+		want   string
+		ok     bool
+	}{
+		{name: "valid bearer", header: "Bearer admin-token", want: "admin-token", ok: true},
+		{name: "missing scheme", header: "admin-token", ok: false},
+		{name: "wrong scheme case", header: "bearer admin-token", ok: false},
+		{name: "missing token", header: "Bearer ", ok: false},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			got, ok := adminBearerToken(testCase.header)
+			if ok != testCase.ok {
+				t.Fatalf("expected ok=%t, got %t", testCase.ok, ok)
+			}
+			if got != testCase.want {
+				t.Fatalf("expected token %q, got %q", testCase.want, got)
+			}
+		})
+	}
+}
+
+func TestServeAsync_ForwardsFatalErrors(t *testing.T) {
+	errs := make(chan serverError, 1)
+	server := &http.Server{
+		Addr:    ":-1",
+		Handler: http.NewServeMux(),
+	}
+
+	serveAsync("admin", server, errs)
+
+	select {
+	case err := <-errs:
+		if err.name != "admin" {
+			t.Fatalf("expected admin server name, got %q", err.name)
+		}
+		if err.err == nil {
+			t.Fatal("expected fatal admin server error")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected serveAsync to report a fatal server error")
 	}
 }

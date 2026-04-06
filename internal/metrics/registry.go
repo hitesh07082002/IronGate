@@ -244,6 +244,14 @@ func (r *Registry) RegisterCollector(c prometheus.Collector) error {
 	return r.registry.Register(c)
 }
 
+func (r *Registry) UnregisterCollector(c prometheus.Collector) bool {
+	if r == nil || r.registry == nil || c == nil {
+		return false
+	}
+
+	return r.registry.Unregister(c)
+}
+
 func (r *Registry) ObserveRequest(service string, statusCode int, duration time.Duration) {
 	if r == nil {
 		return

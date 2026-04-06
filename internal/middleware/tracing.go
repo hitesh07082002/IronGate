@@ -34,7 +34,8 @@ func Tracing(logger *slog.Logger, tracer trace.Tracer) Middleware {
 			ctx, routeCapture := withRouteCapture(ctx)
 			req = req.WithContext(ctx)
 
-			_, tracingSpan := tracer.Start(ctx, "irongate.middleware.tracing")
+			ctx, tracingSpan := tracer.Start(ctx, "irongate.middleware.tracing")
+			req = req.WithContext(ctx)
 			req.Header.Del(HeaderUserID)
 			req.Header.Del(HeaderUserRole)
 			req.Header.Del(HeaderRequestID)

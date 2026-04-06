@@ -49,7 +49,7 @@ For broader product scope and future work, use:
 - Dedicated admin server on `:9090` serving `POST /admin/circuit-breakers/reset` behind a bearer token from `ADMIN_TOKEN`
 - Graceful shutdown that flips `/ready` to `503` before draining in-flight requests
 - Direct `/metrics` Prometheus handler with service-only labels
-- `gateway_circuit_state{target="host:port"}` gauge showing `0=CLOSED`, `1=OPEN`, `2=HALF_OPEN`
+- `gateway_circuit_state{service}` gauge showing `0=CLOSED`, `1=OPEN`, `2=HALF_OPEN` for the current per-service breaker aggregate
 - Gateway-exposed payment routes: `POST /api/payments` for creation and `GET /api/payments/{id}` for status lookup
 - `make load-test` backed by [`benchmarks/smoke.js`](./benchmarks/smoke.js)
 - `make benchmark` backed by [`benchmarks/scenarios.json`](./benchmarks/scenarios.json), [`benchmarks/route.js`](./benchmarks/route.js), and [`benchmarks/runner.py`](./benchmarks/runner.py)
@@ -529,7 +529,7 @@ make benchmark
 
 `make test`, `make coverage`, and `make test-race` require a running Redis instance when you want the Redis-backed integration tests to execute locally. Without `IRONGATE_TEST_REDIS_ADDR`, those Redis integration tests are skipped.
 
-`make coverage` enforces a repo-wide statement coverage floor of 70%.
+`make coverage` enforces a repo-wide statement coverage floor of 75%.
 `make benchmark-test` exercises the Python benchmark runner without requiring a live stack.
 Run `mise install` once in the repo root to install the pinned `k6` toolchain used by the benchmark commands.
 `make load-test` requires `k6` plus a reachable gateway, defaulting to `http://127.0.0.1:8080`.

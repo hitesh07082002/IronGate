@@ -47,8 +47,9 @@ func Auth(authCfg config.AuthConfig, tracer trace.Tracer) Middleware {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			_, span := tracer.Start(req.Context(), "irongate.middleware.auth")
+			spanCtx, span := tracer.Start(req.Context(), "irongate.middleware.auth")
 			defer span.End()
+			req = req.WithContext(spanCtx)
 
 			route := GetRouteConfig(req)
 			if route == nil {

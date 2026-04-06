@@ -57,8 +57,9 @@ func RateLimiterWithMetrics(store ratelimit.Store, logger *slog.Logger, registry
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			_, span := tracer.Start(req.Context(), "irongate.middleware.ratelimiter")
+			spanCtx, span := tracer.Start(req.Context(), "irongate.middleware.ratelimiter")
 			defer span.End()
+			req = req.WithContext(spanCtx)
 
 			route := GetRouteConfig(req)
 			if route == nil {

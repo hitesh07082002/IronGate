@@ -53,7 +53,7 @@
 - [x] Tests: under limit passes, over limit returns 429, window reset, Redis down = fail-open
 - [x] Test: 100 concurrent goroutines hitting rate limit boundary simultaneously (Lua atomicity verification)
 - [x] Test: X-Forwarded-For only trusted from known proxy IPs; spoofed header from untrusted source ignored
-- [x] Verification: `IRONGATE_TEST_REDIS_ADDR=127.0.0.1:6379 make coverage` enforces a 70% statement coverage floor in local runs and CI
+- [x] Verification: `IRONGATE_TEST_REDIS_ADDR=127.0.0.1:6379 make coverage` enforces a 75% statement coverage floor in local runs and CI
 
 ## Phase 5: Circuit Breaker + Retry
 - [x] Circuit breaker state machine in `internal/transport/circuitbreaker/`
@@ -111,6 +111,7 @@
 - [x] `ARCHITECTURE.md` finalized with real code references
 
 ## Phase 9: Chaos Observatory
+
 - [x] Planning spec reconciled with current repo paths and current runtime docs
 - [x] Implementation plan reconciled with current repo paths and current runtime docs
 - [x] Locked implementation decisions captured in `docs/phase9-planning/DECISIONS_LOCK.md`

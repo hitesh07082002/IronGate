@@ -195,7 +195,7 @@ func TestRegistryCloneWithConfigPreservesOpenState(t *testing.T) {
 		Timeout:             time.Minute,
 		WindowSize:          time.Minute,
 		HalfOpenMaxRequests: 1,
-	})
+	}, nil)
 	if cloned == nil {
 		t.Fatal("expected cloned registry")
 	}
@@ -334,9 +334,9 @@ func TestCircuitStateGauge_Transitions(t *testing.T) {
 	registry := NewRegistry(cfg, metricsRegistry.RegisterCollector)
 	breaker := newWithClock(cfg, clock)
 	registry.breakers.Store("user-service-1:8081", breaker)
-	registry.attachBreaker("user-service-1:8081", breaker)
+	registry.attachBreaker("user-service-1:8081", "user-service", breaker)
 
-	if got := circuitStateGaugeValueForTarget(t, metricsRegistry, "user-service-1:8081"); got != 0 {
+	if got := circuitStateGaugeValueForService(t, metricsRegistry, "user-service"); got != 0 {
 		t.Fatalf("expected initial closed gauge value 0, got %v", got)
 	}
 
@@ -344,7 +344,7 @@ func TestCircuitStateGauge_Transitions(t *testing.T) {
 		t.Fatal("expected closed breaker to allow request")
 	}
 	breaker.RecordFailure()
-	if got := circuitStateGaugeValueForTarget(t, metricsRegistry, "user-service-1:8081"); got != 1 {
+	if got := circuitStateGaugeValueForService(t, metricsRegistry, "user-service"); got != 1 {
 		t.Fatalf("expected open gauge value 1, got %v", got)
 	}
 
@@ -352,13 +352,69 @@ func TestCircuitStateGauge_Transitions(t *testing.T) {
 	if !breaker.Allow() {
 		t.Fatal("expected half-open probe to be allowed")
 	}
-	if got := circuitStateGaugeValueForTarget(t, metricsRegistry, "user-service-1:8081"); got != 2 {
+	if got := circuitStateGaugeValueForService(t, metricsRegistry, "user-service"); got != 2 {
 		t.Fatalf("expected half-open gauge value 2, got %v", got)
 	}
 
 	breaker.RecordSuccess()
-	if got := circuitStateGaugeValueForTarget(t, metricsRegistry, "user-service-1:8081"); got != 0 {
+	if got := circuitStateGaugeValueForService(t, metricsRegistry, "user-service"); got != 0 {
 		t.Fatalf("expected closed gauge value 0 after recovery, got %v", got)
+	}
+}
+
+func TestCircuitStateGauge_AggregatesByService(t *testing.T) {
+	clock := &fakeClock{now: time.Unix(0, 0)}
+	cfg := config.CBConfig{
+		FailureThreshold:    1,
+		SuccessThreshold:    1,
+		Timeout:             time.Second,
+		WindowSize:          time.Minute,
+		HalfOpenMaxRequests: 1,
+	}
+	metricsRegistry := metrics.NewRegistry()
+	registry := NewRegistry(cfg, metricsRegistry.RegisterCollector)
+
+	openBreaker := newWithClock(cfg, clock)
+	registry.breakers.Store("user-service-1:8081", openBreaker)
+	registry.attachBreaker("user-service-1:8081", "user-service", openBreaker)
+	openBreaker.RecordFailure()
+
+	halfOpenBreaker := newWithClock(cfg, clock)
+	registry.breakers.Store("user-service-2:8081", halfOpenBreaker)
+	registry.attachBreaker("user-service-2:8081", "user-service", halfOpenBreaker)
+	halfOpenBreaker.RecordFailure()
+	clock.Advance(time.Second)
+	if !halfOpenBreaker.Allow() {
+		t.Fatal("expected second breaker to enter half-open")
+	}
+
+	if got := circuitStateGaugeValueForService(t, metricsRegistry, "user-service"); got != 1 {
+		t.Fatalf("expected open to dominate aggregate state, got %v", got)
+	}
+
+	openBreaker.ForceClose()
+	if got := circuitStateGaugeValueForService(t, metricsRegistry, "user-service"); got != 2 {
+		t.Fatalf("expected half-open aggregate after open breaker recovered, got %v", got)
+	}
+}
+
+func TestRegistryCloneWithConfigUsesFreshCollector(t *testing.T) {
+	registry := NewRegistry(config.CBConfig{FailureThreshold: 1}, nil)
+	breaker := registry.BreakerForService("user-service-1:8081", "user-service")
+	if !breaker.Allow() {
+		t.Fatal("expected breaker to allow request before opening")
+	}
+	breaker.RecordFailure()
+
+	cloned := registry.CloneWithConfig(config.CBConfig{FailureThreshold: 1}, nil)
+	if cloned == nil {
+		t.Fatal("expected cloned registry")
+	}
+	if cloned.Collector() == registry.Collector() {
+		t.Fatal("expected cloned registry to use a fresh collector")
+	}
+	if cloned.BreakerForService("user-service-1:8081", "user-service").State() != StateOpen {
+		t.Fatal("expected cloned breaker to preserve open state")
 	}
 }
 
@@ -396,7 +452,7 @@ func runConcurrentWorkers(workers int, fn func()) {
 	wg.Wait()
 }
 
-func circuitStateGaugeValueForTarget(t *testing.T, registry *metrics.Registry, target string) float64 {
+func circuitStateGaugeValueForService(t *testing.T, registry *metrics.Registry, service string) float64 {
 	t.Helper()
 
 	families, err := registry.Gather()
@@ -409,16 +465,16 @@ func circuitStateGaugeValueForTarget(t *testing.T, registry *metrics.Registry, t
 			continue
 		}
 		for _, metric := range family.Metric {
-			if labelValue(metric, "target") == target {
+			if labelValue(metric, "service") == service {
 				if metric.Gauge == nil {
-					t.Fatalf("metric %s for target %s is not a gauge", metricCircuitState, target)
+					t.Fatalf("metric %s for service %s is not a gauge", metricCircuitState, service)
 				}
 				return metric.GetGauge().GetValue()
 			}
 		}
 	}
 
-	t.Fatalf("metric %s for target %s not found", metricCircuitState, target)
+	t.Fatalf("metric %s for service %s not found", metricCircuitState, service)
 	return 0
 }
 
