@@ -1,6 +1,6 @@
 # Production Deploy
 
-IronGate now ships a repeatable production path for the public domain `irongate.hiteshsadhwani.xyz`.
+This document is the operational reference for the IronGate production environment behind `https://irongate.hiteshsadhwani.xyz`.
 
 ## Architecture
 
@@ -9,6 +9,11 @@ IronGate now ships a repeatable production path for the public domain `irongate.
 - Public `/metrics` is blocked at the edge
 - Prometheus, Grafana, Redis, and the backing services stay private
 - The gateway trusts forwarded headers only from localhost via `IRONGATE_TRUSTED_PROXIES=127.0.0.1/32,::1/128`
+
+## Roles
+
+- `root` is used only for one-time host bootstrap tasks such as package installation, firewall changes, and Caddy configuration.
+- `irongate` is the day-to-day deploy user. It owns `/opt/irongate`, can talk to Docker, and is the default SSH user for [`scripts/deploy-production.sh`](../scripts/deploy-production.sh).
 
 ## One-Time Bootstrap
 
@@ -27,7 +32,7 @@ That script:
 - configures UFW to allow only `OpenSSH`, `80/tcp`, and `443/tcp`
 - writes `/etc/caddy/Caddyfile` from [`deploy/Caddyfile.template`](./Caddyfile.template)
 
-The generated env file is server-local and is not committed.
+The generated env file is server-local, contains production secrets, and is never committed.
 
 ## Deploy
 
@@ -37,7 +42,7 @@ Run:
 ./scripts/deploy-production.sh
 ```
 
-That script packages the current `HEAD`, uploads it over SSH, runs:
+That script packages the local `HEAD` commit, uploads it over SSH, runs:
 
 ```bash
 docker compose \
@@ -50,6 +55,12 @@ docker compose \
 
 It then waits for the local `/ready` endpoint on the droplet and runs [`scripts/check-production-health.sh`](../scripts/check-production-health.sh) against the public URL.
 On the first successful deploy it also creates `/opt/irongate/current` as a symlink to the active release.
+
+Safety rails:
+
+- the script refuses to deploy from a non-`main` branch by default
+- the script refuses to deploy if local `HEAD` does not match `origin/main`
+- both checks can be overridden explicitly, but the default path is safe for production
 
 ## Health Check
 

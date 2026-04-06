@@ -4,7 +4,7 @@ IronGate is a production-style API gateway built in Go on top of the standard `n
 
 It is designed to make the core mechanics of a real gateway easy to inspect. You can see routing, auth, retries, rate limits, circuit breaking, and observability working together without needing a giant platform or a managed control plane.
 
-This repo is built to be easy to evaluate. Clone it, run one script, and watch the gateway exercise real public and protected routes end to end. The local workflow is shipped and benchmarked, and the repo now includes a small production deployment path without turning the README into an ops manual.
+IronGate is designed to be easy to evaluate. Clone the repo, run one script, and inspect the full request path across public and protected routes. The local workflow is shipped and benchmarked, and the production path is documented without overwhelming the main README with operational detail.
 
 ## Start Here
 
@@ -72,12 +72,12 @@ mise x k6@1.7.1 -- make load-test
 
 ## Production Deployment
 
-Production for this repo is wired around a single Ubuntu droplet with host-level Caddy in front of the Docker Compose stack:
+Production for this repo is intentionally simple:
 
-- public domain: `https://irongate.hiteshsadhwani.xyz`
-- public ports: `80/443` only
-- gateway bind: `127.0.0.1:8080` in production
-- edge behavior: Caddy terminates TLS and blocks public `/metrics`
+- public traffic terminates at `https://irongate.hiteshsadhwani.xyz`
+- only `80/443` are exposed publicly
+- the gateway listens on `127.0.0.1:8080` in production
+- Caddy terminates TLS and blocks public `/metrics`
 
 One-time host bootstrap:
 
@@ -91,13 +91,13 @@ Deploy the current `HEAD`:
 make deploy-production
 ```
 
-Run the public smoke check without redeploying:
+Run the production smoke check without redeploying:
 
 ```bash
 make check-production
 ```
 
-The detailed production notes and file layout live in [`deploy/README.md`](./deploy/README.md).
+The operational detail, deploy-user model, and release layout live in [`deploy/README.md`](./deploy/README.md).
 
 ## Manual Walkthrough
 
