@@ -67,17 +67,22 @@ docker compose \
     -f deploy/docker-compose.prod.yml \
     up -d --build --remove-orphans
 
+ready=false
 for attempt in \$(seq 1 60); do
     if curl -fsS http://127.0.0.1:8080/ready >/dev/null 2>&1; then
-        ln -sfn "\${release_dir}" "${REMOTE_APP_ROOT}/current"
-        echo "Remote readiness check passed."
-        exit 0
+        ready=true
+        break
     fi
     sleep 5
 done
 
-echo "Gateway did not become ready on the droplet within 300 seconds." >&2
-exit 1
+if [ "\${ready}" = "true" ]; then
+    ln -sfn "\${release_dir}" "${REMOTE_APP_ROOT}/current"
+    echo "Remote readiness check passed."
+else
+    echo "Gateway did not become ready on the droplet within 300 seconds." >&2
+    exit 1
+fi
 EOF
 )
 
