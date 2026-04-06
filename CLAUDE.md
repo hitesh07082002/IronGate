@@ -65,6 +65,21 @@ make run        # start gateway on :8080
 
 Gateway runtime config lives in `configs/gateway.yaml`. Current route-level settings include `auth_required`, `timeout`, `rate_limit`, `retry`, `load_balancer`, and `targets`. Top-level `circuit_breaker` and `redis` config are also live.
 
+## Deploy Configuration (configured by /setup-deploy)
+- Platform: custom Ubuntu droplet with host-level Caddy and Docker Compose
+- Production URL: https://irongate.hiteshsadhwani.xyz
+- Deploy workflow: local SSH deploy via `./scripts/deploy-production.sh`
+- Deploy status command: `curl -fsS https://irongate.hiteshsadhwani.xyz/ready`
+- Merge method: merge
+- Project type: API
+- Post-deploy health check: `./scripts/check-production-health.sh`
+
+### Custom deploy hooks
+- Pre-merge: `make lint && make test && make build`
+- Deploy trigger: `./scripts/deploy-production.sh`
+- Deploy status: `curl -fsS https://irongate.hiteshsadhwani.xyz/ready`
+- Health check: `./scripts/check-production-health.sh`
+
 ## Skill Routing
 
 When the user's request matches an available skill, invoke it as the first action:

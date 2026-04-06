@@ -1,0 +1,35 @@
+services:
+  gateway:
+    restart: unless-stopped
+
+  prometheus:
+    restart: unless-stopped
+    volumes:
+      - prometheus-data:/prometheus
+
+  grafana:
+    restart: unless-stopped
+    volumes:
+      - grafana-data:/var/lib/grafana
+
+  redis:
+    restart: unless-stopped
+
+  user-service-1:
+    restart: unless-stopped
+
+  user-service-2:
+    restart: unless-stopped
+
+  order-service-1:
+    restart: unless-stopped
+
+  order-service-2:
+    restart: unless-stopped
+
+  payment-service-1:
+    restart: unless-stopped
+
+volumes:
+  prometheus-data:
+  grafana-data:
