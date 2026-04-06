@@ -1,18 +1,16 @@
 # IronGate
 
-IronGate is a production-style API gateway built in Go on top of the standard `net/http` stack. It ships config-driven routing, JWT authentication, Redis-backed sliding-window rate limiting, retry, load balancing, circuit breaking, Prometheus/Grafana observability, hot reload, graceful shutdown, and a documented production deployment path in one repo you can run locally.
+IronGate is a production-grade API gateway implemented in Go with the standard `net/http` stack. In one repository it combines config-driven routing, JWT authentication, Redis-backed sliding-window rate limiting, retry, load balancing, circuit breaking, Prometheus/Grafana observability, hot reload, graceful shutdown, and a documented production deployment path.
 
-It is designed to make the core mechanics of a real gateway easy to inspect. You can see routing, auth, retries, rate limits, circuit breaking, and observability working together without needing a giant platform or a managed control plane.
-
-IronGate is designed to be easy to evaluate. Clone the repo, run one script, and inspect the full request path across public and protected routes. The local workflow is shipped and benchmarked, and the production path is documented without overwhelming the main README with operational detail.
+The project is built for fast evaluation. You can run the complete stack locally, inspect the full request path across public and protected routes, and deploy the same architecture behind TLS without introducing a managed control plane or a large platform dependency.
 
 ## Start Here
 
-- `./demo.sh` is the fastest path
-- it brings the stack up, waits for `/ready`, logs in, hits protected routes, samples `/metrics`, and shuts the stack down
-- if you want the stack left running for exploration, use `./demo.sh --keep-stack`
-- you do not need Go, Redis, Prometheus, or Grafana installed locally for the demo path
-- run `./demo.sh --help` to see the available walkthrough flags
+- `./demo.sh` is the fastest way to evaluate the project.
+- It starts the full stack, waits for `/ready`, logs in, exercises protected routes, samples `/metrics`, and tears the stack down on exit.
+- Use `./demo.sh --keep-stack` if you want the services left running for manual inspection afterward.
+- You do not need Go, Redis, Prometheus, or Grafana installed locally for the demo path.
+- Run `./demo.sh --help` to see the available walkthrough flags.
 
 ## Prerequisites
 
@@ -79,13 +77,13 @@ Production for this repo is intentionally simple:
 - the gateway listens on `127.0.0.1:8080` in production
 - Caddy terminates TLS and blocks public `/metrics`
 
-One-time host bootstrap:
+Bootstrap the host once with root access:
 
 ```bash
 make bootstrap-production
 ```
 
-Deploy the current `HEAD`:
+Deploy the committed `HEAD` from `main`:
 
 ```bash
 make deploy-production
@@ -97,7 +95,7 @@ Run the production smoke check without redeploying:
 make check-production
 ```
 
-The operational detail, deploy-user model, and release layout live in [`deploy/README.md`](./deploy/README.md).
+After bootstrap, day-to-day deploys use the dedicated `irongate` deploy user by default. The full operator workflow, safety rails, and release layout live in [`deploy/README.md`](./deploy/README.md).
 
 ## Manual Walkthrough
 

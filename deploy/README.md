@@ -2,6 +2,13 @@
 
 This document is the operational reference for the IronGate production environment behind `https://irongate.hiteshsadhwani.xyz`.
 
+## Operator Checklist
+
+1. Run [`scripts/bootstrap-production-host.sh`](../scripts/bootstrap-production-host.sh) once as `root` on a new host.
+2. Commit and push the release you want to ship.
+3. Run [`scripts/deploy-production.sh`](../scripts/deploy-production.sh) from a local checkout of `main`.
+4. Use [`scripts/check-production-health.sh`](../scripts/check-production-health.sh) for a live smoke check when you want verification without a redeploy.
+
 ## Architecture
 
 - Host-level Caddy terminates TLS on `80/443`
@@ -42,7 +49,7 @@ Run:
 ./scripts/deploy-production.sh
 ```
 
-That script packages the local `HEAD` commit, uploads it over SSH, runs:
+That script packages the committed local `HEAD`, uploads it over SSH, runs:
 
 ```bash
 docker compose \
@@ -60,6 +67,7 @@ Safety rails:
 
 - the script refuses to deploy from a non-`main` branch by default
 - the script refuses to deploy if local `HEAD` does not match `origin/main`
+- the default SSH target is the least-privilege deploy user `irongate`
 - both checks can be overridden explicitly, but the default path is safe for production
 
 ## Health Check
