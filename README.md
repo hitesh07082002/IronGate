@@ -1,10 +1,10 @@
 # IronGate
 
-IronGate is a production-style API gateway built in Go on top of the standard `net/http` stack. It ships config-driven routing, JWT authentication, Redis-backed sliding-window rate limiting, retry, load balancing, circuit breaking, Prometheus/Grafana observability, hot reload, and graceful shutdown in one repo you can run locally.
+IronGate is a production-style API gateway built in Go on top of the standard `net/http` stack. It ships config-driven routing, JWT authentication, Redis-backed sliding-window rate limiting, retry, load balancing, circuit breaking, Prometheus/Grafana observability, hot reload, graceful shutdown, and a documented production deployment path in one repo you can run locally.
 
 It is designed to make the core mechanics of a real gateway easy to inspect. You can see routing, auth, retries, rate limits, circuit breaking, and observability working together without needing a giant platform or a managed control plane.
 
-This repo is built to be easy to evaluate. Clone it, run one script, and watch the gateway exercise real public and protected routes end to end. The local workflow is shipped and benchmarked. Public deployment wiring is the next step, not something this repo auto-configures yet.
+IronGate is designed to be easy to evaluate. Clone the repo, run one script, and inspect the full request path across public and protected routes. The local workflow is shipped and benchmarked, and the production path is documented without overwhelming the main README with operational detail.
 
 ## Start Here
 
@@ -69,6 +69,35 @@ Optional smoke benchmark later:
 ```bash
 mise x k6@1.7.1 -- make load-test
 ```
+
+## Production Deployment
+
+Production for this repo is intentionally simple:
+
+- public traffic terminates at `https://irongate.hiteshsadhwani.xyz`
+- only `80/443` are exposed publicly
+- the gateway listens on `127.0.0.1:8080` in production
+- Caddy terminates TLS and blocks public `/metrics`
+
+One-time host bootstrap:
+
+```bash
+make bootstrap-production
+```
+
+Deploy the current `HEAD`:
+
+```bash
+make deploy-production
+```
+
+Run the production smoke check without redeploying:
+
+```bash
+make check-production
+```
+
+The operational detail, deploy-user model, and release layout live in [`deploy/README.md`](./deploy/README.md).
 
 ## Manual Walkthrough
 
@@ -169,6 +198,7 @@ Benchmark note: the local benchmark stack sets `IRONGATE_TRUSTED_PROXIES=0.0.0.0
 - If `http://127.0.0.1:8080` is already in use, stop the conflicting service before running the demo.
 - If you only want the walkthrough, missing `k6` is fine. The smoke benchmark is optional.
 - If you want to inspect Prometheus or Grafana after the walkthrough, rerun `./demo.sh --keep-stack`, then stop it with `./demo.sh --teardown`.
+- If you are deploying to production, keep `IRONGATE_GATEWAY_BIND_HOST=127.0.0.1` so the gateway is only reachable through Caddy.
 
 ## Docs Map
 
@@ -177,3 +207,4 @@ Benchmark note: the local benchmark stack sets `IRONGATE_TRUSTED_PROXIES=0.0.0.0
 - [`DESIGN_DOC.md`](./DESIGN_DOC.md): target-state design and algorithms
 - [`PROGRESS.md`](./PROGRESS.md): shipped phases and open stretch goals
 - [`ADR/`](./ADR/): architectural decisions and tradeoffs
+- [`deploy/README.md`](./deploy/README.md): production bootstrap, deploy, and health-check flow

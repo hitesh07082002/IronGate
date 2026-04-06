@@ -1,4 +1,4 @@
-.PHONY: all clean lint build test test-race coverage run docker-up docker-down load-test benchmark benchmark-scenario benchmark-render benchmark-test
+.PHONY: all clean lint build test test-race coverage run docker-up docker-down load-test benchmark benchmark-scenario benchmark-render benchmark-test bootstrap-production deploy-production check-production
 
 GO_TEST_FLAGS ?=
 COVERAGE_MIN ?= 70
@@ -63,3 +63,12 @@ benchmark-render:
 	@command -v python3 >/dev/null 2>&1 || (echo "python3 is required for benchmark-render"; exit 1)
 	@test -n "$${RESULT_DIR:-}" || (echo "RESULT_DIR is required"; exit 1)
 	python3 benchmarks/runner.py render --result-dir "$${RESULT_DIR}"
+
+bootstrap-production:
+	./scripts/bootstrap-production-host.sh
+
+deploy-production:
+	./scripts/deploy-production.sh
+
+check-production:
+	./scripts/check-production-health.sh
