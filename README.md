@@ -1,10 +1,95 @@
 # IronGate
 
-IronGate is a configurable API gateway built in Go with the standard `net/http` stack. It combines config-driven routing, JWT authentication, Redis-backed sliding-window rate limiting, retry, load balancing, circuit breaking, Prometheus/Grafana observability, hot reload, and graceful shutdown in one runnable project.
+IronGate is a production-style API gateway built in Go on top of the standard `net/http` stack. It ships config-driven routing, JWT authentication, Redis-backed sliding-window rate limiting, retry, load balancing, circuit breaking, Prometheus/Grafana observability, hot reload, and graceful shutdown in one repo you can run locally.
 
-The project is set up to be easy to evaluate: `./demo.sh` exercises the stack end to end, `benchmarks/` contains reproducible k6 scenarios, and the repository includes recorded benchmark artifacts plus architectural decision records.
+It is designed to make the core mechanics of a real gateway easy to inspect. You can see routing, auth, retries, rate limits, circuit breaking, and observability working together without needing a giant platform or a managed control plane.
 
-## Highlights
+This repo is built to be easy to evaluate. Clone it, run one script, and watch the gateway exercise real public and protected routes end to end. The local workflow is shipped and benchmarked. Public deployment wiring is the next step, not something this repo auto-configures yet.
+
+## Start Here
+
+- `./demo.sh` is the fastest path
+- it brings the stack up, waits for `/ready`, logs in, hits protected routes, samples `/metrics`, and shuts the stack down
+- if you want the stack left running for exploration, use `./demo.sh --keep-stack`
+- you do not need Go, Redis, Prometheus, or Grafana installed locally for the demo path
+- run `./demo.sh --help` to see the available walkthrough flags
+
+## Prerequisites
+
+- `git`
+- Docker Desktop, or Docker Engine with the Compose plugin
+- `curl`
+
+Optional:
+
+- `make`, for verification and the optional smoke benchmark
+- `k6`
+- `python3`
+- `mise`, if you want the exact pinned one-shot benchmark command from this README
+
+## Quick Start
+
+```bash
+git clone https://github.com/hitesh07082002/IronGate.git
+cd IronGate
+./demo.sh
+```
+
+`./demo.sh` starts the stack, waits for `/ready`, mints a demo token, exercises protected routes, samples `/metrics`, runs the optional smoke test if `k6` is installed, and tears the stack down when it exits.
+
+The first run can take a minute or two while Docker builds the images.
+
+Success looks like:
+- you see JSON output from `/health` and `/ready`
+- protected routes return real mock data
+- the script ends with `Demo completed successfully.`
+
+If `k6` or `make` is missing, the demo still succeeds. It just skips the optional smoke benchmark and prints the exact follow-up command.
+
+If you want to keep the stack running after the walkthrough so you can inspect it:
+
+```bash
+./demo.sh --keep-stack
+```
+
+That leaves these local URLs available:
+
+- gateway: `http://127.0.0.1:8080`
+- Prometheus: `http://127.0.0.1:9090`
+- Grafana: `http://127.0.0.1:3000` with `admin/admin`
+
+When you are done inspecting the stack:
+
+```bash
+./demo.sh --teardown
+```
+
+Optional smoke benchmark later:
+
+```bash
+mise x k6@1.7.1 -- make load-test
+```
+
+## Manual Walkthrough
+
+```bash
+export JWT_SECRET=demo-secret
+export GRAFANA_ADMIN_USER=admin
+export GRAFANA_ADMIN_PASSWORD=admin
+docker compose up -d --build
+until curl -fsS http://127.0.0.1:8080/ready; do sleep 2; done
+TOKEN="$(curl -fsS -X POST http://127.0.0.1:8080/api/users/login | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')"
+curl -fsS -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8080/api/users
+curl -fsS -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8080/api/orders
+curl -fsS -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8080/api/payments/p-1
+curl -fsS http://127.0.0.1:8080/health
+curl -fsS http://127.0.0.1:8080/metrics | sed -n '1,20p'
+docker compose down
+```
+
+If your machine only has the legacy `docker-compose` binary, substitute `docker-compose` for `docker compose`.
+
+## What IronGate Includes
 
 - Config-driven longest-prefix routing with per-route method allowlists
 - JWT auth with explicit `HS256` enforcement and sanitized identity headers
@@ -32,33 +117,7 @@ flowchart LR
     PR --> G["Grafana"]
 ```
 
-Deeper implementation notes live in [`ARCHITECTURE.md`](./ARCHITECTURE.md), [`DESIGN_DOC.md`](./DESIGN_DOC.md), and [`ADR/`](./ADR/).
-
-## Quick Start
-
-### Fastest path
-
-```bash
-./demo.sh
-```
-
-`demo.sh` bootstraps the local stack, waits for `/ready`, issues a login token, exercises protected user, order, and payment routes, and samples `/metrics`. If `k6` is installed it also finishes with the smoke test; otherwise it skips that optional step and prints the exact command to run later.
-
-### Manual stack
-
-```bash
-export JWT_SECRET=demo-secret
-export GRAFANA_ADMIN_USER=admin
-export GRAFANA_ADMIN_PASSWORD=admin
-
-docker-compose up -d --build
-curl -fsS http://127.0.0.1:8080/ready
-curl -fsS -X POST http://127.0.0.1:8080/api/users/login
-```
-
 ## Verification
-
-Run the full local verification suite:
 
 ```bash
 make lint
@@ -67,19 +126,21 @@ IRONGATE_TEST_REDIS_ADDR=127.0.0.1:6379 make test
 IRONGATE_TEST_REDIS_ADDR=127.0.0.1:6379 make test-race
 IRONGATE_TEST_REDIS_ADDR=127.0.0.1:6379 make coverage
 make benchmark-test
+```
+
+If you want to reproduce the benchmark suite:
+
+```bash
 mise x k6@1.7.1 -- make benchmark
 ```
 
 `make benchmark` writes a timestamped result bundle under `benchmarks/results/`.
-`make benchmark-test` covers the Python benchmark runner's artifact-rendering and dependency-check contract without needing k6 or Docker.
 
-## Demo
+## Demo Capture
 
-`./demo.sh` is the recommended walkthrough. It brings up the stack, waits for readiness, issues a login token, exercises protected routes, and samples `/metrics`. If `k6` is installed, it also runs the smoke benchmark; if not, the script still succeeds and prints the follow-up command.
+For a shareable terminal transcript or video, use [`scripts/capture-demo.sh`](./scripts/capture-demo.sh). Full capture instructions live in [`artifacts/demo/README.md`](./artifacts/demo/README.md).
 
-For a shareable demo asset, use [`scripts/capture-demo.sh`](./scripts/capture-demo.sh). Generated transcripts always land under [`artifacts/demo/`](./artifacts/demo/README.md), and the built-in MP4 path is wired for macOS `ffmpeg`/`avfoundation`; large binaries are intentionally not committed.
-
-## Benchmark Summary
+## Benchmark Snapshot
 
 Recorded benchmark bundle: [`benchmarks/results/20260406-033854-d1edb38/`](./benchmarks/results/20260406-033854-d1edb38/README.md)
 
@@ -98,15 +159,21 @@ Main scenario highlights from that run:
 | Authenticated + rate-limited traffic | `GET /api/payments/p-1`, 8 VUs, 20s, single authenticated identity | `111,042` rate-limited `429` responses after the first `20` successful requests |
 | Full pipeline under normal conditions | `GET /api/orders`, 24 VUs, 20s, 1024 authenticated demo users, 100 ms pacing | `230.15 req/s`, `p50 2.92 ms`, `p95 6.47 ms`, `p99 11.08 ms` |
 
-Circuit-breaker proof artifact: [`circuit-breaker-behavior.svg`](./benchmarks/results/20260406-033854-d1edb38/circuit-breaker-transition-recovery/circuit-breaker-behavior.svg), showing healthy traffic, failure-induced trip, open-circuit fast rejection, and recovery after the timeout window.
+Circuit-breaker proof artifact: [`circuit-breaker-behavior.svg`](./benchmarks/results/20260406-033854-d1edb38/circuit-breaker-transition-recovery/circuit-breaker-behavior.svg)
 
 Benchmark note: the local benchmark stack sets `IRONGATE_TRUSTED_PROXIES=0.0.0.0/0,::/0` so one host can emulate many client IPs through `X-Forwarded-For`, and it enables login-claim overrides only inside the benchmark Compose stack so auth scenarios can mint distinct demo identities. Those are benchmark-only local settings. The default runtime still trusts no proxies and rejects login claim overrides unless explicitly configured.
 
-## Further Reading
+## Troubleshooting
 
-- [`ARCHITECTURE.md`](./ARCHITECTURE.md): current-runtime source of truth
-- [`PROJECT_SPEC.md`](./PROJECT_SPEC.md): full project scope, success criteria, and deployment plan
-- [`DESIGN_DOC.md`](./DESIGN_DOC.md): target architecture, algorithms, and failure-mode reasoning
-- [`PROGRESS.md`](./PROGRESS.md): shipped phases and still-open stretch goals
+- If `./demo.sh` says Docker is not reachable, start Docker Desktop or Docker Engine first.
+- If `http://127.0.0.1:8080` is already in use, stop the conflicting service before running the demo.
+- If you only want the walkthrough, missing `k6` is fine. The smoke benchmark is optional.
+- If you want to inspect Prometheus or Grafana after the walkthrough, rerun `./demo.sh --keep-stack`, then stop it with `./demo.sh --teardown`.
+
+## Docs Map
+
+- [`ARCHITECTURE.md`](./ARCHITECTURE.md): current runtime and code-reference guide
+- [`PROJECT_SPEC.md`](./PROJECT_SPEC.md): full project scope and success criteria
+- [`DESIGN_DOC.md`](./DESIGN_DOC.md): target-state design and algorithms
+- [`PROGRESS.md`](./PROGRESS.md): shipped phases and open stretch goals
 - [`ADR/`](./ADR/): architectural decisions and tradeoffs
-- [`benchmarks/results/20260406-033854-d1edb38/`](./benchmarks/results/20260406-033854-d1edb38/README.md): recorded benchmark evidence

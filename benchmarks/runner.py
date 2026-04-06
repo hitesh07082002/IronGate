@@ -29,6 +29,7 @@ DEFAULT_JWT_SECRET = "demo-secret"
 DEFAULT_GRAFANA_USER = "admin"
 DEFAULT_GRAFANA_PASSWORD = "admin"
 DEFAULT_TRUSTED_PROXIES = "0.0.0.0/0,::/0"
+MISSING_COMPOSE_TOOLING = "missing required tooling: docker compose (plugin) or docker-compose"
 
 
 @dataclass
@@ -50,7 +51,7 @@ def main() -> int:
     run_parser.add_argument("--base-url", default=DEFAULT_BASE_URL, help="Gateway base URL.")
     run_parser.add_argument("--result-dir", help="Existing or new result directory. Defaults to benchmarks/results/<timestamp>-<commit>.")
     run_parser.add_argument("--skip-stack", action="store_true", help="Reuse an already-running local stack.")
-    run_parser.add_argument("--keep-stack-running", action="store_true", help="Leave docker-compose services running after the suite.")
+    run_parser.add_argument("--keep-stack-running", action="store_true", help="Leave Docker Compose services running after the suite.")
     run_parser.add_argument("--save-event-stream", action="store_true", help="Also persist the per-request k6 JSON event stream (large, local-debug only).")
 
     render_parser = subparsers.add_parser("render", help="Re-render Markdown and SVG artifacts from an existing result directory.")
@@ -132,9 +133,9 @@ def select_scenarios(scenarios: dict[str, Any], selected: str) -> dict[str, Any]
 
 def ensure_dependencies(*, skip_stack: bool) -> None:
     required = ["k6", "python3"]
-    if not skip_stack:
-        required.append("docker-compose")
     missing = [binary for binary in required if shutil.which(binary) is None]
+    if not skip_stack and detect_compose_command() is None:
+        missing.append("docker compose (plugin) or docker-compose")
     if missing:
         raise SystemExit(f"missing required tooling: {', '.join(missing)}")
 
@@ -182,16 +183,36 @@ def git_output(args: list[str]) -> str:
     return completed.stdout.strip()
 
 
+def detect_compose_command() -> list[str] | None:
+    docker = shutil.which("docker")
+    if docker is not None:
+        probe = subprocess.run([docker, "compose", "version"], capture_output=True, text=True, check=False)
+        if probe.returncode == 0:
+            return [docker, "compose"]
+
+    legacy = shutil.which("docker-compose")
+    if legacy is not None:
+        return [legacy]
+    return None
+
+
+def require_compose_command() -> list[str]:
+    command = detect_compose_command()
+    if command is None:
+        raise SystemExit(MISSING_COMPOSE_TOOLING)
+    return command
+
+
 def compose_up(extra_env: dict[str, str]) -> None:
     env = os.environ.copy()
     env.update(extra_env)
-    subprocess.run(["docker-compose", "up", "-d", "--build"], cwd=ROOT, check=True, env=env)
+    subprocess.run([*require_compose_command(), "up", "-d", "--build"], cwd=ROOT, check=True, env=env)
 
 
 def compose_down(extra_env: dict[str, str]) -> None:
     env = os.environ.copy()
     env.update(extra_env)
-    subprocess.run(["docker-compose", "down"], cwd=ROOT, check=True, env=env)
+    subprocess.run([*require_compose_command(), "down"], cwd=ROOT, check=True, env=env)
 
 
 def wait_for_ready(base_url: str, timeout_seconds: int = 180) -> None:
@@ -560,9 +581,10 @@ def collect_hardware_info() -> dict[str, Any]:
 
 
 def collect_software_info() -> dict[str, str]:
+    compose_command = detect_compose_command()
     return {
         "k6": safe_command_output(["k6", "version"]),
-        "docker_compose": safe_command_output(["docker-compose", "version"]),
+        "docker_compose": safe_command_output([*compose_command, "version"]) if compose_command else "unavailable",
         "go": safe_command_output(["go", "version"]),
     }
 

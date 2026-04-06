@@ -73,14 +73,41 @@ class EnsureDependenciesTests(unittest.TestCase):
         with mock.patch.object(runner.shutil, "which", side_effect=lambda name: binaries.get(name)):
             runner.ensure_dependencies(skip_stack=True)
 
-    def test_managed_stack_requires_docker_compose(self):
-        binaries = {"k6": "/tmp/k6", "python3": "/usr/bin/python3"}
+    def test_managed_stack_requires_compose_plugin_or_legacy_binary(self):
+        binaries = {"k6": "/tmp/k6", "python3": "/usr/bin/python3", "docker": None, "docker-compose": None}
 
         with mock.patch.object(runner.shutil, "which", side_effect=lambda name: binaries.get(name)):
             with self.assertRaises(SystemExit) as raised:
                 runner.ensure_dependencies(skip_stack=False)
 
-        self.assertEqual(str(raised.exception), "missing required tooling: docker-compose")
+        self.assertEqual(str(raised.exception), runner.MISSING_COMPOSE_TOOLING)
+
+
+class ComposeDetectionTests(unittest.TestCase):
+    def test_detect_compose_command_prefers_docker_compose_plugin(self):
+        binaries = {"docker": "/usr/bin/docker", "docker-compose": "/usr/local/bin/docker-compose"}
+
+        with mock.patch.object(runner.shutil, "which", side_effect=lambda name: binaries.get(name)):
+            with mock.patch.object(runner.subprocess, "run") as run_mock:
+                run_mock.return_value = mock.Mock(returncode=0)
+
+                self.assertEqual(runner.detect_compose_command(), ["/usr/bin/docker", "compose"])
+
+        run_mock.assert_called_once_with(
+            ["/usr/bin/docker", "compose", "version"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def test_detect_compose_command_falls_back_to_legacy_binary(self):
+        binaries = {"docker": "/usr/bin/docker", "docker-compose": "/usr/local/bin/docker-compose"}
+
+        with mock.patch.object(runner.shutil, "which", side_effect=lambda name: binaries.get(name)):
+            with mock.patch.object(runner.subprocess, "run") as run_mock:
+                run_mock.return_value = mock.Mock(returncode=1)
+
+                self.assertEqual(runner.detect_compose_command(), ["/usr/local/bin/docker-compose"])
 
 
 class BenchmarkEnvTests(unittest.TestCase):
