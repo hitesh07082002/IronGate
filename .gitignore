@@ -7,3 +7,4 @@ artifacts/demo/*.gif
 artifacts/demo/*.log
 artifacts/demo/*.mp4
 artifacts/demo/*.typescript
+.gstack/
