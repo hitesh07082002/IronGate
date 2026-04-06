@@ -2,6 +2,8 @@
 
 This document is the operational reference for the IronGate production environment behind `https://irongate.hiteshsadhwani.xyz`.
 
+This is the current Phase 8 production layout. The planned Phase 9 Chaos Observatory docs add demo and observatory subdomains later, but those are not part of the live deployment until that phase is implemented and shipped.
+
 ## Operator Checklist
 
 1. Run [`scripts/bootstrap-production-host.sh`](../scripts/bootstrap-production-host.sh) once as `root` on a new host.

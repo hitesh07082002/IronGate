@@ -4,6 +4,8 @@ IronGate is a production-grade API gateway implemented in Go with the standard `
 
 The project is built for fast evaluation. You can run the complete stack locally, inspect the full request path across public and protected routes, and deploy the same architecture behind TLS without introducing a managed control plane or a large platform dependency.
 
+Phase 8 is the shipped baseline on `main`. The planned Phase 9 Chaos Observatory expansion lives under [`docs/phase9-planning/`](./docs/phase9-planning/) and does not describe current live behavior yet.
+
 ## Start Here
 
 - `./demo.sh` is the fastest way to evaluate the project.
@@ -208,5 +210,8 @@ Benchmark note: the local benchmark stack sets `IRONGATE_TRUSTED_PROXIES=0.0.0.0
 - [`PROJECT_SPEC.md`](./PROJECT_SPEC.md): full project scope and success criteria
 - [`DESIGN_DOC.md`](./DESIGN_DOC.md): target-state design and algorithms
 - [`PROGRESS.md`](./PROGRESS.md): shipped phases and open stretch goals
+- [`docs/phase9-planning/PHASE9_CHAOS_OBSERVATORY_SPEC_v2.2.md`](./docs/phase9-planning/PHASE9_CHAOS_OBSERVATORY_SPEC_v2.2.md): approved Phase 9 planning spec
+- [`docs/phase9-planning/PHASE9_IMPLEMENTATION_PLAN_v1.2.md`](./docs/phase9-planning/PHASE9_IMPLEMENTATION_PLAN_v1.2.md): ordered Phase 9 implementation plan
+- [`docs/phase9-planning/DECISIONS_LOCK.md`](./docs/phase9-planning/DECISIONS_LOCK.md): locked Phase 9 implementation decisions
 - [`ADR/`](./ADR/): architectural decisions and tradeoffs
 - [`deploy/README.md`](./deploy/README.md): production bootstrap, deploy, and health-check flow

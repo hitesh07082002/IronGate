@@ -1,8 +1,9 @@
 # IronGate Progress Tracker
 
-> Status: Phases 1 through 8 are complete. Stretch goals remain open.
+> Status: Phases 1 through 8 are complete. Phase 9 is planned but not shipped.
 >
 > Use this file as the delivery checklist. Use [`README.md`](./README.md) for the public overview and [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the current runtime reference.
+> Planned Phase 9 docs live in [`docs/phase9-planning/`](./docs/phase9-planning/).
 
 ## Phase 1: Foundation
 - [x] Initialize Git repo, Go modules
@@ -109,8 +110,15 @@
 - [x] Demo capture workflow for the 2-minute GIF/video via `scripts/capture-demo.sh` + `artifacts/demo/README.md`
 - [x] `ARCHITECTURE.md` finalized with real code references
 
+## Phase 9: Chaos Observatory (planned, not shipped)
+- [x] Planning spec reconciled with current repo paths and current runtime docs
+- [x] Implementation plan reconciled with current repo paths and current runtime docs
+- [x] Locked implementation decisions captured in `docs/phase9-planning/DECISIONS_LOCK.md`
+- [ ] Implementation started on `main`
+- [ ] Phase 9 shipped and verified on production
+
 ## Stretch Goals
-- [ ] Chaos control panel (single HTML page)
+- [ ] Phase 9 Chaos Observatory demo platform (tracked in `docs/phase9-planning/`)
 - [ ] Token bucket rate limiting (alternative strategy)
 - [ ] Canary routing (N% traffic to v2)
 - [ ] Health check endpoints for upstream services

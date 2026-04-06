@@ -1,11 +1,12 @@
 # IronGate — Project Specification
 
-> **Status:** Core scope shipped, stretch goals pending
+> **Status:** Phases 1 through 8 shipped, Phase 9 planned
 > **Author:** Hitesh Sadhwani
 > **Last Updated:** April 2026
 >
 > For technical architecture and algorithms, see [`DESIGN_DOC.md`](./DESIGN_DOC.md).
 > For implementation reference, see [`ARCHITECTURE.md`](./ARCHITECTURE.md).
+> Planned Phase 9 work is tracked in [`docs/phase9-planning/`](./docs/phase9-planning/) and is not part of the shipped runtime yet.
 
 ---
 
@@ -53,8 +54,14 @@ Go is a strong fit for this class of infrastructure. Its standard library alread
 | Timeline | 7–8 weeks while working full-time at e2e Cloud |
 | Language | Go (stdlib + minimal dependencies) |
 | Budget | ~₹2,000/month for DigitalOcean VPS (snapshot/destroy to reduce) |
-| Frontend | None. No web UI, no admin dashboard. Pure backend infrastructure. |
-| Deployment | Single VPS with Docker Compose + Caddy for TLS termination |
+| Frontend | Current shipped runtime: none. Planned Phase 9 adds a demo-only UI under `docs/phase9-planning/`, not a general admin plane. |
+| Deployment | Current shipped runtime: single VPS with Docker Compose + Caddy for TLS termination. Planned Phase 9 adds a demo overlay on the same edge model. |
+
+Phase 9 note:
+
+- The original "chaos control panel" stretch goal has expanded into the broader Chaos Observatory plan in [`docs/phase9-planning/`](./docs/phase9-planning/).
+- Until that work ships, current runtime and production behavior remain the Phase 8 docs in [`ARCHITECTURE.md`](./ARCHITECTURE.md), [`PROGRESS.md`](./PROGRESS.md), and [`deploy/README.md`](./deploy/README.md).
+- The planned Phase 9 demo overlay intentionally raises the deployment target to an 8 GB / 4 vCPU VPS; keep using this document for the current shipped baseline and the Phase 9 planning docs for the expanded demo footprint.
 
 ---
 
@@ -81,7 +88,7 @@ Go is a strong fit for this class of infrastructure. Its standard library alread
 |---------|--------|
 | WebSocket / gRPC proxying | Adds complexity without proportional learning value |
 | TLS termination | Handled by Caddy; operational, not architectural |
-| Admin API / Web UI | Would shift focus to frontend work |
+| General-purpose admin API / ops console | Would expand the core gateway beyond its learning goals. The Phase 9 Observatory UI is demo-specific, not a general admin surface. |
 | Service discovery (Consul/etcd) | A separate project; static config is sufficient |
 | OAuth2 / OpenID Connect | JWT validation is enough to demonstrate auth middleware |
 | API versioning / transformation | Feature of mature gateways, not core patterns |
@@ -90,7 +97,7 @@ Go is a strong fit for this class of infrastructure. Its standard library alread
 
 ### 3.3 Stretch Goals (Priority Order)
 
-1. **Chaos control panel** — Single HTML page to inject failures and watch Grafana respond live
+1. **Phase 9 Chaos Observatory demo platform** — Demo-only control plane and observability UI, tracked in `docs/phase9-planning/`
 2. **Token bucket rate limiting** — Alternative algorithm per route via `strategy: "token_bucket"`
 3. **Canary routing** — Send N% traffic to v2 of a service based on weight config
 4. **Health check endpoints** — Background health checks, auto-remove unhealthy targets
@@ -472,6 +479,10 @@ The entire project runs on a **single DigitalOcean VPS** with a custom domain. N
 gateway.yourdomain.com    → VPS:8080  (API Gateway)
 grafana.yourdomain.com    → VPS:3000  (Grafana Dashboard)
 ```
+
+Phase 9 planning note: the future Chaos Observatory overlay adds `demo.yourdomain.com`
+and `observatory.yourdomain.com`, but those are not part of the current production
+deployment described in [`deploy/README.md`](./deploy/README.md).
 
 TLS via **Caddy** (automatic Let's Encrypt):
 
