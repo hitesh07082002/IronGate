@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -308,6 +310,16 @@ func waitForStartingRun(t *testing.T, app *app) {
 	t.Fatal("timed out waiting for starting scenario")
 }
 
+func withServiceEndpoints(t *testing.T, endpoints []serviceEndpoint) {
+	t.Helper()
+
+	previous := serviceEndpoints
+	serviceEndpoints = endpoints
+	t.Cleanup(func() {
+		serviceEndpoints = previous
+	})
+}
+
 func TestRunnerStartBuildsK6ContainerConfig(t *testing.T) {
 	docker := &mockDockerClient{
 		containerCreateFunc: func(context.Context, *dockercontainer.Config, *dockercontainer.HostConfig, *dockernetwork.NetworkingConfig, *ocispec.Platform, string) (dockercontainer.CreateResponse, error) {
@@ -319,7 +331,7 @@ func TestRunnerStartBuildsK6ContainerConfig(t *testing.T) {
 	containerID, err := runner.Start(context.Background(), &Scenario{
 		Name:     "checkout",
 		K6Script: "scenarios/k6/checkout.js",
-	}, 42, 90, "demo-jwt")
+	}, "moderate", 42, 90, "demo-jwt")
 	if err != nil {
 		t.Fatalf("Runner.Start: %v", err)
 	}
@@ -357,6 +369,7 @@ func TestRunnerStartBuildsK6ContainerConfig(t *testing.T) {
 	}
 
 	wantEnv := map[string]bool{
+		"INTENSITY=moderate":                    true,
 		"RPS=42":                                true,
 		"DURATION=90":                           true,
 		"TARGET_URL=http://gateway:8080":        true,
@@ -373,6 +386,145 @@ func TestRunnerStartBuildsK6ContainerConfig(t *testing.T) {
 	}
 	if len(docker.startedIDs) != 1 || docker.startedIDs[0] != "k6-123" {
 		t.Fatalf("started IDs = %#v, want [k6-123]", docker.startedIDs)
+	}
+}
+
+func TestExecuteChaosStepPostsErrorInjection(t *testing.T) {
+	var gotPath string
+	var gotPayload map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want POST", r.Method)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotPayload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	withServiceEndpoints(t, []serviceEndpoint{{Name: "user-service-1", URL: server.URL}})
+
+	app := newTestApp(t)
+	app.httpClient = server.Client()
+
+	if err := app.executeChaosStep(context.Background(), ChaosStep{
+		Action: "error_inject",
+		Target: "user-service-1",
+		Params: map[string]any{"rate": 0.3},
+	}); err != nil {
+		t.Fatalf("executeChaosStep(error_inject): %v", err)
+	}
+	if gotPath != "/chaos/errors" {
+		t.Fatalf("path = %q, want /chaos/errors", gotPath)
+	}
+	if gotPayload["rate"] != 0.3 {
+		t.Fatalf("payload = %#v, want rate 0.3", gotPayload)
+	}
+}
+
+func TestExecuteChaosStepPostsLatencyInjection(t *testing.T) {
+	var gotPath string
+	var gotPayload map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want POST", r.Method)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotPayload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	withServiceEndpoints(t, []serviceEndpoint{{Name: "order-service-2", URL: server.URL}})
+
+	app := newTestApp(t)
+	app.httpClient = server.Client()
+
+	if err := app.executeChaosStep(context.Background(), ChaosStep{
+		Action: "latency_inject",
+		Target: "order-service-2",
+		Params: map[string]any{"delay_ms": 2000},
+	}); err != nil {
+		t.Fatalf("executeChaosStep(latency_inject): %v", err)
+	}
+	if gotPath != "/chaos/latency" {
+		t.Fatalf("path = %q, want /chaos/latency", gotPath)
+	}
+	if gotPayload["delay_ms"] != float64(2000) {
+		t.Fatalf("payload = %#v, want delay_ms 2000", gotPayload)
+	}
+}
+
+func TestExecuteChaosStepAddsToxic(t *testing.T) {
+	var gotPath string
+	var gotPayload map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want POST", r.Method)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotPayload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer server.Close()
+
+	app := newTestApp(t)
+	app.toxiproxy = NewToxiproxyClient(server.Client(), app.logger)
+	app.toxiproxy.baseURL = server.URL
+
+	if err := app.executeChaosStep(context.Background(), ChaosStep{
+		Action: "add_toxic",
+		Params: map[string]any{
+			"type": "latency",
+			"attributes": map[string]any{
+				"latency": 500,
+				"jitter":  0,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("executeChaosStep(add_toxic): %v", err)
+	}
+	if gotPath != "/proxies/redis/toxics" {
+		t.Fatalf("path = %q, want /proxies/redis/toxics", gotPath)
+	}
+	if gotPayload["type"] != "latency" || gotPayload["name"] != "latency" {
+		t.Fatalf("payload = %#v, want latency toxic", gotPayload)
+	}
+}
+
+func TestExecuteChaosStepRemoveToxicAllowsNotFound(t *testing.T) {
+	var gotPath string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		if r.Method != http.MethodDelete {
+			t.Fatalf("method = %s, want DELETE", r.Method)
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	app := newTestApp(t)
+	app.toxiproxy = NewToxiproxyClient(server.Client(), app.logger)
+	app.toxiproxy.baseURL = server.URL
+
+	if err := app.executeChaosStep(context.Background(), ChaosStep{
+		Action: "remove_toxic",
+		Params: map[string]any{"type": "latency"},
+	}); err != nil {
+		t.Fatalf("executeChaosStep(remove_toxic): %v", err)
+	}
+	if gotPath != "/proxies/redis/toxics/latency" {
+		t.Fatalf("path = %q, want /proxies/redis/toxics/latency", gotPath)
 	}
 }
 
@@ -418,6 +570,19 @@ func TestRunnerStopRemovesExitedContainerAfterConflict(t *testing.T) {
 
 	if len(docker.removedCalls) != 1 || docker.removedCalls[0].id != "k6-123" {
 		t.Fatalf("remove calls = %#v", docker.removedCalls)
+	}
+}
+
+func TestRunnerStopIgnoresRemoveAlreadyInProgress(t *testing.T) {
+	docker := &mockDockerClient{
+		containerRemoveFunc: func(context.Context, string, dockercontainer.RemoveOptions) error {
+			return mockConflictError{error: errors.New("removal of container k6-123 is already in progress")}
+		},
+	}
+	runner := NewRunner(newTestLogger(), docker, "/tmp/project", "irongate")
+
+	if err := runner.Stop(context.Background(), "k6-123"); err != nil {
+		t.Fatalf("Runner.Stop: %v", err)
 	}
 }
 

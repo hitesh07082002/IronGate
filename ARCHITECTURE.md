@@ -4,7 +4,7 @@
 >
 > Start with [`README.md`](./README.md) for the overview and demo path. Use [`PROJECT_SPEC.md`](./PROJECT_SPEC.md) for full scope and [`DESIGN_DOC.md`](./DESIGN_DOC.md) for target-state design. If those documents disagree with the code, this file is the source of truth for current behavior.
 >
-> Phase 9 Milestone 1 is now part of the shipped runtime. The remaining Phase 9 planning docs under [`docs/phase9-planning/`](./docs/phase9-planning/) describe future work only. This file wins whenever planning docs disagree with current runtime behavior.
+> Phase 9 Milestones 1 through 3 are now part of the shipped runtime. The remaining Phase 9 planning docs under [`docs/phase9-planning/`](./docs/phase9-planning/) describe future work only. This file wins whenever planning docs disagree with current runtime behavior.
 
 ---
 
@@ -21,7 +21,7 @@ For broader product scope and future work, use:
 - [`DESIGN_DOC.md`](./DESIGN_DOC.md) for target architecture, algorithms, and tradeoffs
 - [`PROJECT_SPEC.md`](./PROJECT_SPEC.md) for full feature scope and project requirements
 - [`PROGRESS.md`](./PROGRESS.md) for what is shipped now versus planned next
-- [`docs/phase9-planning/`](./docs/phase9-planning/) for the remaining Chaos Observatory milestones beyond shipped M1
+- [`docs/phase9-planning/`](./docs/phase9-planning/) for the remaining Chaos Observatory milestones beyond shipped M3
 
 ---
 
@@ -186,8 +186,15 @@ irongate/
 │   ├── collector-config.yaml
 │   └── tempo.yaml
 ├── scenarios/
+│   ├── auth-wall.yaml
+│   ├── cascading-failure.yaml
 │   ├── circuit-breaker-recovery.yaml
 │   ├── happy-path.yaml
+│   ├── latency-injection.yaml
+│   ├── rate-limit-storm.yaml
+│   ├── redis-impaired.yaml
+│   ├── single-replica-death.yaml
+│   ├── upstream-5xx-retry.yaml
 │   └── k6/
 ├── ADR/
 ├── DESIGN_DOC.md
@@ -259,7 +266,7 @@ This server is separate from the public gateway listener on `:8080`. The default
 
 ### Observatory Server
 
-Phase 9 Milestone 2 adds a separate observatory process under [`cmd/observatory`](./cmd/observatory) that binds to `127.0.0.1:9000` in the overlay and orchestrates the demo backend.
+Phase 9 Milestones 2 and 3 add a separate observatory process under [`cmd/observatory`](./cmd/observatory) that binds to `127.0.0.1:9000` in the overlay and orchestrates the demo backend.
 
 - `GET /api/health` reports spec version plus JWT and Toxiproxy readiness
 - `GET /api/scenarios`, `GET /api/scenarios/{name}`, and `GET /api/scenarios/{name}/status` expose the built-in scenario catalog
@@ -268,7 +275,7 @@ Phase 9 Milestone 2 adds a separate observatory process under [`cmd/observatory`
 - `GET /api/metrics/query` and `GET /api/metrics/query_range` proxy a restricted subset of Prometheus queries
 - `POST /api/reset` restores service health, clears Toxiproxy toxics, stops managed k6 containers, and resets gateway circuit breakers
 
-The observatory runner starts short-lived `grafana/k6` containers against the Docker network, uses Toxiproxy for Redis impairment scenarios, and relies on structured gateway event logs from [`internal/telemetry/events.go`](./internal/telemetry/events.go) for the SSE stream.
+The observatory runner starts short-lived `grafana/k6` containers against the Docker network, passes scenario intensity into each run, uses Toxiproxy for Redis impairment scenarios, and relies on structured gateway event logs from [`internal/telemetry/events.go`](./internal/telemetry/events.go) for the SSE stream. The shipped catalog currently includes nine scenarios covering healthy traffic, auth rejection, rate limiting, single-target failure, retry absorption, circuit-breaker recovery, cascading failure, Redis impairment, and latency injection.
 
 #### `Router`
 

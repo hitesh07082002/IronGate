@@ -1,0 +1,34 @@
+name: "cascading-failure"
+display_name: "Cascading Failure"
+description: "Take down both user-service replicas in sequence and show the gateway failing fast once no healthy targets remain."
+what_you_learn: "When every target is gone, the gateway returns explicit 503s instead of hanging or proxying nonsense."
+what_to_watch: "Traffic first fails over to the surviving replica, then flips to a clean wall of 503 responses after the second kill."
+category: resilience
+duration_options: [60, 120]
+intensity_options:
+  mild: {rps: 50}
+  moderate: {rps: 100}
+  severe: {rps: 200}
+chaos_sequence:
+  - at_seconds: 5
+    action: service_down
+    target: user-service-1
+  - at_seconds: 20
+    action: service_down
+    target: user-service-2
+expected_signals:
+  - panel: "Circuit State"
+    signal: "The user-service aggregate remains open once both targets are exhausted"
+  - panel: "RPS + Error Rate"
+    signal: "Client traffic becomes 100% 503 after the second replica goes down"
+  - panel: "Upstream Picks per Target"
+    signal: "Picks shift to the surviving instance, then both targets flatline"
+  - event_feed:
+      - "all_targets_exhausted"
+      - "circuit_open"
+k6_script: "scenarios/k6/cascading-failure.js"
+reset_actions:
+  - service_up: user-service-1
+  - service_up: user-service-2
+  - flush_circuit_breakers: true
+  - drain_wait_seconds: 5

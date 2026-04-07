@@ -1,0 +1,25 @@
+name: "auth-wall"
+display_name: "Auth Wall"
+description: "Flood protected routes with bad bearer tokens and show the gateway rejecting requests before any upstream call is made."
+what_you_learn: "JWT validation at the gateway blocks malformed, missing, wrong-algorithm, and invalid-signature tokens without spending upstream capacity."
+what_to_watch: "Error rate turns into a clean 401 wall while upstream request volume stays flat near zero."
+category: auth
+duration_options: [30, 60]
+intensity_options:
+  mild: {rps: 50}
+  moderate: {rps: 200}
+  severe: {rps: 500}
+chaos_sequence: []
+expected_signals:
+  - panel: "RPS + Error Rate"
+    signal: "401 responses climb at the selected request rate"
+  - panel: "Upstream Picks per Target"
+    signal: "Protected upstream services remain at or near zero traffic"
+  - panel: "Latency"
+    signal: "Rejected requests stay very fast because auth fails before proxying"
+  - event_feed:
+      - "auth_failed"
+k6_script: "scenarios/k6/auth-wall.js"
+reset_actions:
+  - flush_circuit_breakers: true
+  - drain_wait_seconds: 5

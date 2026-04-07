@@ -470,7 +470,7 @@ func (a *app) startScenario(scenario *Scenario, params runParams) error {
 	a.setScenarioStatusLocked(scenario.Name, statusRunning)
 	a.mu.Unlock()
 
-	containerID, err := a.runner.Start(runCtx, scenario, intensity.RPS, durationSeconds, a.currentDemoJWT())
+	containerID, err := a.runner.Start(runCtx, scenario, strings.TrimSpace(params.Intensity), intensity.RPS, durationSeconds, a.currentDemoJWT())
 	a.mu.Lock()
 	if a.starting == run {
 		a.starting = nil

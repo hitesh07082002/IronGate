@@ -1,0 +1,26 @@
+name: "rate-limit-storm"
+display_name: "Rate Limit Storm"
+description: "Push the gateway's Redis-backed sliding window limiter with one hot client or a many-keys variant."
+what_you_learn: "Rate limiting happens at the gateway, so excess requests are absorbed before they fan out to upstream services."
+what_to_watch: "Single-key mode turns into a 429 wall after the threshold; many_keys spreads requests across users and reduces rejections."
+category: rate_limiting
+duration_options: [60, 120]
+intensity_options:
+  mild: {rps: 50}
+  moderate: {rps: 200}
+  severe: {rps: 500}
+  many_keys: {rps: 50}
+chaos_sequence: []
+expected_signals:
+  - panel: "Rate Limit Rejections"
+    signal: "429 responses climb once the route threshold is exhausted"
+  - panel: "Upstream RPS"
+    signal: "Single-key traffic is clipped close to the allowed rate while many_keys keeps aggregate throughput higher"
+  - panel: "Headers"
+    signal: "X-RateLimit-Remaining falls to zero and holds during the storm"
+  - event_feed:
+      - "rate_limited"
+k6_script: "scenarios/k6/rate-limit-storm.js"
+reset_actions:
+  - clear_rate_limits: true
+  - drain_wait_seconds: 5

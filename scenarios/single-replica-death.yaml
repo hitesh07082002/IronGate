@@ -1,0 +1,30 @@
+name: "single-replica-death"
+display_name: "Single Replica Death"
+description: "Kill one user-service replica and watch traffic fail over to the healthy instance."
+what_you_learn: "Per-target circuit breaker isolation shifts traffic away from a dead replica without taking the whole service down."
+what_to_watch: "The dead replica disappears from upstream picks, circuit state opens for that target, and client errors settle quickly."
+category: resilience
+duration_options: [60, 120, 300]
+intensity_options:
+  mild: {rps: 50}
+  moderate: {rps: 150}
+  severe: {rps: 300}
+chaos_sequence:
+  - at_seconds: 10
+    action: service_down
+    target: user-service-2
+expected_signals:
+  - panel: "Circuit State"
+    signal: "The affected user-service target opens while healthy traffic keeps flowing"
+  - panel: "Upstream Picks per Target"
+    signal: "user-service-2 drops to zero and user-service-1 absorbs the remaining load"
+  - panel: "RPS + Error Rate"
+    signal: "A brief 503 window appears near the failure, then traffic stabilizes"
+  - event_feed:
+      - "circuit_open"
+      - "circuit_rejected"
+k6_script: "scenarios/k6/single-replica-death.js"
+reset_actions:
+  - service_up: user-service-2
+  - flush_circuit_breakers: true
+  - drain_wait_seconds: 5

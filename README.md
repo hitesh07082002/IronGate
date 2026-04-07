@@ -4,7 +4,7 @@ IronGate is a production-grade API gateway implemented in Go with the standard `
 
 The project is built for fast evaluation. You can run the complete stack locally, inspect the full request path across public and protected routes, and deploy the same architecture behind TLS without introducing a managed control plane or a large platform dependency.
 
-Phases 1 through 8 plus Phase 9 Milestones 1 and 2 are now part of the repo's shipped runtime. The remaining Chaos Observatory expansion lives under [`docs/phase9-planning/`](./docs/phase9-planning/) and still describes future work beyond the current implementation.
+Phases 1 through 8 plus Phase 9 Milestones 1 through 3 are now part of the repo's shipped runtime. The remaining Chaos Observatory expansion lives under [`docs/phase9-planning/`](./docs/phase9-planning/) and still describes future work beyond the current implementation.
 
 ## Start Here
 
@@ -114,7 +114,7 @@ After bootstrap, day-to-day deploys use the dedicated `irongate` deploy user by 
 - Per-target circuit breaking with failover and half-open recovery
 - Prometheus metrics plus Grafana dashboards with service-only label cardinality
 - OpenTelemetry trace export, W3C trace propagation, and Prometheus exemplars through the observatory overlay
-- Chaos Observatory backend core with a local `:9000` control plane, SSE event stream, scenario runner, and Toxiproxy-backed Redis fault injection
+- Chaos Observatory backend core with a local `:9000` control plane, SSE event stream, scenario runner, Toxiproxy-backed Redis fault injection, and a 9-scenario demo catalog
 - Bearer-protected admin reset endpoint for circuit-breaker state recovery during observatory demos
 - Hot reload with rollback to the last valid runtime snapshot
 - Graceful shutdown that flips `/ready` before draining in-flight requests
@@ -174,6 +174,8 @@ Once the overlay is up, these local URLs are useful:
 - Grafana: `http://127.0.0.1:3000` with `admin/admin`
 - observatory API: `http://127.0.0.1:9000/api/health`
 - observatory SSE events: `http://127.0.0.1:9000/api/events`
+
+The shipped observatory catalog now includes `happy-path`, `auth-wall`, `rate-limit-storm`, `single-replica-death`, `upstream-5xx-retry`, `circuit-breaker-recovery`, `cascading-failure`, `redis-impaired`, and `latency-injection`.
 
 Reset the observatory state through the public demo API:
 

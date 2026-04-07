@@ -16,8 +16,9 @@ export function authHeaders(token) {
   };
 }
 
-function tokenPoolSize() {
-  const value = Number(__ENV.TOKEN_POOL_SIZE || 0);
+function tokenPoolSize(override) {
+  const rawValue = override !== undefined ? override : (__ENV.TOKEN_POOL_SIZE || 0);
+  const value = Number(rawValue);
   if (!isFinite(value) || value <= 0) {
     return 0;
   }
@@ -54,8 +55,8 @@ function bootstrapToken(base, index) {
   return String(payload.token);
 }
 
-function buildTokenPool(base) {
-  const size = tokenPoolSize();
+function buildTokenPool(base, overrideSize) {
+  const size = tokenPoolSize(overrideSize);
   if (size === 0) {
     return [];
   }
@@ -100,18 +101,26 @@ export function buildOptions() {
   };
 }
 
-export function setupGateway() {
+export function setupGateway(options = {}) {
   const gatewayBaseURL = baseURL();
   const response = http.get(`${gatewayBaseURL}/health`);
   check(response, {
     'gateway reachable': (res) => res.status === 200,
   });
 
-  const tokenPool = buildTokenPool(gatewayBaseURL);
+  const tokenPool = buildTokenPool(gatewayBaseURL, options.tokenPoolSize);
+  let headers;
+  if (Object.prototype.hasOwnProperty.call(options, 'headers')) {
+    headers = options.headers;
+  } else if (tokenPool.length > 0) {
+    headers = {};
+  } else {
+    headers = authHeaders();
+  }
 
   return {
     baseURL: gatewayBaseURL,
-    headers: tokenPool.length > 0 ? {} : authHeaders(),
+    headers,
     tokenPool,
   };
 }

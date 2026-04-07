@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -38,9 +39,10 @@ type IntensityOption struct {
 }
 
 type ChaosStep struct {
-	AtSeconds int    `json:"at_seconds" yaml:"at_seconds"`
-	Action    string `json:"action" yaml:"action"`
-	Target    string `json:"target,omitempty" yaml:"target"`
+	AtSeconds int            `json:"at_seconds" yaml:"at_seconds"`
+	Action    string         `json:"action" yaml:"action"`
+	Target    string         `json:"target,omitempty" yaml:"target"`
+	Params    map[string]any `json:"params,omitempty" yaml:"params"`
 }
 
 func loadScenarios(root string) (map[string]*Scenario, error) {
@@ -139,15 +141,14 @@ func (s *Scenario) Validate() error {
 		}
 	}
 
-	for index, step := range s.ChaosSequence {
+	for index := range s.ChaosSequence {
+		step := &s.ChaosSequence[index]
 		if step.AtSeconds < 0 {
 			return fmt.Errorf("chaos_sequence[%d] at_seconds must be non-negative", index)
 		}
-		action := strings.TrimSpace(step.Action)
-		if action != "service_down" && action != "service_up" {
-			return fmt.Errorf("chaos_sequence[%d] has unsupported action %q", index, step.Action)
-		}
-		if _, err := serviceURL(strings.TrimSpace(step.Target)); err != nil {
+		step.Action = strings.TrimSpace(step.Action)
+		step.Target = strings.TrimSpace(step.Target)
+		if err := validateChaosStep(*step); err != nil {
 			return fmt.Errorf("chaos_sequence[%d]: %w", index, err)
 		}
 	}
@@ -157,6 +158,124 @@ func (s *Scenario) Validate() error {
 		return s.ChaosSequence[left].AtSeconds < s.ChaosSequence[right].AtSeconds
 	})
 	return nil
+}
+
+func validateChaosStep(step ChaosStep) error {
+	switch step.Action {
+	case "service_down", "service_up":
+		if _, err := serviceURL(step.Target); err != nil {
+			return err
+		}
+	case "error_inject":
+		if _, err := serviceURL(step.Target); err != nil {
+			return err
+		}
+		rate, err := chaosFloatParam(step.Params, "rate")
+		if err != nil {
+			return err
+		}
+		if rate < 0 || rate > 1 {
+			return fmt.Errorf("rate must be between 0 and 1")
+		}
+	case "latency_inject":
+		if _, err := serviceURL(step.Target); err != nil {
+			return err
+		}
+		delayMS, err := chaosIntParam(step.Params, "delay_ms")
+		if err != nil {
+			return err
+		}
+		if delayMS <= 0 {
+			return fmt.Errorf("delay_ms must be greater than 0")
+		}
+	case "add_toxic":
+		if _, err := chaosStringParam(step.Params, "type"); err != nil {
+			return err
+		}
+		if _, err := chaosAttributesParam(step.Params, "attributes"); err != nil {
+			return err
+		}
+	case "remove_toxic":
+		if _, err := chaosStringParam(step.Params, "type"); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("has unsupported action %q", step.Action)
+	}
+
+	return nil
+}
+
+func chaosStringParam(params map[string]any, key string) (string, error) {
+	if len(params) == 0 {
+		return "", fmt.Errorf("%s is required", key)
+	}
+
+	value, ok := params[key]
+	if !ok {
+		return "", fmt.Errorf("%s is required", key)
+	}
+
+	text, ok := value.(string)
+	if !ok || strings.TrimSpace(text) == "" {
+		return "", fmt.Errorf("%s must be a non-empty string", key)
+	}
+
+	return strings.TrimSpace(text), nil
+}
+
+func chaosFloatParam(params map[string]any, key string) (float64, error) {
+	if len(params) == 0 {
+		return 0, fmt.Errorf("%s is required", key)
+	}
+
+	value, ok := params[key]
+	if !ok {
+		return 0, fmt.Errorf("%s is required", key)
+	}
+
+	switch typed := value.(type) {
+	case float64:
+		return typed, nil
+	case float32:
+		return float64(typed), nil
+	case int:
+		return float64(typed), nil
+	case int64:
+		return float64(typed), nil
+	default:
+		return 0, fmt.Errorf("%s must be a number", key)
+	}
+}
+
+func chaosIntParam(params map[string]any, key string) (int, error) {
+	value, err := chaosFloatParam(params, key)
+	if err != nil {
+		return 0, err
+	}
+	if math.Trunc(value) != value {
+		return 0, fmt.Errorf("%s must be an integer", key)
+	}
+
+	return int(value), nil
+}
+
+func chaosAttributesParam(params map[string]any, key string) (map[string]any, error) {
+	if len(params) == 0 {
+		return nil, fmt.Errorf("%s is required", key)
+	}
+
+	value, ok := params[key]
+	if !ok {
+		return nil, fmt.Errorf("%s is required", key)
+	}
+
+	attrs, ok := value.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("%s must be a map", key)
+	}
+
+	return attrs, nil
 }
 
 func (s *Scenario) ResolveRun(params runParams) (IntensityOption, int, error) {

@@ -1,0 +1,31 @@
+name: "upstream-5xx-retry"
+display_name: "Upstream 5xx Retry"
+description: "Inject 5xx responses into one order-service replica and watch retry absorb transient failures."
+what_you_learn: "The retry transport masks a meaningful slice of upstream errors before the client ever notices."
+what_to_watch: "Retry events rise with the injected 5xx rate while successful responses still dominate at the default fault level."
+category: resilience
+duration_options: [60, 120]
+intensity_options:
+  mild: {rps: 50}
+  moderate: {rps: 100}
+  severe: {rps: 200}
+chaos_sequence:
+  - at_seconds: 5
+    action: error_inject
+    target: order-service-2
+    params:
+      rate: 0.3
+expected_signals:
+  - panel: "Retries"
+    signal: "Retry attempts climb once injected 5xx responses begin"
+  - panel: "RPS + Error Rate"
+    signal: "Most requests still complete successfully at the default 30% failure rate"
+  - panel: "Upstream Duration"
+    signal: "Retried requests stretch tail latency because they pay a backoff penalty"
+  - event_feed:
+      - "retry_attempt"
+      - "upstream_5xx"
+k6_script: "scenarios/k6/upstream-5xx-retry.js"
+reset_actions:
+  - flush_circuit_breakers: true
+  - drain_wait_seconds: 5

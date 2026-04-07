@@ -35,19 +35,60 @@ func (a *app) executeChaos(ctx context.Context, scenario *Scenario) error {
 }
 
 func (a *app) executeChaosStep(ctx context.Context, step ChaosStep) error {
-	targetURL, err := serviceURL(step.Target)
-	if err != nil {
-		return err
-	}
-
 	switch strings.TrimSpace(step.Action) {
 	case "service_down":
 		return a.stopServiceContainer(ctx, step.Target)
 	case "service_up":
+		targetURL, err := serviceURL(step.Target)
+		if err != nil {
+			return err
+		}
 		if err := a.startServiceContainer(ctx, step.Target); err != nil {
 			return err
 		}
 		return a.waitForHealthy(ctx, serviceEndpoint{Name: step.Target, URL: targetURL})
+	case "error_inject":
+		targetURL, err := serviceURL(step.Target)
+		if err != nil {
+			return err
+		}
+		rate, err := chaosFloatParam(step.Params, "rate")
+		if err != nil {
+			return err
+		}
+		return a.postJSON(ctx, targetURL+"/chaos/errors", map[string]any{"rate": rate})
+	case "latency_inject":
+		targetURL, err := serviceURL(step.Target)
+		if err != nil {
+			return err
+		}
+		delayMS, err := chaosIntParam(step.Params, "delay_ms")
+		if err != nil {
+			return err
+		}
+		return a.postJSON(ctx, targetURL+"/chaos/latency", map[string]any{"delay_ms": delayMS})
+	case "add_toxic":
+		if a == nil || a.toxiproxy == nil {
+			return fmt.Errorf("toxiproxy client is not configured")
+		}
+		toxicType, err := chaosStringParam(step.Params, "type")
+		if err != nil {
+			return err
+		}
+		attrs, err := chaosAttributesParam(step.Params, "attributes")
+		if err != nil {
+			return err
+		}
+		return a.toxiproxy.AddToxic(ctx, toxicType, attrs)
+	case "remove_toxic":
+		if a == nil || a.toxiproxy == nil {
+			return fmt.Errorf("toxiproxy client is not configured")
+		}
+		toxicType, err := chaosStringParam(step.Params, "type")
+		if err != nil {
+			return err
+		}
+		return a.toxiproxy.RemoveToxic(ctx, toxicType)
 	default:
 		return fmt.Errorf("unsupported chaos action %q", step.Action)
 	}
