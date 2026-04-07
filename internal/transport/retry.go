@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math/rand"
 	"net"
 	"net/http"
@@ -22,6 +23,7 @@ import (
 	"github.com/hitesh07082002/irongate/internal/config"
 	gatewaymetrics "github.com/hitesh07082002/irongate/internal/metrics"
 	"github.com/hitesh07082002/irongate/internal/middleware"
+	"github.com/hitesh07082002/irongate/internal/telemetry"
 )
 
 const (
@@ -155,6 +157,11 @@ func (rt *RetryTransport) RoundTrip(req *http.Request) (resp *http.Response, err
 				triedTargets[metadata.target] = struct{}{}
 			}
 			if totalTargets == 0 || len(triedTargets) >= totalTargets {
+				telemetry.LogGatewayEvent(slog.Default(), slog.LevelError, "all_targets_exhausted", "all targets exhausted for "+service, map[string]any{
+					"service":    service,
+					"request_id": req.Header.Get(middleware.HeaderRequestID),
+					"trace_id":   telemetry.TraceIDFromContext(req.Context()),
+				})
 				return nil, &AttemptError{
 					Err:        ErrNoHealthyTargets,
 					RetryCount: logicalAttempt,
@@ -174,6 +181,23 @@ func (rt *RetryTransport) RoundTrip(req *http.Request) (resp *http.Response, err
 		if !shouldRetry(policy, logicalAttempt, resp, roundTripErr) {
 			return resp, roundTripErr
 		}
+		if resp != nil && resp.StatusCode >= http.StatusInternalServerError {
+			telemetry.LogGatewayEvent(slog.Default(), slog.LevelWarn, "upstream_5xx", "upstream returned 5xx", map[string]any{
+				"service":    service,
+				"status":     resp.StatusCode,
+				"request_id": req.Header.Get(middleware.HeaderRequestID),
+				"target":     metadata.target,
+				"trace_id":   telemetry.TraceIDFromContext(req.Context()),
+			})
+		}
+		telemetry.LogGatewayEvent(slog.Default(), slog.LevelWarn, "retry_attempt", "retry attempt scheduled", map[string]any{
+			"service":    service,
+			"attempt":    logicalAttempt + 2,
+			"reason":     outcomeReason,
+			"request_id": req.Header.Get(middleware.HeaderRequestID),
+			"target":     metadata.target,
+			"trace_id":   telemetry.TraceIDFromContext(req.Context()),
+		})
 
 		if metadata.target != "" {
 			triedTargets[metadata.target] = struct{}{}

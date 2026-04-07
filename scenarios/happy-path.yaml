@@ -1,0 +1,23 @@
+name: "happy-path"
+display_name: "Happy Path"
+description: "Run healthy authenticated traffic through the gateway with no chaos."
+what_you_learn: "What normal routing, retries, and latency look like before faults are introduced."
+what_to_watch: "RPS stays steady, error rate stays near zero, and circuit state remains closed."
+category: baseline
+duration_options: [30, 60, 120]
+intensity_options:
+  mild: {rps: 10}
+  moderate: {rps: 60}
+  severe: {rps: 150}
+chaos_sequence: []
+expected_signals:
+  - panel: "RPS + Error Rate"
+    signal: "Steady request rate with zero or near-zero errors"
+  - panel: "Circuit State"
+    signal: "All services remain CLOSED"
+  - event_feed:
+      - "request completed successfully"
+k6_script: "scenarios/k6/happy-path.js"
+reset_actions:
+  - flush_circuit_breakers: true
+  - drain_wait_seconds: 5

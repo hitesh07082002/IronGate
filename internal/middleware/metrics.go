@@ -1,10 +1,13 @@
 package middleware
 
 import (
+	"log/slog"
 	"net/http"
 	"time"
 
 	gatewaymetrics "github.com/hitesh07082002/irongate/internal/metrics"
+	"github.com/hitesh07082002/irongate/internal/response"
+	"github.com/hitesh07082002/irongate/internal/telemetry"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -34,6 +37,15 @@ func Metrics(registry *gatewaymetrics.Registry) Middleware {
 				registry.DecInFlight(route.Service)
 				spanCtx := trace.SpanFromContext(req.Context()).SpanContext()
 				duration := time.Since(start)
+				if recorder.statusCode < http.StatusBadRequest {
+					telemetry.LogGatewayEvent(slog.Default(), slog.LevelInfo, "request_success", "request completed successfully", map[string]any{
+						"service":    route.Service,
+						"route":      route.Path,
+						"status":     recorder.statusCode,
+						"request_id": response.RequestID(req),
+						"trace_id":   spanCtx.TraceID().String(),
+					})
+				}
 				if spanCtx.IsValid() && spanCtx.IsSampled() {
 					registry.ObserveRequestWithExemplar(
 						route.Service,

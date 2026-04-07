@@ -105,6 +105,13 @@ func RateLimiterWithMetrics(store ratelimit.Store, logger *slog.Logger, registry
 			span.SetAttributes(attribute.String("ratelimit.client_key", telemetry.HashAttr(clientKey)))
 
 			if store == nil {
+				telemetry.LogGatewayEvent(logger, slog.LevelWarn, "redis_unavailable", "rate limit store unavailable; allowing request", map[string]any{
+					"service":    route.Service,
+					"route":      route.Path,
+					"request_id": response.RequestID(req),
+					"trace_id":   telemetry.TraceIDFromContext(req.Context()),
+					"reason":     "store not configured",
+				})
 				span.SetAttributes(attribute.String("ratelimit.outcome", "fail_open"))
 				bucketKind, bucketKeyHash := rateLimitBucketLogFields(clientKey)
 				logger.Warn("rate limit store unavailable; allowing request",
@@ -131,6 +138,13 @@ func RateLimiterWithMetrics(store ratelimit.Store, logger *slog.Logger, registry
 			})
 			cancel()
 			if err != nil {
+				telemetry.LogGatewayEvent(logger, slog.LevelWarn, "redis_unavailable", "rate limit store unavailable; allowing request", map[string]any{
+					"service":    route.Service,
+					"route":      route.Path,
+					"request_id": response.RequestID(req),
+					"trace_id":   telemetry.TraceIDFromContext(req.Context()),
+					"error":      err.Error(),
+				})
 				span.SetAttributes(attribute.String("ratelimit.outcome", "fail_open"))
 				bucketKind, bucketKeyHash := rateLimitBucketLogFields(clientKey)
 				logger.Warn("rate limit store unavailable; allowing request",
@@ -147,6 +161,13 @@ func RateLimiterWithMetrics(store ratelimit.Store, logger *slog.Logger, registry
 
 			setRateLimitHeaders(w.Header(), route.RateLimit.Requests, decision)
 			if !decision.Allowed {
+				telemetry.LogGatewayEvent(logger, slog.LevelWarn, "rate_limited", rateLimitExceededMessage, map[string]any{
+					"service":    route.Service,
+					"route":      route.Path,
+					"request_id": response.RequestID(req),
+					"trace_id":   telemetry.TraceIDFromContext(req.Context()),
+					"remaining":  decision.Remaining,
+				})
 				span.SetAttributes(
 					attribute.String("ratelimit.outcome", "rejected"),
 					attribute.Int64("ratelimit.remaining", int64(decision.Remaining)),

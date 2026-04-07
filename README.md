@@ -4,7 +4,7 @@ IronGate is a production-grade API gateway implemented in Go with the standard `
 
 The project is built for fast evaluation. You can run the complete stack locally, inspect the full request path across public and protected routes, and deploy the same architecture behind TLS without introducing a managed control plane or a large platform dependency.
 
-Phases 1 through 8 plus Phase 9 Milestone 1 are now part of the repo's shipped runtime. The remaining Chaos Observatory expansion lives under [`docs/phase9-planning/`](./docs/phase9-planning/) and still describes future work beyond the current implementation.
+Phases 1 through 8 plus Phase 9 Milestones 1 and 2 are now part of the repo's shipped runtime. The remaining Chaos Observatory expansion lives under [`docs/phase9-planning/`](./docs/phase9-planning/) and still describes future work beyond the current implementation.
 
 ## Start Here
 
@@ -114,6 +114,7 @@ After bootstrap, day-to-day deploys use the dedicated `irongate` deploy user by 
 - Per-target circuit breaking with failover and half-open recovery
 - Prometheus metrics plus Grafana dashboards with service-only label cardinality
 - OpenTelemetry trace export, W3C trace propagation, and Prometheus exemplars through the observatory overlay
+- Chaos Observatory backend core with a local `:9000` control plane, SSE event stream, scenario runner, and Toxiproxy-backed Redis fault injection
 - Bearer-protected admin reset endpoint for circuit-breaker state recovery during observatory demos
 - Hot reload with rollback to the last valid runtime snapshot
 - Graceful shutdown that flips `/ready` before draining in-flight requests
@@ -154,23 +155,50 @@ make benchmark
 `make benchmark` writes a timestamped result bundle under `benchmarks/results/`.
 The committed benchmark snapshot and performance notes live in [`docs/benchmarks.md`](./docs/benchmarks.md).
 
-For the Phase 9 Milestone 1 observability stack:
+For the Phase 9 observability and observatory stack:
 
 ```bash
 JWT_SECRET=test-secret \
 GRAFANA_ADMIN_USER=admin \
 GRAFANA_ADMIN_PASSWORD=admin \
 ADMIN_TOKEN=admin-token \
+DEMO_TOKEN=demo-token \
 make observatory-up
 ```
 
-That overlay adds Tempo plus the OTel Collector on top of the normal Docker stack so you can verify live traces and Prometheus exemplars. It also enables the bearer-protected admin reset plane inside Docker via `ADMIN_TOKEN` without publishing a host admin port. Tear it down with:
+That overlay adds Tempo, the OTel Collector, Toxiproxy, and the local observatory service on top of the normal Docker stack so you can verify live traces, Prometheus exemplars, scenario events, and Redis fault handling. It also enables the bearer-protected admin reset plane inside Docker via `ADMIN_TOKEN` without publishing a host admin port.
+
+Once the overlay is up, these local URLs are useful:
+
+- gateway: `http://127.0.0.1:8080`
+- Grafana: `http://127.0.0.1:3000` with `admin/admin`
+- observatory API: `http://127.0.0.1:9000/api/health`
+- observatory SSE events: `http://127.0.0.1:9000/api/events`
+
+Reset the observatory state through the public demo API:
+
+```bash
+DEMO_TOKEN=demo-token make observatory-reset
+```
+
+Start the built-in circuit-breaker recovery scenario:
+
+```bash
+curl -fsS -X POST \
+  -H "Authorization: Bearer demo-token" \
+  -H "Content-Type: application/json" \
+  -d '{"intensity":"severe","duration":60}' \
+  http://127.0.0.1:9000/api/scenarios/circuit-breaker-recovery/run
+```
+
+Tear the overlay down with:
 
 ```bash
 JWT_SECRET=test-secret \
 GRAFANA_ADMIN_USER=admin \
 GRAFANA_ADMIN_PASSWORD=admin \
 ADMIN_TOKEN=admin-token \
+DEMO_TOKEN=demo-token \
 make observatory-down
 ```
 
@@ -195,5 +223,6 @@ Production troubleshooting stays in [`deploy/README.md`](./deploy/README.md).
 - [`docs/phase9-planning/PHASE9_CHAOS_OBSERVATORY_SPEC_v2.2.md`](./docs/phase9-planning/PHASE9_CHAOS_OBSERVATORY_SPEC_v2.2.md): approved Phase 9 planning spec
 - [`docs/phase9-planning/PHASE9_IMPLEMENTATION_PLAN_v1.2.md`](./docs/phase9-planning/PHASE9_IMPLEMENTATION_PLAN_v1.2.md): ordered Phase 9 implementation plan
 - [`docs/phase9-planning/DECISIONS_LOCK.md`](./docs/phase9-planning/DECISIONS_LOCK.md): locked Phase 9 implementation decisions
+- [`docs/phase9-planning/CODEX_M2_PROMPT.md`](./docs/phase9-planning/CODEX_M2_PROMPT.md): implementation prompt used for the shipped M2 backend core
 - [`ADR/`](./ADR/): architectural decisions and tradeoffs
 - [`deploy/README.md`](./deploy/README.md): production bootstrap, deploy, and health-check flow

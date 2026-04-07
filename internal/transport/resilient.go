@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -21,6 +22,7 @@ import (
 	"github.com/hitesh07082002/irongate/internal/config"
 	gatewaymetrics "github.com/hitesh07082002/irongate/internal/metrics"
 	"github.com/hitesh07082002/irongate/internal/middleware"
+	"github.com/hitesh07082002/irongate/internal/telemetry"
 	"github.com/hitesh07082002/irongate/internal/transport/circuitbreaker"
 	"github.com/hitesh07082002/irongate/internal/transport/loadbalancer"
 )
@@ -179,13 +181,30 @@ func (ct *CircuitBreakerTransport) RoundTrip(req *http.Request) (*http.Response,
 	}
 
 	breaker := ct.registry.BreakerForService(target, service)
+	beforeAllowState := breaker.State()
 	allowed := breaker.Allow()
+	afterAllowState := breaker.State()
 	span.SetAttributes(
 		attribute.String("cb.target", target),
-		attribute.String("cb.state", circuitStateAttribute(breaker.State())),
+		attribute.String("cb.state", circuitStateAttribute(afterAllowState)),
 	)
+	if allowed && afterAllowState == circuitbreaker.StateHalfOpen {
+		ct.logCircuitEvent(req, slog.LevelWarn, "circuit_half_open", "half-open probe sent to "+target, service, target, map[string]any{
+			"cb.state":   circuitStateAttribute(afterAllowState),
+			"request_id": req.Header.Get(middleware.HeaderRequestID),
+			"previous":   circuitStateAttribute(beforeAllowState),
+			"trace_id":   telemetry.TraceIDFromContext(req.Context()),
+			"route":      routePath(req),
+		})
+	}
 	ct.syncOpenCircuitGauge(service, routeTargets, target)
 	if !allowed {
+		ct.logCircuitEvent(req, slog.LevelWarn, "circuit_rejected", "circuit rejected request for "+target, service, target, map[string]any{
+			"cb.state":   circuitStateAttribute(afterAllowState),
+			"request_id": req.Header.Get(middleware.HeaderRequestID),
+			"trace_id":   telemetry.TraceIDFromContext(req.Context()),
+			"route":      routePath(req),
+		})
 		span.AddEvent("circuit_rejected")
 		span.SetStatus(codes.Error, ErrCircuitOpen.Error())
 		return nil, ErrCircuitOpen
@@ -197,7 +216,16 @@ func (ct *CircuitBreakerTransport) RoundTrip(req *http.Request) (*http.Response,
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		if countsTowardCircuit(req.Context(), err) {
+			beforeFailureState := breaker.State()
 			ct.recordBreakerFailure(breaker, service, routeTargets, target)
+			if breaker.State() == circuitbreaker.StateOpen && beforeFailureState != circuitbreaker.StateOpen {
+				ct.logCircuitEvent(req, slog.LevelError, "circuit_open", "circuit OPEN on "+target, service, target, map[string]any{
+					"cb.state":   "open",
+					"request_id": req.Header.Get(middleware.HeaderRequestID),
+					"trace_id":   telemetry.TraceIDFromContext(req.Context()),
+					"route":      routePath(req),
+				})
+			}
 		} else {
 			ct.recordBreakerIgnored(breaker, service, routeTargets, target)
 		}
@@ -211,11 +239,30 @@ func (ct *CircuitBreakerTransport) RoundTrip(req *http.Request) (*http.Response,
 
 	if resp.StatusCode >= http.StatusInternalServerError {
 		span.SetStatus(codes.Error, http.StatusText(resp.StatusCode))
+		beforeFailureState := breaker.State()
 		ct.recordBreakerFailure(breaker, service, routeTargets, target)
+		if breaker.State() == circuitbreaker.StateOpen && beforeFailureState != circuitbreaker.StateOpen {
+			ct.logCircuitEvent(req, slog.LevelError, "circuit_open", "circuit OPEN on "+target, service, target, map[string]any{
+				"cb.state":   "open",
+				"request_id": req.Header.Get(middleware.HeaderRequestID),
+				"trace_id":   telemetry.TraceIDFromContext(req.Context()),
+				"route":      routePath(req),
+				"status":     resp.StatusCode,
+			})
+		}
 		return resp, nil
 	}
 	if resp.Body == nil {
+		beforeSuccessState := breaker.State()
 		ct.recordBreakerSuccess(breaker, service, routeTargets, target)
+		if beforeSuccessState == circuitbreaker.StateHalfOpen && breaker.State() == circuitbreaker.StateClosed {
+			ct.logCircuitEvent(req, slog.LevelInfo, "circuit_closed", "circuit CLOSED on "+target, service, target, map[string]any{
+				"cb.state":   "closed",
+				"request_id": req.Header.Get(middleware.HeaderRequestID),
+				"trace_id":   telemetry.TraceIDFromContext(req.Context()),
+				"route":      routePath(req),
+			})
+		}
 		resp.Body = http.NoBody
 		return resp, nil
 	}
@@ -224,13 +271,40 @@ func (ct *CircuitBreakerTransport) RoundTrip(req *http.Request) (*http.Response,
 		ReadCloser: resp.Body,
 		ctx:        req.Context(),
 		succeed: func() {
+			beforeSuccessState := breaker.State()
 			ct.recordBreakerSuccess(breaker, service, routeTargets, target)
+			if beforeSuccessState == circuitbreaker.StateHalfOpen && breaker.State() == circuitbreaker.StateClosed {
+				ct.logCircuitEvent(req, slog.LevelInfo, "circuit_closed", "circuit CLOSED on "+target, service, target, map[string]any{
+					"cb.state":   "closed",
+					"request_id": req.Header.Get(middleware.HeaderRequestID),
+					"trace_id":   telemetry.TraceIDFromContext(req.Context()),
+					"route":      routePath(req),
+				})
+			}
 		},
 		fail: func() {
+			beforeFailureState := breaker.State()
 			ct.recordBreakerFailure(breaker, service, routeTargets, target)
+			if breaker.State() == circuitbreaker.StateOpen && beforeFailureState != circuitbreaker.StateOpen {
+				ct.logCircuitEvent(req, slog.LevelError, "circuit_open", "circuit OPEN on "+target, service, target, map[string]any{
+					"cb.state":   "open",
+					"request_id": req.Header.Get(middleware.HeaderRequestID),
+					"trace_id":   telemetry.TraceIDFromContext(req.Context()),
+					"route":      routePath(req),
+				})
+			}
 		},
 		ignore: func() {
+			beforeState := breaker.State()
 			ct.recordBreakerIgnored(breaker, service, routeTargets, target)
+			if beforeState == circuitbreaker.StateHalfOpen && breaker.State() == circuitbreaker.StateClosed {
+				ct.logCircuitEvent(req, slog.LevelInfo, "circuit_closed", "circuit CLOSED on "+target, service, target, map[string]any{
+					"cb.state":   "closed",
+					"request_id": req.Header.Get(middleware.HeaderRequestID),
+					"trace_id":   telemetry.TraceIDFromContext(req.Context()),
+					"route":      routePath(req),
+				})
+			}
 		},
 	}
 
@@ -307,6 +381,26 @@ func routeBalancerKey(route *config.RouteConfig) string {
 	}
 
 	return builder.String()
+}
+
+func (ct *CircuitBreakerTransport) logCircuitEvent(req *http.Request, level slog.Level, typ, message, service, target string, attrs map[string]any) {
+	eventAttrs := map[string]any{
+		"service": service,
+		"target":  target,
+	}
+	for key, value := range attrs {
+		eventAttrs[key] = value
+	}
+	telemetry.LogGatewayEvent(slog.Default(), level, typ, message, eventAttrs)
+}
+
+func routePath(req *http.Request) string {
+	route := middleware.GetRouteConfig(req)
+	if route == nil {
+		return ""
+	}
+
+	return route.Path
 }
 
 func wrapAttemptError(err error, metadata attemptMetadata) error {

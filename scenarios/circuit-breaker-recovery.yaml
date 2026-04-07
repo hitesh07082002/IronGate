@@ -1,0 +1,31 @@
+name: "circuit-breaker-recovery"
+display_name: "Circuit Breaker: Open → Recovery"
+description: "Kill one upstream replica and watch the circuit open, traffic fail over, then automatically recover."
+what_you_learn: "How circuit breakers prevent cascade failures and self-heal without operator intervention."
+what_to_watch: "Watch the Circuit State timeline — it flips OPEN within ~10 seconds, then probes and CLOSES automatically."
+category: resilience
+duration_options: [60, 120, 300]
+intensity_options:
+  mild: {rps: 20}
+  moderate: {rps: 100}
+  severe: {rps: 300}
+chaos_sequence:
+  - at_seconds: 10
+    action: service_down
+    target: user-service-2
+expected_signals:
+  - panel: "Circuit State"
+    signal: "Flips CLOSED → OPEN within 15s of chaos start"
+  - panel: "RPS + Error Rate"
+    signal: "503 spike during OPEN period; drops on recovery"
+  - panel: "Upstream Picks per Target"
+    signal: "user-service-2 picks drop to zero during OPEN"
+  - event_feed:
+      - "circuit OPEN on user-service-2"
+      - "half-open probe sent to user-service-2"
+      - "circuit CLOSED — recovery complete"
+k6_script: "scenarios/k6/circuit-breaker-recovery.js"
+reset_actions:
+  - service_up: user-service-2
+  - flush_circuit_breakers: true
+  - drain_wait_seconds: 5
