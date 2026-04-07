@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	dockercontainer "github.com/docker/docker/api/types/container"
 	dockerfilters "github.com/docker/docker/api/types/filters"
 	dockerimage "github.com/docker/docker/api/types/image"
@@ -165,7 +166,9 @@ func (r *Runner) Stop(ctx context.Context, containerID string) error {
 		if client.IsErrNotFound(err) {
 			return nil
 		}
-		return fmt.Errorf("stop k6 container: %w", err)
+		if !cerrdefs.IsConflict(err) || !strings.Contains(err.Error(), "is not running") {
+			return fmt.Errorf("stop k6 container: %w", err)
+		}
 	}
 	if err := r.docker.ContainerRemove(ctx, containerID, dockercontainer.RemoveOptions{Force: true, RemoveVolumes: true}); err != nil && !client.IsErrNotFound(err) {
 		return fmt.Errorf("remove k6 container: %w", err)

@@ -36,6 +36,10 @@ type createCall struct {
 	name          string
 }
 
+type mockConflictError struct{ error }
+
+func (mockConflictError) Conflict() {}
+
 type mockDockerClient struct {
 	mu sync.Mutex
 
@@ -397,6 +401,26 @@ func TestRunnerStopStopsAndRemovesContainer(t *testing.T) {
 	}
 }
 
+func TestRunnerStopRemovesExitedContainerAfterConflict(t *testing.T) {
+	docker := &mockDockerClient{
+		containerStopFunc: func(context.Context, string, dockercontainer.StopOptions) error {
+			return mockConflictError{error: errors.New("container k6-123 is not running")}
+		},
+	}
+	runner := NewRunner(newTestLogger(), docker, "/tmp/project", "irongate")
+
+	if err := runner.Stop(context.Background(), "k6-123"); err != nil {
+		t.Fatalf("Runner.Stop: %v", err)
+	}
+
+	docker.mu.Lock()
+	defer docker.mu.Unlock()
+
+	if len(docker.removedCalls) != 1 || docker.removedCalls[0].id != "k6-123" {
+		t.Fatalf("remove calls = %#v", docker.removedCalls)
+	}
+}
+
 func TestRunnerStopManagedContainersUsesManagedLabelFilter(t *testing.T) {
 	t.Run("empty list", func(t *testing.T) {
 		docker := &mockDockerClient{}
@@ -436,6 +460,29 @@ func TestRunnerStopManagedContainersUsesManagedLabelFilter(t *testing.T) {
 			t.Fatalf("stop calls = %#v", docker.stoppedCalls)
 		}
 		if len(docker.removedCalls) != 1 || docker.removedCalls[0].id != "k6-1" {
+			t.Fatalf("remove calls = %#v", docker.removedCalls)
+		}
+	})
+
+	t.Run("removes exited containers too", func(t *testing.T) {
+		docker := &mockDockerClient{
+			containerListFunc: func(context.Context, dockercontainer.ListOptions) ([]dockercontainer.Summary, error) {
+				return []dockercontainer.Summary{{ID: "k6-exited", State: "exited"}}, nil
+			},
+			containerStopFunc: func(context.Context, string, dockercontainer.StopOptions) error {
+				return mockConflictError{error: errors.New("container k6-exited is not running")}
+			},
+		}
+		runner := NewRunner(newTestLogger(), docker, "/tmp/project", "irongate")
+
+		if err := runner.StopManagedContainers(context.Background()); err != nil {
+			t.Fatalf("StopManagedContainers: %v", err)
+		}
+
+		docker.mu.Lock()
+		defer docker.mu.Unlock()
+
+		if len(docker.removedCalls) != 1 || docker.removedCalls[0].id != "k6-exited" {
 			t.Fatalf("remove calls = %#v", docker.removedCalls)
 		}
 	})
