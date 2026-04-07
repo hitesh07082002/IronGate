@@ -473,7 +473,7 @@ scrape_configs:
 **Step 4 — Wire exemplar → trace link in Grafana Prometheus datasource:**
 
 ```yaml
-# monitoring/grafana/provisioning/datasources/prometheus.yaml
+# monitoring/grafana/provisioning/datasources/prometheus.yml
 apiVersion: 1
 datasources:
   - name: Prometheus
@@ -955,9 +955,9 @@ DELETE /proxies/redis/toxics/:name  # remove on reset
 ```
 
 Gateway remains YAML-first in observatory mode. `configs/gateway.yaml` should resolve
-Redis as `address: "${REDIS_ADDR:-redis:6379}"`, and `docker-compose.observatory.yml`
-sets `REDIS_ADDR=toxiproxy:6380`. The base `docker-compose.yml` keeps the default
-`redis:6379` path.
+Redis as `address: "${REDIS_ADDR}"`. The base `docker-compose.yml` sets
+`REDIS_ADDR=redis:6379`, and `docker-compose.observatory.yml` later overrides it to
+`toxiproxy:6380` for Redis-chaos scenarios.
 
 ---
 
@@ -1217,7 +1217,7 @@ func hashAttr(value string) string {
 ### 11.6 Grafana Embedding
 
 ```ini
-# monitoring/grafana/provisioning/grafana.ini
+# monitoring/grafana/provisioning/grafana-demo.ini
 [security]
 allow_embedding = true
 content_security_policy = false
@@ -1283,9 +1283,9 @@ Steps:
 4. `gateway_circuit_state{service}` gauge + `Registry.Reset()` + admin server on `:9090`
 5. `ObserveWithExemplar` on `gateway_request_duration_seconds` (§6.2 Steps 1–2)
 6. `docker-compose.observatory.yml` skeleton: Tempo + OTel Collector; gateway env vars; pinned image tags
-7. Grafana: `tempo.yaml` datasource (`uid: tempo`); `prometheus.yaml` with `exemplarTraceIdDestinations`; `grafana.ini` with `allow_embedding = true`
+7. Grafana: `tempo.yaml` datasource (`uid: tempo`); `prometheus.yml` with `exemplarTraceIdDestinations`; `grafana-demo.ini` with `allow_embedding = true`
 8. Prometheus: `exemplar_storage: true`; `scrape_protocols` for OpenMetrics (§6.2 Steps 3–4)
-9. Dashboard 1 (`gateway-overview.json`): p99 panel with exemplars enabled
+9. Dashboard 1 (`irongate-observability.json`): p99 panel with exemplars enabled
 
 **Exit criterion:** Kill `user-service-2`; send one request; money trace visible in Grafana
 Explore (`cb.state=open`, zero upstream span, < 5ms total). Exemplar dot on p99 panel;
@@ -1463,14 +1463,15 @@ irongate/
 │   │   └── prometheus.yml
 │   └── grafana/
 │       ├── dashboards/
-│       │   ├── gateway-overview.json
+│       │   ├── irongate-observability.json
 │       │   ├── resilience.json
 │       │   ├── rate-limiting.json
 │       │   └── scenario-view.json
 │       └── provisioning/
-│           ├── grafana.ini             allow_embedding = true
+│           ├── grafana.ini             base runtime defaults
+│           ├── grafana-demo.ini        allow_embedding = true
 │           ├── datasources/
-│           │   ├── prometheus.yaml
+│           │   ├── prometheus.yml
 │           │   └── tempo.yaml
 │           └── dashboards/
 │               └── dashboards.yaml
@@ -1699,7 +1700,7 @@ All decisions are resolved and incorporated into the spec body. Do not re-open.
 | ID | Decision | Where in spec |
 |----|----------|--------------|
 | B1 | Pre-pull `grafana/k6:<pinned-tag>` in `make observatory-up` | §8.8, §14 |
-| B2 | `allow_embedding = true` + `content_security_policy = false` in `grafana.ini`; verify cross-subdomain iframe before M4 Traces tab | §11.6, §12 M4 |
+| B2 | `allow_embedding = true` + `content_security_policy = false` in `grafana-demo.ini`; verify cross-subdomain iframe before M4 Traces tab | §11.6, §12 M4 |
 | B3 | Add `gateway_circuit_state{service}` gauge (0/1/2, service-level aggregate); implement in M1 | §3.3, §8.7, §10 Dashboard 2 |
 | B4 | Observatory mints its demo JWT via `POST http://gateway:8080/api/users/login`; 23h refresh; fallback to `DEMO_JWT` | §8.8 |
 | B5 | Docker SDK `ContainerLogs(Follow: true)` + `stdcopy.StdCopy()`; one JSON object per line | §8.4 |

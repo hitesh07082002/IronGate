@@ -1,6 +1,7 @@
 package circuitbreaker
 
 import (
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/hitesh07082002/irongate/internal/config"
 	"github.com/hitesh07082002/irongate/internal/metrics"
+	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 )
 
@@ -460,6 +462,26 @@ func TestRegistryCloneWithConfigUsesFreshCollector(t *testing.T) {
 	}
 	if cloned.BreakerForService("user-service-1:8081", "user-service").State() != StateOpen {
 		t.Fatal("expected cloned breaker to preserve open state")
+	}
+}
+
+func TestRegistryRegistrationFailureFallsBackWithoutCollector(t *testing.T) {
+	registry := NewRegistry(config.CBConfig{FailureThreshold: 1}, func(prometheus.Collector) error {
+		return errors.New("register failed")
+	})
+
+	if registry.Collector() != nil {
+		t.Fatal("expected collector to be disabled when registration fails")
+	}
+
+	breaker := registry.BreakerForService("user-service-1:8081", "user-service")
+	if !breaker.Allow() {
+		t.Fatal("expected fallback registry to keep serving breakers")
+	}
+	breaker.RecordFailure()
+
+	if state, ok := registry.State("user-service-1:8081"); !ok || state != StateOpen {
+		t.Fatalf("expected fallback registry to keep breaker state, got %s,%t", state, ok)
 	}
 }
 

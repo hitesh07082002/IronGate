@@ -32,9 +32,10 @@ implementation plan is ambiguous, this file wins until a deliberate follow-up PR
 4. **Config contract stays YAML-first**
    Gateway Redis wiring continues to come from `configs/gateway.yaml`, which should resolve:
 
-   `redis.address: "${REDIS_ADDR:-redis:6379}"`
+   `redis.address: "${REDIS_ADDR}"`
 
-   The Phase 9 overlay sets `REDIS_ADDR=toxiproxy:6380`. The base stack keeps the default.
+   The base stack sets `REDIS_ADDR=redis:6379`. The observatory overlay later overrides it
+   to `toxiproxy:6380` for Redis-chaos scenarios.
 
 5. **Repo layout for Prometheus / Grafana assets**
    New observability assets extend the existing repo structure, not a parallel tree:

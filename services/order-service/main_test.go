@@ -38,6 +38,18 @@ func TestOrderServiceRoutesRespond(t *testing.T) {
 		t.Fatalf("expected %d orders, got %d", len(orders), len(listed))
 	}
 
+	getResp := httptest.NewRecorder()
+	mux.ServeHTTP(getResp, httptest.NewRequest(http.MethodGet, "/orders/o-1", nil))
+	if getResp.Code != http.StatusOK {
+		t.Fatalf("expected GET /orders/{id} 200, got %d", getResp.Code)
+	}
+
+	createResp := httptest.NewRecorder()
+	mux.ServeHTTP(createResp, httptest.NewRequest(http.MethodPost, "/orders", nil))
+	if createResp.Code != http.StatusCreated {
+		t.Fatalf("expected POST /orders 201, got %d", createResp.Code)
+	}
+
 	healthResp := httptest.NewRecorder()
 	mux.ServeHTTP(healthResp, httptest.NewRequest(http.MethodGet, "/health", nil))
 	if healthResp.Code != http.StatusOK {

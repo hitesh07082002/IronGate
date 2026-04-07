@@ -66,17 +66,22 @@ func TestChaosHandlersRejectInvalidPayloads(t *testing.T) {
 
 func TestChaosMiddlewareDelaysAndInjectsErrors(t *testing.T) {
 	state := NewChaosState()
-	state.delay = 10 * time.Millisecond
+	mux := http.NewServeMux()
+	RegisterChaosHandlers(mux, state)
 
 	var nextCalls atomic.Int32
-	handler := state.Middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	mux.Handle("GET /users", state.Middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		nextCalls.Add(1)
 		WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-	}))
+	})))
+
+	if resp := postJSON(t, mux, "/chaos/latency", `{"delay_ms":10}`); resp.Code != http.StatusOK {
+		t.Fatalf("expected latency update 200, got %d", resp.Code)
+	}
 
 	start := time.Now()
 	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/users", nil))
+	mux.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/users", nil))
 	if elapsed := time.Since(start); elapsed < 8*time.Millisecond {
 		t.Fatalf("expected chaos delay to be applied, got %s", elapsed)
 	}
@@ -87,11 +92,15 @@ func TestChaosMiddlewareDelaysAndInjectsErrors(t *testing.T) {
 		t.Fatalf("expected next handler once after delay, got %d", nextCalls.Load())
 	}
 
-	state.delay = 0
-	state.errorRate = 1
-	state.rng = rand.New(rand.NewSource(0))
+	if resp := postJSON(t, mux, "/chaos/reset", `{}`); resp.Code != http.StatusOK {
+		t.Fatalf("expected reset 200, got %d", resp.Code)
+	}
+	if resp := postJSON(t, mux, "/chaos/errors", `{"rate":1}`); resp.Code != http.StatusOK {
+		t.Fatalf("expected error-rate update 200, got %d", resp.Code)
+	}
+
 	recorder = httptest.NewRecorder()
-	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/users", nil))
+	mux.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/users", nil))
 	if recorder.Code != http.StatusInternalServerError {
 		t.Fatalf("expected injected chaos error, got %d", recorder.Code)
 	}

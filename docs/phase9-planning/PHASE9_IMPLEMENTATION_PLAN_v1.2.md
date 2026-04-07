@@ -32,7 +32,7 @@
 | ID | Decision | Spec ref |
 |----|----------|---------|
 | B1 | Pre-pull `grafana/k6:<pinned-tag>` in `make observatory-up`; document air-gapped procedure | §8.8, §14 |
-| B2 | `allow_embedding = true` + `content_security_policy = false` in `grafana.ini` (demo VPS only — not for multi-tenant Grafana); verify cross-subdomain iframe in Chrome + Firefox on real VPS before building Observability Traces tab | §11.6, §12 M4 |
+| B2 | `allow_embedding = true` + `content_security_policy = false` in `grafana-demo.ini` (demo VPS only — not for multi-tenant Grafana); verify cross-subdomain iframe in Chrome + Firefox on real VPS before building Observability Traces tab | §11.6, §12 M4 |
 | B3 | Add `gateway_circuit_state{service}` gauge (service-level aggregate of per-target breaker state, 0=CLOSED, 1=OPEN, 2=HALF_OPEN); implement in M1, not deferred | §3.3, §8.7, §10 |
 | B4 | Observatory mints its demo JWT via `POST http://gateway:8080/api/users/login`; 23h refresh ticker; fallback to `DEMO_JWT` env var | §8.8 |
 | B5 | Docker SDK `ContainerLogs(Follow: true, Stdout: true)` + `stdcopy.StdCopy()` to demultiplex; one JSON object per line on gateway stdout | §8.4 |
@@ -79,8 +79,9 @@ Pinned image tags and tool versions are bumped only through an explicit PR that 
    before the 100/min global limit. These are two separate token buckets.
 
 9. **Redis address override mechanism.** The gateway remains YAML-first. Phase 9 changes
-   `configs/gateway.yaml` to resolve Redis as `address: "${REDIS_ADDR:-redis:6379}"`,
-   and `docker-compose.observatory.yml` sets `REDIS_ADDR=toxiproxy:6380`.
+   `configs/gateway.yaml` to resolve Redis as `address: "${REDIS_ADDR}"`. The base
+   `docker-compose.yml` sets `REDIS_ADDR=redis:6379`, and the observatory overlay later
+   overrides it to `toxiproxy:6380` for Redis-chaos scenarios.
 
 ---
 
@@ -131,12 +132,12 @@ admin reset endpoint are live.
 | `cmd/gateway/main.go` | Second HTTP server on `:9090`; OTel init; admin endpoint; `ObserveWithExemplar` wired |
 | `otel/collector-config.yaml` | Collector config per §5.6 (`memory_limiter` before `batch`) |
 | `docker-compose.observatory.yml` | Skeleton: `tempo`, `otel-collector` containers; gateway OTel env vars; `ADMIN_TOKEN`; pinned image tags |
-| `configs/gateway.yaml` | Redis address becomes `${REDIS_ADDR:-redis:6379}` so the observatory overlay can route through Toxiproxy without a second config file |
-| `monitoring/grafana/provisioning/grafana.ini` | `allow_embedding = true`, `content_security_policy = false` |
+| `configs/gateway.yaml` | Redis address becomes `${REDIS_ADDR}` so Compose can provide `redis:6379` in the base stack and later override it to `toxiproxy:6380` without a second config file |
+| `monitoring/grafana/provisioning/grafana-demo.ini` | Demo-only Grafana override with `allow_embedding = true`, `content_security_policy = false` |
 | `monitoring/grafana/provisioning/datasources/tempo.yaml` | Tempo datasource with `uid: tempo`; no Loki fields |
-| `monitoring/grafana/provisioning/datasources/prometheus.yaml` | Updated: `exemplarTraceIdDestinations` pointing to `uid: tempo` |
+| `monitoring/grafana/provisioning/datasources/prometheus.yml` | Updated: `exemplarTraceIdDestinations` pointing to `uid: tempo` |
 | `monitoring/prometheus/prometheus.yml` | `exemplar_storage: true`; `scrape_protocols` for OpenMetrics |
-| `monitoring/grafana/dashboards/gateway-overview.json` | Updated: p99 latency panel with exemplars enabled |
+| `monitoring/grafana/dashboards/irongate-observability.json` | Updated: p99 latency panel with exemplars enabled |
 
 **Sub-milestones:**
 
@@ -216,8 +217,8 @@ Acceptance:
 Deliverables:
 - Tracing middleware uses `ObserveWithExemplar()` with `traceID` label when `spanCtx.IsSampled()` (§6.2 Step 2).
 - `monitoring/prometheus/prometheus.yml`: `exemplar_storage: true`; `scrape_protocols` with `OpenMetricsText1.0.0` (§6.2 Step 3).
-- `monitoring/grafana/provisioning/datasources/prometheus.yaml`: `exemplarTraceIdDestinations` pointing to `datasourceUid: tempo` (§6.2 Step 4).
-- `monitoring/grafana/provisioning/grafana.ini`: `allow_embedding = true`, `content_security_policy = false`.
+- `monitoring/grafana/provisioning/datasources/prometheus.yml`: `exemplarTraceIdDestinations` pointing to `datasourceUid: tempo` (§6.2 Step 4).
+- `monitoring/grafana/provisioning/grafana-demo.ini`: demo-only `allow_embedding = true`, `content_security_policy = false`.
 - `docker-compose.observatory.yml`: Tempo + OTel Collector containers; `OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317`; `OTEL_TRACES_SAMPLER=always_on`; `ADMIN_TOKEN`; pinned image tags.
 - Dashboard 1 p99 panel: exemplars enabled.
 
@@ -782,7 +783,7 @@ breaks the chain — no dot appears, no error is thrown. The four pieces are:
 - Diagnostic checklist to isolate which piece is missing:
   - `curl -H "Accept: application/openmetrics-text" gateway:8080/metrics | grep "# {traceID"` — Step 1 check.
   - `curl "prometheus:9090/api/v1/query_exemplars?query=gateway_request_duration_seconds&start=...&end=..."` — Step 2 check.
-  - Inspect `monitoring/grafana/provisioning/datasources/prometheus.yaml` for `exemplarTraceIdDestinations.datasourceUid` = `tempo` — Step 3 check.
+  - Inspect `monitoring/grafana/provisioning/datasources/prometheus.yml` for `exemplarTraceIdDestinations.datasourceUid` = `tempo` — Step 3 check.
   - Grafana panel editor → Field → Exemplars toggle — Step 4 check.
 - Do not proceed to M2 if M1.5 exit criterion is not met.
 
@@ -841,8 +842,9 @@ Toxiproxy does nothing. S8 silently fails — rate limiting is not impaired, `re
 events never fire, acceptance criteria are not met.
 
 **Mitigation:**
-- `configs/gateway.yaml` resolves Redis via `${REDIS_ADDR:-redis:6379}` and
-  `docker-compose.observatory.yml` sets `REDIS_ADDR=toxiproxy:6380` on the gateway
+- `configs/gateway.yaml` resolves Redis via `${REDIS_ADDR}`. The base stack sets
+  `REDIS_ADDR=redis:6379`, and `docker-compose.observatory.yml` later sets
+  `REDIS_ADDR=toxiproxy:6380` on the gateway
   service. Docker Compose applies the env var override and restarts the gateway when the
   overlay is brought up with `docker-compose up`. Document in Compose file: "Gateway uses
   Toxiproxy for Redis in observatory mode. Do not change REDIS_ADDR without retesting S8."

@@ -36,6 +36,12 @@ func TestPaymentServiceRoutesRespond(t *testing.T) {
 		t.Fatalf("expected created payment p-3, got %#v", created)
 	}
 
+	getResp := httptest.NewRecorder()
+	mux.ServeHTTP(getResp, httptest.NewRequest(http.MethodGet, "/payments/p-1", nil))
+	if getResp.Code != http.StatusOK {
+		t.Fatalf("expected GET /payments/{id} 200, got %d", getResp.Code)
+	}
+
 	healthResp := httptest.NewRecorder()
 	mux.ServeHTTP(healthResp, httptest.NewRequest(http.MethodGet, "/health", nil))
 	if healthResp.Code != http.StatusOK {
