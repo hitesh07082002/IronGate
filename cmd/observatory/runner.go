@@ -50,7 +50,11 @@ func (r *Runner) Start(ctx context.Context, scenario *Scenario, rps, durationSec
 	}
 
 	scriptsDir := filepath.Join(r.projectRoot, "scenarios", "k6")
-	scriptPath := "/scripts/" + filepath.Base(scenario.K6Script)
+	relativeScriptPath := filepath.ToSlash(filepath.Clean(strings.TrimSpace(scenario.K6Script)))
+	relativeScriptPath = strings.TrimPrefix(relativeScriptPath, "./")
+	relativeScriptPath = strings.TrimPrefix(relativeScriptPath, "scenarios/k6/")
+	relativeScriptPath = strings.TrimPrefix(relativeScriptPath, "/")
+	scriptPath := "/scripts/" + relativeScriptPath
 	containerName := fmt.Sprintf("irongate-k6-%s-%d", scenario.Name, time.Now().UnixNano())
 	env := []string{
 		"RPS=" + fmt.Sprint(rps),
@@ -87,9 +91,18 @@ func (r *Runner) Start(ctx context.Context, scenario *Scenario, rps, durationSec
 		return "", fmt.Errorf("create k6 container: %w", err)
 	}
 
+	started := false
+	defer func() {
+		if started {
+			return
+		}
+		_ = r.docker.ContainerRemove(context.Background(), resp.ID, dockercontainer.RemoveOptions{Force: true})
+	}()
+
 	if err := r.docker.ContainerStart(ctx, resp.ID, dockercontainer.StartOptions{}); err != nil {
 		return "", fmt.Errorf("start k6 container: %w", err)
 	}
+	started = true
 
 	go r.logContainerOutput(context.Background(), resp.ID)
 

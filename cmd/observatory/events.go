@@ -211,11 +211,11 @@ func (a *app) streamGatewayEvents(ctx context.Context) {
 		}
 
 		err = parseEvents(logs, func(event Event) {
+			since = event.TS
 			if !a.shouldSampleEvent(event.Type) {
 				return
 			}
 			a.eventHub.Publish(event)
-			since = event.TS
 		})
 		logs.Close()
 		if ctx.Err() != nil {

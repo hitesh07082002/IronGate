@@ -75,6 +75,23 @@ func decodeJSONResponse[T any](t *testing.T, recorder *httptest.ResponseRecorder
 	return payload
 }
 
+func assertAPIErrorResponse(t *testing.T, recorder *httptest.ResponseRecorder, status int) apiError {
+	t.Helper()
+
+	payload := decodeJSONResponse[apiError](t, recorder)
+	if payload.Code != status {
+		t.Fatalf("error payload code = %d, want %d", payload.Code, status)
+	}
+	if strings.TrimSpace(payload.Error) == "" {
+		t.Fatalf("expected error payload message, got %#v", payload)
+	}
+	if strings.TrimSpace(payload.RequestID) == "" {
+		t.Fatalf("expected request_id in error payload, got %#v", payload)
+	}
+
+	return payload
+}
+
 func TestRoutesServeHealthAndScenarioEndpoints(t *testing.T) {
 	app := newTestApp(t)
 	handler := app.routes()
@@ -151,26 +168,37 @@ func TestRunScenarioHandlerValidationAndFailures(t *testing.T) {
 		return recorder
 	}
 
-	if recorder := request(`{"intensity":"mild","duration":30}`, ""); recorder.Code != http.StatusUnauthorized {
-		t.Fatalf("unauthorized run status = %d, want %d", recorder.Code, http.StatusUnauthorized)
+	unauthorized := request(`{"intensity":"mild","duration":30}`, "")
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized run status = %d, want %d", unauthorized.Code, http.StatusUnauthorized)
 	}
-	if recorder := request(`{`, app.demoToken); recorder.Code != http.StatusBadRequest {
-		t.Fatalf("invalid body status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	assertAPIErrorResponse(t, unauthorized, http.StatusUnauthorized)
+
+	invalidBody := request(`{`, app.demoToken)
+	if invalidBody.Code != http.StatusBadRequest {
+		t.Fatalf("invalid body status = %d, want %d", invalidBody.Code, http.StatusBadRequest)
 	}
-	if recorder := request(`{"intensity":"missing","duration":30}`, app.demoToken); recorder.Code != http.StatusBadRequest {
-		t.Fatalf("invalid params status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	assertAPIErrorResponse(t, invalidBody, http.StatusBadRequest)
+
+	invalidParams := request(`{"intensity":"missing","duration":30}`, app.demoToken)
+	if invalidParams.Code != http.StatusBadRequest {
+		t.Fatalf("invalid params status = %d, want %d", invalidParams.Code, http.StatusBadRequest)
 	}
+	assertAPIErrorResponse(t, invalidParams, http.StatusBadRequest)
 
 	app.active = &scenarioRun{name: "happy-path"}
-	if recorder := request(`{"intensity":"mild","duration":30}`, app.demoToken); recorder.Code != http.StatusConflict {
-		t.Fatalf("conflict status = %d, want %d", recorder.Code, http.StatusConflict)
+	conflict := request(`{"intensity":"mild","duration":30}`, app.demoToken)
+	if conflict.Code != http.StatusConflict {
+		t.Fatalf("conflict status = %d, want %d", conflict.Code, http.StatusConflict)
 	}
+	assertAPIErrorResponse(t, conflict, http.StatusConflict)
 
 	app.active = nil
 	recorder := request(`{"intensity":"mild","duration":30}`, app.demoToken)
 	if recorder.Code != http.StatusInternalServerError {
 		t.Fatalf("runner failure status = %d, want %d", recorder.Code, http.StatusInternalServerError)
 	}
+	assertAPIErrorResponse(t, recorder, http.StatusInternalServerError)
 	if got := app.scenarioStatusFor("happy-path"); got != statusError {
 		t.Fatalf("scenario status after runner failure = %q, want %q", got, statusError)
 	}
@@ -246,8 +274,28 @@ func TestStopScenarioHandler(t *testing.T) {
 		t.Fatalf("stop handler status = %d, want %d", recorder.Code, http.StatusOK)
 	}
 	payload := decodeJSONResponse[map[string]scenarioStatus](t, recorder)
-	if payload["status"] != statusStopping {
+	if payload["status"] != statusIdle {
 		t.Fatalf("unexpected stop payload: %#v", payload)
+	}
+
+	app.active = &scenarioRun{
+		name:        "happy-path",
+		containerID: "",
+		cancel:      func() {},
+	}
+	app.scenarioStatus["happy-path"] = statusRunning
+
+	stopActiveReq := httptest.NewRequest(http.MethodPost, "/api/scenarios/happy-path/stop", nil)
+	stopActiveReq.Header.Set("Authorization", "Bearer "+app.demoToken)
+	stopActiveReq.RemoteAddr = "127.0.0.1:4444"
+	stopActiveRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(stopActiveRecorder, stopActiveReq)
+	if stopActiveRecorder.Code != http.StatusOK {
+		t.Fatalf("active stop handler status = %d, want %d", stopActiveRecorder.Code, http.StatusOK)
+	}
+	activePayload := decodeJSONResponse[map[string]scenarioStatus](t, stopActiveRecorder)
+	if activePayload["status"] != statusStopping {
+		t.Fatalf("unexpected active stop payload: %#v", activePayload)
 	}
 
 	missingReq := httptest.NewRequest(http.MethodPost, "/api/scenarios/missing/stop", nil)

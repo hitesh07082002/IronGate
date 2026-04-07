@@ -1,6 +1,6 @@
 # IronGate Progress Tracker
 
-> Status: Phases 1 through 8 and Phase 9 Milestone 1 are complete. Remaining Phase 9 milestones are planned.
+> Status: Phases 1 through 8 and Phase 9 Milestones 1 and 2 are complete. Remaining Phase 9 milestones are planned.
 >
 > Use this file as the delivery checklist. Use [`README.md`](./README.md) for the public overview and [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the current runtime reference.
 > Remaining Phase 9 planning docs live in [`docs/phase9-planning/`](./docs/phase9-planning/).

@@ -6,9 +6,9 @@ what_to_watch: "RPS stays steady, error rate stays near zero, and circuit state 
 category: baseline
 duration_options: [30, 60, 120]
 intensity_options:
-  mild: { rps: 10 }
-  moderate: { rps: 60 }
-  severe: { rps: 150 }
+  mild: {rps: 10}
+  moderate: {rps: 60}
+  severe: {rps: 150}
 chaos_sequence: []
 expected_signals:
   - panel: "RPS + Error Rate"

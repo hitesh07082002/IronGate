@@ -36,7 +36,10 @@ func TestToxiproxyEnsureRedisProxy(t *testing.T) {
 	if gotPath != "/populate" {
 		t.Fatalf("expected /populate, got %s", gotPath)
 	}
-	if len(gotPayload) != 1 || gotPayload[0]["name"] != "redis" {
+	if len(gotPayload) != 1 {
+		t.Fatalf("expected 1 proxy entry, got %d: %#v", len(gotPayload), gotPayload)
+	}
+	if gotPayload[0]["name"] != "redis" {
 		t.Fatalf("expected redis proxy payload, got %#v", gotPayload)
 	}
 }

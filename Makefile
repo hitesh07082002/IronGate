@@ -57,11 +57,6 @@ observatory-up: ## Start full observatory stack (Tempo + OTel Collector + gatewa
 
 observatory-down: ## Stop observatory stack
 	@test -n "$(DOCKER_COMPOSE)" || (echo "Docker Compose is required"; exit 1)
-	@test -n "$${JWT_SECRET:-}" || (echo "JWT_SECRET must be set"; exit 1)
-	@test -n "$${GRAFANA_ADMIN_USER:-}" || (echo "GRAFANA_ADMIN_USER must be set"; exit 1)
-	@test -n "$${GRAFANA_ADMIN_PASSWORD:-}" || (echo "GRAFANA_ADMIN_PASSWORD must be set"; exit 1)
-	@test -n "$${ADMIN_TOKEN:-}" || (echo "ADMIN_TOKEN must be set"; exit 1)
-	@test -n "$${DEMO_TOKEN:-}" || (echo "DEMO_TOKEN must be set"; exit 1)
 	$(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.observatory.yml down
 
 observatory-logs: ## Tail observatory container logs

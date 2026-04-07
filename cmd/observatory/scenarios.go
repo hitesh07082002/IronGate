@@ -61,6 +61,10 @@ func loadScenarios(root string) (map[string]*Scenario, error) {
 			invalid = append(invalid, err)
 			continue
 		}
+		if _, exists := scenarios[scenario.Name]; exists {
+			invalid = append(invalid, fmt.Errorf("duplicate scenario name %q in %s", scenario.Name, path))
+			continue
+		}
 		scenarios[scenario.Name] = scenario
 	}
 	if len(scenarios) == 0 {
@@ -139,12 +143,19 @@ func (s *Scenario) Validate() error {
 		if step.AtSeconds < 0 {
 			return fmt.Errorf("chaos_sequence[%d] at_seconds must be non-negative", index)
 		}
-		if strings.TrimSpace(step.Action) == "" {
-			return fmt.Errorf("chaos_sequence[%d] action is required", index)
+		action := strings.TrimSpace(step.Action)
+		if action != "service_down" && action != "service_up" {
+			return fmt.Errorf("chaos_sequence[%d] has unsupported action %q", index, step.Action)
+		}
+		if _, err := serviceURL(strings.TrimSpace(step.Target)); err != nil {
+			return fmt.Errorf("chaos_sequence[%d]: %w", index, err)
 		}
 	}
 
 	sort.Ints(s.DurationOptions)
+	sort.Slice(s.ChaosSequence, func(left, right int) bool {
+		return s.ChaosSequence[left].AtSeconds < s.ChaosSequence[right].AtSeconds
+	})
 	return nil
 }
 

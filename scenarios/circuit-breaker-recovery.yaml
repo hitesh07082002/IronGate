@@ -6,15 +6,12 @@ what_to_watch: "Watch the Circuit State timeline — it flips OPEN within ~10 se
 category: resilience
 duration_options: [60, 120, 300]
 intensity_options:
-  mild: { rps: 20 }
-  moderate: { rps: 100 }
-  severe: { rps: 150 }
+  mild: {rps: 20}
+  moderate: {rps: 100}
+  severe: {rps: 300}
 chaos_sequence:
   - at_seconds: 10
     action: service_down
-    target: user-service-2
-  - at_seconds: 40
-    action: service_up
     target: user-service-2
 expected_signals:
   - panel: "Circuit State"

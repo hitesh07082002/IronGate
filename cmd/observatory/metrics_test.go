@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 )
@@ -30,4 +32,23 @@ func TestIPRateLimiterRejectsAfterLimit(t *testing.T) {
 	if limiter.Allow("127.0.0.1", now) {
 		t.Fatal("expected third request to be rejected")
 	}
+}
+
+func TestIPRateLimiterConcurrent(t *testing.T) {
+	limiter := NewIPRateLimiter(1000, time.Minute)
+	base := time.Now()
+
+	var wg sync.WaitGroup
+	for index := 0; index < 100; index++ {
+		wg.Add(1)
+		go func(worker int) {
+			defer wg.Done()
+			key := fmt.Sprintf("192.168.1.%d", worker%16)
+			for step := 0; step < 100; step++ {
+				_ = limiter.Allow(key, base.Add(time.Duration(step)*time.Millisecond))
+			}
+		}(index)
+	}
+
+	wg.Wait()
 }

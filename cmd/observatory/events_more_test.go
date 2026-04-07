@@ -42,10 +42,15 @@ func TestEventHubPublishSubscribeAndHandleEvents(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/events", nil).WithContext(reqCtx)
 	recorder := httptest.NewRecorder()
 
+	published := make(chan struct{})
 	go func() {
-		time.Sleep(20 * time.Millisecond)
 		hub.Publish(Event{TS: time.Now().UTC(), Type: "streamed", Message: "streamed"})
-		time.Sleep(20 * time.Millisecond)
+		close(published)
+	}()
+
+	go func() {
+		<-published
+		time.Sleep(10 * time.Millisecond)
 		cancelReq()
 	}()
 

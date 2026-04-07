@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"context"
+	"crypto/subtle"
 	"log/slog"
 	"os"
 	"regexp"
@@ -103,9 +104,5 @@ func eventSecretMatch(value string) bool {
 }
 
 func subtleStringMatch(left, right string) bool {
-	if len(left) != len(right) {
-		return false
-	}
-
-	return left == right
+	return subtle.ConstantTimeCompare([]byte(left), []byte(right)) == 1
 }

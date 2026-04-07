@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/docker/docker/client"
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -43,6 +44,7 @@ const (
 	k6ManagedContainerLabel     = "com.irongate.observatory.managed"
 	k6ManagedContainerLabelTrue = "true"
 	k6ScenarioLabel             = "com.irongate.observatory.scenario"
+	observatoryRequestIDHeader  = "X-Request-ID"
 )
 
 type scenarioStatus string
@@ -72,8 +74,9 @@ type runParams struct {
 }
 
 type apiError struct {
-	Error string `json:"error"`
-	Code  int    `json:"code"`
+	Error     string `json:"error"`
+	Code      int    `json:"code"`
+	RequestID string `json:"request_id"`
 }
 
 type scenarioRun struct {
@@ -332,7 +335,20 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("GET /api/metrics/query_range", a.handleMetricsQueryRange)
 	mux.HandleFunc("POST /api/reset", a.withMutationAuth(a.handleReset))
 
-	return a.withGlobalLimit(mux)
+	return withRequestID(a.withGlobalLimit(mux))
+}
+
+func withRequestID(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestID := strings.TrimSpace(r.Header.Get(observatoryRequestIDHeader))
+		if requestID == "" {
+			requestID = uuid.NewString()
+		}
+
+		r.Header.Set(observatoryRequestIDHeader, requestID)
+		w.Header().Set(observatoryRequestIDHeader, requestID)
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (a *app) withGlobalLimit(next http.Handler) http.Handler {
@@ -506,9 +522,24 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 
 func writeAPIError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, apiError{
-		Error: message,
-		Code:  status,
+		Error:     message,
+		Code:      status,
+		RequestID: responseRequestID(w),
 	})
+}
+
+func responseRequestID(w http.ResponseWriter) string {
+	if w == nil {
+		return uuid.NewString()
+	}
+
+	requestID := strings.TrimSpace(w.Header().Get(observatoryRequestIDHeader))
+	if requestID == "" {
+		requestID = uuid.NewString()
+		w.Header().Set(observatoryRequestIDHeader, requestID)
+	}
+
+	return requestID
 }
 
 func requiredEnv(key string) (string, error) {

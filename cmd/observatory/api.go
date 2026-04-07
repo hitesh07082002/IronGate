@@ -86,7 +86,12 @@ func (a *app) handleStopScenario(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := a.stopScenario(r.Context(), name); err != nil && !errors.Is(err, errScenarioNotRunning) {
+	err := a.stopScenario(r.Context(), name)
+	if errors.Is(err, errScenarioNotRunning) {
+		writeJSON(w, http.StatusOK, map[string]scenarioStatus{"status": a.scenarioStatusFor(name)})
+		return
+	}
+	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
