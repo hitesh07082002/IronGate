@@ -122,3 +122,73 @@ func (c *ToxiproxyClient) RemoveAllToxics(ctx context.Context) error {
 
 	return nil
 }
+
+func (c *ToxiproxyClient) AddToxic(ctx context.Context, toxicType string, attrs map[string]any) error {
+	if c == nil || c.httpClient == nil {
+		return fmt.Errorf("toxiproxy client is not configured")
+	}
+	if toxicType == "" {
+		return fmt.Errorf("toxic type is required")
+	}
+	if attrs == nil {
+		attrs = map[string]any{}
+	}
+
+	raw, err := jsonMarshal(map[string]any{
+		"name":       toxicType,
+		"type":       toxicType,
+		"attributes": attrs,
+	})
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/proxies/redis/toxics", bytes.NewReader(raw))
+	if err != nil {
+		return fmt.Errorf("build toxiproxy add toxic request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("add toxiproxy toxic %s: %w", toxicType, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= http.StatusBadRequest {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("add toxiproxy toxic %s returned %d: %s", toxicType, resp.StatusCode, string(body))
+	}
+
+	return nil
+}
+
+func (c *ToxiproxyClient) RemoveToxic(ctx context.Context, toxicType string) error {
+	if c == nil || c.httpClient == nil {
+		return fmt.Errorf("toxiproxy client is not configured")
+	}
+	if toxicType == "" {
+		return fmt.Errorf("toxic type is required")
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.baseURL+"/proxies/redis/toxics/"+toxicType, nil)
+	if err != nil {
+		return fmt.Errorf("build toxiproxy delete toxic request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("delete toxiproxy toxic %s: %w", toxicType, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil
+	}
+	if resp.StatusCode >= http.StatusBadRequest {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("delete toxiproxy toxic %s returned %d: %s", toxicType, resp.StatusCode, string(body))
+	}
+
+	return nil
+}

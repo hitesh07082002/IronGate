@@ -38,7 +38,7 @@ func NewRunner(logger *slog.Logger, docker dockerClient, projectRoot, composePro
 	}
 }
 
-func (r *Runner) Start(ctx context.Context, scenario *Scenario, rps, durationSeconds int, jwt string) (string, error) {
+func (r *Runner) Start(ctx context.Context, scenario *Scenario, intensityName string, rps, durationSeconds int, jwt string) (string, error) {
 	if r == nil || r.docker == nil {
 		return "", fmt.Errorf("docker client is not configured")
 	}
@@ -58,6 +58,7 @@ func (r *Runner) Start(ctx context.Context, scenario *Scenario, rps, durationSec
 	scriptPath := "/scripts/" + relativeScriptPath
 	containerName := fmt.Sprintf("irongate-k6-%s-%d", scenario.Name, time.Now().UnixNano())
 	env := []string{
+		"INTENSITY=" + strings.TrimSpace(intensityName),
 		"RPS=" + fmt.Sprint(rps),
 		"DURATION=" + fmt.Sprint(durationSeconds),
 		"TARGET_URL=http://gateway:8080",
@@ -171,6 +172,9 @@ func (r *Runner) Stop(ctx context.Context, containerID string) error {
 		}
 	}
 	if err := r.docker.ContainerRemove(ctx, containerID, dockercontainer.RemoveOptions{Force: true, RemoveVolumes: true}); err != nil && !client.IsErrNotFound(err) {
+		if cerrdefs.IsConflict(err) && strings.Contains(err.Error(), "already in progress") {
+			return nil
+		}
 		return fmt.Errorf("remove k6 container: %w", err)
 	}
 

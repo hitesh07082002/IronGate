@@ -1,0 +1,29 @@
+name: "latency-injection"
+display_name: "Latency Injection"
+description: "Slow one order-service replica and watch tail latency climb while the gateway keeps serving traffic."
+what_you_learn: "Injected upstream delay shows up immediately in traces and latency panels, making timeout and retry behavior easy to inspect."
+what_to_watch: "Latency p99 stretches sharply after the slow target is hit, and mixed status codes appear under heavier load."
+category: latency
+duration_options: [60, 120]
+intensity_options:
+  mild: {rps: 20}
+  moderate: {rps: 50}
+  severe: {rps: 100}
+chaos_sequence:
+  - at_seconds: 5
+    action: latency_inject
+    target: order-service-2
+    params:
+      delay_ms: 2000
+expected_signals:
+  - panel: "Latency"
+    signal: "p95 and p99 climb immediately after latency injection begins"
+  - panel: "Retries"
+    signal: "Retried requests become more visible as slow responses amplify tail latency"
+  - panel: "RPS + Error Rate"
+    signal: "Most requests still succeed, but slower responses and occasional gateway errors become easier to spot"
+  - event_feed:
+      - "retry_attempt"
+k6_script: "scenarios/k6/latency-injection.js"
+reset_actions:
+  - drain_wait_seconds: 5

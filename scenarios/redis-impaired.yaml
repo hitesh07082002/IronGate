@@ -1,0 +1,33 @@
+name: "redis-impaired"
+display_name: "Redis Impaired"
+description: "Inject latency into the Redis proxy and watch rate limiting fail open instead of taking requests down."
+what_you_learn: "ADR-003 is visible behavior: when Redis is impaired, availability wins and the gateway stops enforcing limits temporarily."
+what_to_watch: "429s disappear, X-RateLimit headers drop out, and upstream throughput rises above the normal limit window."
+category: rate_limiting
+duration_options: [60, 120]
+intensity_options:
+  mild: {rps: 50}
+  moderate: {rps: 100}
+  severe: {rps: 200}
+chaos_sequence:
+  - at_seconds: 10
+    action: add_toxic
+    params:
+      type: latency
+      attributes:
+        latency: 500
+        jitter: 0
+expected_signals:
+  - panel: "Rate Limit Rejections"
+    signal: "429 responses drop away once Redis latency pushes the limiter into fail-open mode"
+  - panel: "Headers"
+    signal: "X-RateLimit-* headers disappear while fail-open is active"
+  - panel: "Upstream RPS"
+    signal: "Allowed throughput rises above the normal threshold"
+  - event_feed:
+      - "redis_unavailable"
+k6_script: "scenarios/k6/redis-impaired.js"
+reset_actions:
+  - remove_toxic: latency
+  - clear_rate_limits: true
+  - drain_wait_seconds: 5

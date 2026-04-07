@@ -83,3 +83,60 @@ func TestToxiproxyRemoveAllToxicsDeletesEachToxic(t *testing.T) {
 		t.Fatalf("missing delete paths: %#v", expected)
 	}
 }
+
+func TestToxiproxyAddToxicPostsPayload(t *testing.T) {
+	var gotMethod string
+	var gotPath string
+	var gotPayload map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&gotPayload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer server.Close()
+
+	client := NewToxiproxyClient(server.Client(), slog.Default())
+	client.baseURL = server.URL
+
+	if err := client.AddToxic(context.Background(), "latency", map[string]any{"latency": 500, "jitter": 0}); err != nil {
+		t.Fatalf("add toxic: %v", err)
+	}
+	if gotMethod != http.MethodPost {
+		t.Fatalf("method = %s, want POST", gotMethod)
+	}
+	if gotPath != "/proxies/redis/toxics" {
+		t.Fatalf("path = %q, want /proxies/redis/toxics", gotPath)
+	}
+	if gotPayload["type"] != "latency" || gotPayload["name"] != "latency" {
+		t.Fatalf("payload = %#v, want latency toxic", gotPayload)
+	}
+}
+
+func TestToxiproxyRemoveToxicIgnoresNotFound(t *testing.T) {
+	var gotMethod string
+	var gotPath string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	client := NewToxiproxyClient(server.Client(), slog.Default())
+	client.baseURL = server.URL
+
+	if err := client.RemoveToxic(context.Background(), "latency"); err != nil {
+		t.Fatalf("remove toxic: %v", err)
+	}
+	if gotMethod != http.MethodDelete {
+		t.Fatalf("method = %s, want DELETE", gotMethod)
+	}
+	if gotPath != "/proxies/redis/toxics/latency" {
+		t.Fatalf("path = %q, want /proxies/redis/toxics/latency", gotPath)
+	}
+}

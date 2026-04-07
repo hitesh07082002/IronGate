@@ -1,12 +1,12 @@
 # IronGate — Project Specification
 
-> **Status:** Phases 1 through 8 and Phase 9 Milestone 1 shipped; remaining Phase 9 work planned
+> **Status:** Phases 1 through 8 and Phase 9 Milestones 1 through 3 shipped; remaining Phase 9 work planned
 > **Author:** Hitesh Sadhwani
 > **Last Updated:** April 2026
 >
 > For technical architecture and algorithms, see [`DESIGN_DOC.md`](./DESIGN_DOC.md).
 > For implementation reference, see [`ARCHITECTURE.md`](./ARCHITECTURE.md).
-> Remaining Phase 9 work is tracked in [`docs/phase9-planning/`](./docs/phase9-planning/) and extends the shipped M1 observability foundation.
+> Remaining Phase 9 work is tracked in [`docs/phase9-planning/`](./docs/phase9-planning/) and extends the shipped M3 observability foundation.
 
 ---
 
@@ -14,7 +14,7 @@
 
 **IronGate** is a configurable API gateway built in Go. The target end-state handles routing, authentication, rate limiting, load balancing, circuit breaking, retry with exponential backoff, and observability through a single YAML config file.
 
-The current implementation already ships Phases 1 through 8 plus Phase 9 Milestone 1: gateway foundations, load balancing, JWT authentication, Redis-backed rate limiting, retry plus circuit breaking, observability, runtime-readiness management, documentation plus benchmark artifacts, and the first Chaos Observatory observability slice (OTel tracing, Tempo/collector overlay, Prometheus exemplars, and circuit-breaker reset wiring).
+The current implementation already ships Phases 1 through 8 plus Phase 9 Milestones 1 through 3: gateway foundations, load balancing, JWT authentication, Redis-backed rate limiting, retry plus circuit breaking, observability, runtime-readiness management, documentation plus benchmark artifacts, and the first three Chaos Observatory slices (OTel tracing plus overlay bootstrap, the observatory control plane, and the full shipped scenario catalog).
 
 Target end-state: a single `docker-compose up` brings up the gateway, backend services, Redis, Prometheus, and Grafana. The shipped project already supports that local system for the current runtime path, with `JWT_SECRET`, `GRAFANA_ADMIN_USER`, and `GRAFANA_ADMIN_PASSWORD` supplied through the environment.
 
@@ -60,8 +60,8 @@ Go is a strong fit for this class of infrastructure. Its standard library alread
 Phase 9 note:
 
 - The original "chaos control panel" stretch goal has expanded into the broader Chaos Observatory plan in [`docs/phase9-planning/`](./docs/phase9-planning/).
-- Phase 9 Milestone 1 is already part of the current runtime: OpenTelemetry export hooks, Prometheus exemplars, the `gateway_circuit_state` gauge, the circuit-breaker reset admin endpoint, and the local observatory overlay.
-- The remaining Phase 9 UI/demo/control-plane work is still planned. Current runtime and production behavior remain whatever is documented in [`ARCHITECTURE.md`](./ARCHITECTURE.md), [`PROGRESS.md`](./PROGRESS.md), and [`deploy/README.md`](./deploy/README.md).
+- Phase 9 Milestones 1 through 3 are already part of the current runtime: OpenTelemetry export hooks, Prometheus exemplars, the `gateway_circuit_state` gauge, the circuit-breaker reset admin endpoint, the local observatory overlay, the observatory control plane, and the shipped scenario catalog.
+- The remaining Phase 9 UI/demo/control-plane work beyond M3 is still planned. Current runtime and production behavior remain whatever is documented in [`ARCHITECTURE.md`](./ARCHITECTURE.md), [`PROGRESS.md`](./PROGRESS.md), and [`deploy/README.md`](./deploy/README.md).
 - The planned Phase 9 demo overlay intentionally raises the deployment target to an 8 GB / 4 vCPU VPS; keep using this document for the current shipped baseline and the Phase 9 planning docs for the expanded demo footprint.
 
 ---
