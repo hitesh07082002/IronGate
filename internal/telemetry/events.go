@@ -14,6 +14,11 @@ import (
 
 var jwtLikePattern = regexp.MustCompile(`^eyJ[A-Za-z0-9_+=/-]*\.[A-Za-z0-9_+=/-]*\.[A-Za-z0-9_+=/-]*$`)
 
+var (
+	cachedDemoToken  = strings.TrimSpace(os.Getenv("DEMO_TOKEN"))
+	cachedAdminToken = strings.TrimSpace(os.Getenv("ADMIN_TOKEN"))
+)
+
 func LogGatewayEvent(logger *slog.Logger, level slog.Level, typ, message string, attrs map[string]any) {
 	if strings.TrimSpace(typ) == "" {
 		return
@@ -94,13 +99,11 @@ func sanitizeEventString(value string) string {
 }
 
 func eventSecretMatch(value string) bool {
-	demoToken := strings.TrimSpace(os.Getenv("DEMO_TOKEN"))
-	if demoToken != "" && subtleStringMatch(value, demoToken) {
+	if cachedDemoToken != "" && subtleStringMatch(value, cachedDemoToken) {
 		return true
 	}
 
-	adminToken := strings.TrimSpace(os.Getenv("ADMIN_TOKEN"))
-	return adminToken != "" && subtleStringMatch(value, adminToken)
+	return cachedAdminToken != "" && subtleStringMatch(value, cachedAdminToken)
 }
 
 func subtleStringMatch(left, right string) bool {

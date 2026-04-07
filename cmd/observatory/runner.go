@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	dockercontainer "github.com/docker/docker/api/types/container"
 	dockerfilters "github.com/docker/docker/api/types/filters"
 	dockerimage "github.com/docker/docker/api/types/image"
@@ -19,12 +20,12 @@ const k6ImageRef = "grafana/k6:0.51.0"
 
 type Runner struct {
 	logger         *slog.Logger
-	docker         *client.Client
+	docker         dockerClient
 	projectRoot    string
 	composeProject string
 }
 
-func NewRunner(logger *slog.Logger, docker *client.Client, projectRoot, composeProject string) *Runner {
+func NewRunner(logger *slog.Logger, docker dockerClient, projectRoot, composeProject string) *Runner {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -124,6 +125,9 @@ func (r *Runner) Wait(ctx context.Context, containerID string) error {
 	if strings.TrimSpace(containerID) == "" {
 		return nil
 	}
+	if r == nil || r.docker == nil {
+		return fmt.Errorf("docker client is not configured")
+	}
 
 	statusCh, errCh := r.docker.ContainerWait(ctx, containerID, dockercontainer.WaitConditionNotRunning)
 	defer func() {
@@ -153,16 +157,31 @@ func (r *Runner) Stop(ctx context.Context, containerID string) error {
 	if strings.TrimSpace(containerID) == "" {
 		return nil
 	}
+	if r == nil || r.docker == nil {
+		return fmt.Errorf("docker client is not configured")
+	}
 
 	timeout := 5
 	if err := r.docker.ContainerStop(ctx, containerID, dockercontainer.StopOptions{Timeout: &timeout}); err != nil {
-		return fmt.Errorf("stop k6 container: %w", err)
+		if client.IsErrNotFound(err) {
+			return nil
+		}
+		if !cerrdefs.IsConflict(err) || !strings.Contains(err.Error(), "is not running") {
+			return fmt.Errorf("stop k6 container: %w", err)
+		}
+	}
+	if err := r.docker.ContainerRemove(ctx, containerID, dockercontainer.RemoveOptions{Force: true, RemoveVolumes: true}); err != nil && !client.IsErrNotFound(err) {
+		return fmt.Errorf("remove k6 container: %w", err)
 	}
 
 	return nil
 }
 
 func (r *Runner) StopManagedContainers(ctx context.Context) error {
+	if r == nil || r.docker == nil {
+		return nil
+	}
+
 	filterArgs := dockerfilters.NewArgs(
 		dockerfilters.Arg("label", k6ManagedContainerLabel+"="+k6ManagedContainerLabelTrue),
 	)
@@ -178,9 +197,6 @@ func (r *Runner) StopManagedContainers(ctx context.Context) error {
 	for _, listed := range containers {
 		if err := r.Stop(ctx, listed.ID); err != nil && !client.IsErrNotFound(err) {
 			return fmt.Errorf("stop managed k6 container %s: %w", listed.ID, err)
-		}
-		if err := r.docker.ContainerRemove(ctx, listed.ID, dockercontainer.RemoveOptions{Force: true, RemoveVolumes: true}); err != nil && !client.IsErrNotFound(err) {
-			return fmt.Errorf("remove managed k6 container %s: %w", listed.ID, err)
 		}
 	}
 
@@ -207,6 +223,9 @@ func (r *Runner) ensureImage(ctx context.Context) error {
 
 func (r *Runner) logContainerOutput(ctx context.Context, containerID string) {
 	if strings.TrimSpace(containerID) == "" {
+		return
+	}
+	if r == nil || r.docker == nil {
 		return
 	}
 
