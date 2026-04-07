@@ -1,4 +1,4 @@
-.PHONY: all clean lint build test test-race coverage run docker-up docker-down load-test benchmark benchmark-scenario benchmark-render benchmark-test bootstrap-production deploy-production check-production observatory-up observatory-down observatory-logs
+.PHONY: all clean lint build test test-race coverage run docker-up docker-down load-test benchmark benchmark-scenario benchmark-render benchmark-test bootstrap-production deploy-production check-production observatory-up observatory-down observatory-logs observatory-reset
 
 GO_TEST_FLAGS ?=
 COVERAGE_MIN ?= 70
@@ -17,6 +17,7 @@ lint:
 build:
 	mkdir -p bin
 	go build -o bin/gateway ./cmd/gateway
+	go build -o bin/observatory ./cmd/observatory
 
 test:
 	go test ./... -v $(GO_TEST_FLAGS)
@@ -46,15 +47,31 @@ docker-down:
 observatory-up: ## Start full observatory stack (Tempo + OTel Collector + gateway)
 	@command -v docker >/dev/null 2>&1 || (echo "Docker is required for observatory-up"; exit 1)
 	@test -n "$(DOCKER_COMPOSE)" || (echo "Docker Compose is required"; exit 1)
+	@test -n "$${JWT_SECRET:-}" || (echo "JWT_SECRET must be set"; exit 1)
+	@test -n "$${GRAFANA_ADMIN_USER:-}" || (echo "GRAFANA_ADMIN_USER must be set"; exit 1)
+	@test -n "$${GRAFANA_ADMIN_PASSWORD:-}" || (echo "GRAFANA_ADMIN_PASSWORD must be set"; exit 1)
+	@test -n "$${ADMIN_TOKEN:-}" || (echo "ADMIN_TOKEN must be set"; exit 1)
+	@test -n "$${DEMO_TOKEN:-}" || (echo "DEMO_TOKEN must be set"; exit 1)
+	docker pull grafana/k6:0.51.0
 	$(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.observatory.yml up -d --build
 
 observatory-down: ## Stop observatory stack
 	@test -n "$(DOCKER_COMPOSE)" || (echo "Docker Compose is required"; exit 1)
+	@test -n "$${JWT_SECRET:-}" || (echo "JWT_SECRET must be set"; exit 1)
+	@test -n "$${GRAFANA_ADMIN_USER:-}" || (echo "GRAFANA_ADMIN_USER must be set"; exit 1)
+	@test -n "$${GRAFANA_ADMIN_PASSWORD:-}" || (echo "GRAFANA_ADMIN_PASSWORD must be set"; exit 1)
+	@test -n "$${ADMIN_TOKEN:-}" || (echo "ADMIN_TOKEN must be set"; exit 1)
+	@test -n "$${DEMO_TOKEN:-}" || (echo "DEMO_TOKEN must be set"; exit 1)
 	$(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.observatory.yml down
 
 observatory-logs: ## Tail observatory container logs
 	@test -n "$(DOCKER_COMPOSE)" || (echo "Docker Compose is required"; exit 1)
 	$(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.observatory.yml logs -f
+
+observatory-reset: ## Reset observatory state through the public API
+	@command -v curl >/dev/null 2>&1 || (echo "curl is required for observatory-reset"; exit 1)
+	@test -n "$${DEMO_TOKEN:-}" || (echo "DEMO_TOKEN must be set"; exit 1)
+	curl -fsS -XPOST -H "Authorization: Bearer $$DEMO_TOKEN" http://127.0.0.1:9000/api/reset
 
 load-test:
 	@test -n "$(K6_CMD)" || (echo "k6 is required for load-test; run 'mise install' in the repo root first"; exit 1)

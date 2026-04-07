@@ -3,6 +3,7 @@ package middleware
 import (
 	"crypto/subtle"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -53,6 +54,7 @@ func Auth(authCfg config.AuthConfig, tracer trace.Tracer) Middleware {
 
 			route := GetRouteConfig(req)
 			if route == nil {
+				logAuthFailure(req, nil, "route config missing")
 				span.SetAttributes(attribute.String("auth.outcome", "failed"))
 				span.SetStatus(codes.Error, "route config missing")
 				response.WriteError(w, req, http.StatusInternalServerError, "route config missing")
@@ -66,6 +68,7 @@ func Auth(authCfg config.AuthConfig, tracer trace.Tracer) Middleware {
 			}
 
 			if secretValue == "" || !signingMethodMatches(algorithm, jwt.SigningMethodHS256.Alg()) {
+				logAuthFailure(req, route, authConfigErrorMessage)
 				span.SetAttributes(attribute.String("auth.outcome", "failed"))
 				span.SetStatus(codes.Error, authConfigErrorMessage)
 				response.WriteError(w, req, http.StatusInternalServerError, authConfigErrorMessage)
@@ -74,6 +77,7 @@ func Auth(authCfg config.AuthConfig, tracer trace.Tracer) Middleware {
 
 			authorization := strings.TrimSpace(req.Header.Get("Authorization"))
 			if authorization == "" {
+				logAuthFailure(req, route, authMissingHeaderMessage)
 				span.SetAttributes(attribute.String("auth.outcome", "failed"))
 				span.SetStatus(codes.Error, authMissingHeaderMessage)
 				response.WriteError(w, req, http.StatusUnauthorized, authMissingHeaderMessage)
@@ -82,6 +86,7 @@ func Auth(authCfg config.AuthConfig, tracer trace.Tracer) Middleware {
 
 			tokenString, ok := bearerToken(authorization)
 			if !ok {
+				logAuthFailure(req, route, authMalformedTokenMessage)
 				span.SetAttributes(attribute.String("auth.outcome", "failed"))
 				span.SetStatus(codes.Error, authMalformedTokenMessage)
 				response.WriteError(w, req, http.StatusUnauthorized, authMalformedTokenMessage)
@@ -97,18 +102,21 @@ func Auth(authCfg config.AuthConfig, tracer trace.Tracer) Middleware {
 				return secret, nil
 			})
 			if err != nil {
+				logAuthFailure(req, route, authInvalidTokenMessage)
 				span.SetAttributes(attribute.String("auth.outcome", "failed"))
 				span.SetStatus(codes.Error, authInvalidTokenMessage)
 				writeAuthError(w, req, err)
 				return
 			}
 			if token == nil || !token.Valid {
+				logAuthFailure(req, route, authInvalidTokenMessage)
 				span.SetAttributes(attribute.String("auth.outcome", "failed"))
 				span.SetStatus(codes.Error, authInvalidTokenMessage)
 				response.WriteError(w, req, http.StatusUnauthorized, authInvalidTokenMessage)
 				return
 			}
 			if claims.ExpiresAt == nil || claims.IssuedAt == nil || strings.TrimSpace(claims.Subject) == "" || strings.TrimSpace(claims.Role) == "" {
+				logAuthFailure(req, route, authInvalidTokenMessage)
 				span.SetAttributes(attribute.String("auth.outcome", "failed"))
 				span.SetStatus(codes.Error, authInvalidTokenMessage)
 				response.WriteError(w, req, http.StatusUnauthorized, authInvalidTokenMessage)
@@ -126,6 +134,18 @@ func Auth(authCfg config.AuthConfig, tracer trace.Tracer) Middleware {
 			next.ServeHTTP(w, req)
 		})
 	}
+}
+
+func logAuthFailure(req *http.Request, route *config.RouteConfig, reason string) {
+	attrs := map[string]any{
+		"request_id": response.RequestID(req),
+		"trace_id":   telemetry.TraceIDFromContext(req.Context()),
+	}
+	if route != nil {
+		attrs["service"] = route.Service
+		attrs["route"] = route.Path
+	}
+	telemetry.LogGatewayEvent(slog.Default(), slog.LevelWarn, "auth_failed", reason, attrs)
 }
 
 func bearerToken(header string) (string, bool) {

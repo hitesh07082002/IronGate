@@ -116,6 +116,7 @@
 - [x] Implementation plan reconciled with current repo paths and current runtime docs
 - [x] Locked implementation decisions captured in `docs/phase9-planning/DECISIONS_LOCK.md`
 - [x] Milestone 1 shipped in the repo: OpenTelemetry bootstrap, exemplars, `gateway_circuit_state`, admin reset endpoint, and observatory overlay
+- [x] Milestone 2 shipped in the repo: observatory API/service, SSE event stream, k6-backed scenarios, Redis fault injection through Toxiproxy, and gateway event emission
 - [ ] Remaining Chaos Observatory milestones shipped
 - [ ] Full Phase 9 demo platform verified on production
 

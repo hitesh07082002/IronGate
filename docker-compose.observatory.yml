@@ -21,10 +21,46 @@ services:
       OTEL_SERVICE_NAME: irongate
       ADMIN_TOKEN: "${ADMIN_TOKEN}"
       ADMIN_ADDR: ":9090"
+      REDIS_ADDR: toxiproxy:6380
       GATEWAY_CONTAINER_NAME: irongate-gateway-1
-      # REDIS_ADDR is inherited from the base docker-compose.yml for M1.
-      # M2 will explicitly override it with toxiproxy:6380 when Toxiproxy is introduced.
+
+  user-service-1:
+    environment:
+      IRONGATE_ALLOW_LOGIN_OVERRIDES: "true"
+
+  user-service-2:
+    environment:
+      IRONGATE_ALLOW_LOGIN_OVERRIDES: "true"
 
   grafana:
     volumes:
       - ./monitoring/grafana/provisioning/grafana-demo.ini:/etc/grafana/grafana.ini:ro
+
+  toxiproxy:
+    image: ghcr.io/shopify/toxiproxy:2.9.0
+
+  observatory:
+    build:
+      context: .
+      dockerfile: Dockerfile.observatory
+    depends_on:
+      gateway:
+        condition: service_started
+      prometheus:
+        condition: service_started
+      redis:
+        condition: service_started
+      toxiproxy:
+        condition: service_started
+    ports:
+      - "127.0.0.1:9000:9000"
+    environment:
+      DEMO_TOKEN: "${DEMO_TOKEN:?DEMO_TOKEN must be set}"
+      ADMIN_TOKEN: "${ADMIN_TOKEN:?ADMIN_TOKEN must be set}"
+      DEMO_JWT: "${DEMO_JWT:-}"
+      COMPOSE_PROJECT_NAME: "${COMPOSE_PROJECT_NAME:-irongate}"
+      GATEWAY_CONTAINER_NAME: "${GATEWAY_CONTAINER_NAME:-irongate-gateway-1}"
+      PROJECT_ROOT: "${PWD:?PWD must be set}"
+      REDIS_ADDR: toxiproxy:6380
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock

@@ -70,7 +70,7 @@ For broader product scope and future work, use:
   - `GRAFANA_ADMIN_USER` and `GRAFANA_ADMIN_PASSWORD` provided to Grafana at startup
   - Redis kept internal-only on the Compose network
   - Prometheus and Grafana bound to `127.0.0.1` on the host for local-only access
-- Optional observatory overlay via [`docker-compose.observatory.yml`](./docker-compose.observatory.yml) adding Tempo, the OTel Collector, and gateway OTel/admin environment wiring
+- Optional observatory overlay via [`docker-compose.observatory.yml`](./docker-compose.observatory.yml) adding Tempo, the OTel Collector, Toxiproxy, the local observatory API on `127.0.0.1:9000`, and gateway OTel/admin environment wiring
 
 The codebase still contains some future-facing config fields so later phases can plug into the same route model. In the current implementation, unsupported later-phase features such as non-sliding-window rate limiting still fail closed instead of being silently ignored.
 
@@ -85,6 +85,17 @@ irongate/
 │   └── demo/
 │       └── README.md
 ├── cmd/
+│   ├── observatory/
+│   │   ├── api.go
+│   │   ├── app.go
+│   │   ├── chaos.go
+│   │   ├── events.go
+│   │   ├── main.go
+│   │   ├── metrics.go
+│   │   ├── reset.go
+│   │   ├── runner.go
+│   │   ├── scenarios.go
+│   │   └── toxiproxy.go
 │   └── gateway/
 │       ├── admin_test.go
 │       ├── main.go
@@ -102,6 +113,7 @@ irongate/
 ├── configs/
 │   └── gateway.yaml
 ├── demo.sh
+├── Dockerfile.observatory
 ├── internal/
 │   ├── config/
 │   │   ├── config.go
@@ -132,6 +144,7 @@ irongate/
 │   │   ├── manager.go
 │   │   └── watcher.go
 │   ├── telemetry/
+│   │   ├── events.go
 │   │   ├── telemetry.go
 │   │   └── telemetry_test.go
 │   ├── testutil/
@@ -172,6 +185,10 @@ irongate/
 ├── otel/
 │   ├── collector-config.yaml
 │   └── tempo.yaml
+├── scenarios/
+│   ├── circuit-breaker-recovery.yaml
+│   ├── happy-path.yaml
+│   └── k6/
 ├── ADR/
 ├── DESIGN_DOC.md
 ├── PROJECT_SPEC.md
@@ -239,6 +256,19 @@ When `ADMIN_TOKEN` is set, `main` starts a second HTTP server for observatory-on
 - Calls `Registry.Reset()` on the active circuit-breaker registry and returns `{"reset":true,"targets_cleared":N}`
 
 This server is separate from the public gateway listener on `:8080`. The default bind address is `127.0.0.1:9090`; the observatory overlay sets `ADMIN_ADDR=:9090` so the admin plane stays reachable inside Docker without publishing a host port.
+
+### Observatory Server
+
+Phase 9 Milestone 2 adds a separate observatory process under [`cmd/observatory`](./cmd/observatory) that binds to `127.0.0.1:9000` in the overlay and orchestrates the demo backend.
+
+- `GET /api/health` reports spec version plus JWT and Toxiproxy readiness
+- `GET /api/scenarios`, `GET /api/scenarios/{name}`, and `GET /api/scenarios/{name}/status` expose the built-in scenario catalog
+- `POST /api/scenarios/{name}/run` and `POST /api/scenarios/{name}/stop` require `Authorization: Bearer $DEMO_TOKEN`
+- `GET /api/events` streams gateway and system events over SSE for the demo UI
+- `GET /api/metrics/query` and `GET /api/metrics/query_range` proxy a restricted subset of Prometheus queries
+- `POST /api/reset` restores service health, clears Toxiproxy toxics, stops managed k6 containers, and resets gateway circuit breakers
+
+The observatory runner starts short-lived `grafana/k6` containers against the Docker network, uses Toxiproxy for Redis impairment scenarios, and relies on structured gateway event logs from [`internal/telemetry/events.go`](./internal/telemetry/events.go) for the SSE stream.
 
 #### `Router`
 
