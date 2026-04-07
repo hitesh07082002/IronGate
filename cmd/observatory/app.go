@@ -39,6 +39,9 @@ const (
 	metricsRateLimitPerMinute   = 60
 	rateLimitWindow             = time.Minute
 	jwtBootstrapTimeout         = 10 * time.Second
+	bootstrapAttemptTimeout     = 2 * time.Second
+	bootstrapInitialBackoff     = 200 * time.Millisecond
+	bootstrapMaxBackoff         = time.Second
 	jwtRefreshInterval          = 23 * time.Hour
 	requestTimeout              = 10 * time.Second
 	k6ManagedContainerLabel     = "com.irongate.observatory.managed"
@@ -249,8 +252,15 @@ func (a *app) ensureDemoJWT(ctx context.Context) error {
 	bootstrapCtx, cancel := context.WithTimeout(ctx, jwtBootstrapTimeout)
 	defer cancel()
 
-	token, err := a.fetchDemoJWT(bootstrapCtx)
-	if err != nil {
+	var token string
+	if err := retryBootstrap(bootstrapCtx, func(attemptCtx context.Context) error {
+		fetched, err := a.fetchDemoJWT(attemptCtx)
+		if err != nil {
+			return err
+		}
+		token = fetched
+		return nil
+	}); err != nil {
 		return fmt.Errorf("bootstrap demo jwt: %w", err)
 	}
 
@@ -307,6 +317,42 @@ func (a *app) fetchDemoJWT(ctx context.Context) (string, error) {
 	}
 
 	return payload.Token, nil
+}
+
+func retryBootstrap(ctx context.Context, fn func(context.Context) error) error {
+	backoff := bootstrapInitialBackoff
+	var lastErr error
+
+	for {
+		attemptCtx, cancel := context.WithTimeout(ctx, bootstrapAttemptTimeout)
+		err := fn(attemptCtx)
+		cancel()
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if ctx.Err() != nil {
+			break
+		}
+		if !sleepContext(ctx, backoff) {
+			break
+		}
+		if backoff < bootstrapMaxBackoff {
+			backoff *= 2
+			if backoff > bootstrapMaxBackoff {
+				backoff = bootstrapMaxBackoff
+			}
+		}
+	}
+
+	if lastErr == nil {
+		return ctx.Err()
+	}
+	if ctx.Err() != nil {
+		return fmt.Errorf("%w: %v", ctx.Err(), lastErr)
+	}
+
+	return lastErr
 }
 
 func (a *app) currentDemoJWT() string {

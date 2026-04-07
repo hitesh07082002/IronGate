@@ -31,7 +31,10 @@ func NewToxiproxyClient(httpClient *http.Client, logger *slog.Logger) *Toxiproxy
 }
 
 func (a *app) ensureToxiproxy(ctx context.Context) error {
-	if err := a.toxiproxy.EnsureRedisProxy(ctx); err != nil {
+	bootstrapCtx, cancel := context.WithTimeout(ctx, jwtBootstrapTimeout)
+	defer cancel()
+
+	if err := retryBootstrap(bootstrapCtx, a.toxiproxy.EnsureRedisProxy); err != nil {
 		return err
 	}
 	a.toxiproxyReady = true
@@ -110,6 +113,7 @@ func (c *ToxiproxyClient) RemoveAllToxics(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("delete toxiproxy toxic %s: %w", toxic.Name, err)
 		}
+		_, _ = io.Copy(io.Discard, deleteResp.Body)
 		deleteResp.Body.Close()
 		if deleteResp.StatusCode >= http.StatusBadRequest && deleteResp.StatusCode != http.StatusNotFound {
 			return fmt.Errorf("delete toxiproxy toxic %s returned %d", toxic.Name, deleteResp.StatusCode)

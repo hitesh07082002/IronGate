@@ -441,6 +441,28 @@ func TestFetchAndEnsureDemoJWT(t *testing.T) {
 		t.Fatalf("currentDemoJWT = %q, want bootstrap-jwt", got)
 	}
 
+	var bootstrapAttempts atomic.Int32
+	retryingApp := newTestApp(t)
+	retryingApp.httpClient = newTestHTTPClient(func(_ *http.Request) (*http.Response, error) {
+		if bootstrapAttempts.Add(1) == 1 {
+			return nil, errors.New("gateway warming up")
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{"token":"retried-bootstrap-jwt"}`)),
+		}, nil
+	})
+	if err := retryingApp.ensureDemoJWT(context.Background()); err != nil {
+		t.Fatalf("ensureDemoJWT retry bootstrap: %v", err)
+	}
+	if got := retryingApp.currentDemoJWT(); got != "retried-bootstrap-jwt" {
+		t.Fatalf("retried currentDemoJWT = %q, want retried-bootstrap-jwt", got)
+	}
+	if got := bootstrapAttempts.Load(); got != 2 {
+		t.Fatalf("bootstrap attempts = %d, want 2", got)
+	}
+
 	var nilApp *app
 	if err := nilApp.ensureDemoJWT(context.Background()); err == nil {
 		t.Fatal("expected nil app ensureDemoJWT to fail")
@@ -582,9 +604,13 @@ func TestResetAndChaosHelpers(t *testing.T) {
 
 func TestEnsureToxiproxy(t *testing.T) {
 	app := newTestApp(t)
+	var attempts atomic.Int32
 	app.toxiproxy = NewToxiproxyClient(newTestHTTPClient(func(req *http.Request) (*http.Response, error) {
 		if req.URL.Path != "/populate" {
 			t.Fatalf("ensureToxiproxy path = %s, want /populate", req.URL.Path)
+		}
+		if attempts.Add(1) == 1 {
+			return nil, errors.New("toxiproxy not ready")
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -599,6 +625,21 @@ func TestEnsureToxiproxy(t *testing.T) {
 	}
 	if !app.toxiproxyReady {
 		t.Fatal("expected ensureToxiproxy to mark client ready")
+	}
+	if got := attempts.Load(); got != 2 {
+		t.Fatalf("ensureToxiproxy attempts = %d, want 2", got)
+	}
+}
+
+func TestRetryBootstrapReturnsContextErrorWhenDeadlineExpires(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	err := retryBootstrap(ctx, func(context.Context) error {
+		return errors.New("still warming up")
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("retryBootstrap error = %v, want context deadline exceeded", err)
 	}
 }
 

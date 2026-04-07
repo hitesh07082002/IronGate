@@ -69,4 +69,17 @@ func TestToxiproxyRemoveAllToxicsDeletesEachToxic(t *testing.T) {
 	if len(deleted) != 2 {
 		t.Fatalf("expected 2 toxics deleted, got %d", len(deleted))
 	}
+	expected := map[string]bool{
+		"/proxies/redis/toxics/latency": true,
+		"/proxies/redis/toxics/timeout": true,
+	}
+	for _, path := range deleted {
+		if !expected[path] {
+			t.Fatalf("unexpected delete path: %s", path)
+		}
+		delete(expected, path)
+	}
+	if len(expected) != 0 {
+		t.Fatalf("missing delete paths: %#v", expected)
+	}
 }
