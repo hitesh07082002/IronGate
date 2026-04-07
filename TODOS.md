@@ -57,6 +57,60 @@ to be picked up 3 months later without needing to re-read the full spec.
 
 ## Phase 9 Post-Stabilization
 
+## Observatory Hardening (from M2 eng review)
+
+### IPRateLimiter TTL eviction (P3)
+
+**What:** Add a goroutine in `cmd/observatory/app.go` that periodically evicts `IPRateLimiter` entries older than 10 minutes so the state map does not grow without bound.
+
+**Why:** Observatory is intentionally unauthenticated for demo traffic, so the in-memory IP limiter can see a long tail of ephemeral client IPs. Without eviction the map grows monotonically and turns a simple protection into a quiet memory leak.
+
+**Pros:** Small change. Keeps observatory memory usage bounded during demos and public testing.
+
+**Cons:** Adds a background cleanup loop and one more lifecycle concern to test.
+
+**Depends on:** M5.
+**Where to start:** `cmd/observatory/app.go:691` — add `lastSeen` tracking and a sweeper that prunes entries older than 10 minutes.
+
+### Stack-scoped container labels (P3)
+
+**What:** Add the Compose project name as a second label on managed k6 containers so cleanup only affects the current stack.
+
+**Why:** `Runner.StopManagedContainers()` currently keys off a global managed label. If two IronGate stacks run on the same Docker host, one observatory reset can clean up the other stack’s k6 containers.
+
+**Pros:** Safer multi-stack demos. No behavior change for the single-stack local flow.
+
+**Cons:** Requires updating both container creation and cleanup filters together.
+
+**Depends on:** M5.
+**Where to start:** `cmd/observatory/runner.go:75` and `cmd/observatory/runner.go:177` — add a compose-project label on create, then filter on both labels during cleanup.
+
+### Prometheus query_range param bounds (P3)
+
+**What:** Validate `start`, `end`, `step`, and `timeout` before forwarding `query_range` requests to Prometheus, including a max 1 hour window and a minimum 1 second step.
+
+**Why:** Observatory currently forwards these parameters raw. A malicious or accidental wide query can fan out into an expensive Prometheus scan that hurts the demo environment.
+
+**Pros:** Prevents abusive range queries with a tight, easy-to-explain policy.
+
+**Cons:** Adds a small amount of parameter parsing and rejection logic.
+
+**Depends on:** M5.
+**Where to start:** `cmd/observatory/metrics.go:60` — parse the query_range params, reject windows over 1 hour, and clamp or reject steps below 1 second.
+
+### SSE concurrent stream limit (P3)
+
+**What:** Add a maximum of 10 concurrent `/api/events` SSE streams and optionally require bearer auth for the stream endpoint.
+
+**Why:** `/api/events` is currently unauthenticated and unlimited. A handful of long-lived connections can pin memory and goroutines in the observatory process.
+
+**Pros:** Protects the demo plane from trivial resource exhaustion and makes the event feed safer to expose.
+
+**Cons:** Introduces connection accounting and one more auth decision for the UI.
+
+**Depends on:** M5.
+**Where to start:** `cmd/observatory/events.go:126` — track active SSE subscriptions, reject the 11th connection, and evaluate whether the stream should share the existing bearer token flow.
+
 ### Typed Event Bus (v2 Observatory event stream)
 
 **What:** Add `internal/events/` — a typed event bus where each middleware emits

@@ -38,9 +38,23 @@ func recordAttrs(record slog.Record) map[string]any {
 	return attrs
 }
 
+func setCachedSecretsForTest(t *testing.T, demoToken, adminToken string) {
+	t.Helper()
+
+	previousDemoToken := cachedDemoToken
+	previousAdminToken := cachedAdminToken
+	cachedDemoToken = demoToken
+	cachedAdminToken = adminToken
+	t.Cleanup(func() {
+		cachedDemoToken = previousDemoToken
+		cachedAdminToken = previousAdminToken
+	})
+}
+
 func TestLogGatewayEventSanitizesAttrs(t *testing.T) {
 	t.Setenv("DEMO_TOKEN", "demo-secret")
 	t.Setenv("ADMIN_TOKEN", "admin-secret")
+	setCachedSecretsForTest(t, "demo-secret", "admin-secret")
 
 	handler := &captureHandler{}
 	logger := slog.New(handler)
@@ -93,6 +107,7 @@ func TestLogGatewayEventSanitizesAttrs(t *testing.T) {
 func TestTraceIDAndSanitizers(t *testing.T) {
 	t.Setenv("DEMO_TOKEN", "demo-secret")
 	t.Setenv("ADMIN_TOKEN", "admin-secret")
+	setCachedSecretsForTest(t, "demo-secret", "admin-secret")
 
 	if got := TraceIDFromContext(nil); got != "" {
 		t.Fatalf("TraceIDFromContext(nil) = %q, want empty", got)

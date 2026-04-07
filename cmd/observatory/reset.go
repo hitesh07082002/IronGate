@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+var resetDrainDelay = 5 * time.Second
+
 type resetResponse struct {
 	Status          string `json:"status"`
 	ServicesHealthy bool   `json:"services_healthy,omitempty"`
@@ -43,7 +45,7 @@ func (a *app) resetSystem(ctx context.Context) resetResponse {
 	select {
 	case <-resetCtx.Done():
 		return partialReset("drain_wait", resetCtx.Err())
-	case <-time.After(5 * time.Second):
+	case <-time.After(resetDrainDelay):
 	}
 
 	if err := a.verifyServiceHealth(resetCtx); err != nil {
@@ -62,14 +64,18 @@ func (a *app) resetSystem(ctx context.Context) resetResponse {
 
 func (a *app) cancelActiveScenario() {
 	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	if a.active == nil {
+	run := a.active
+	if run == nil {
+		run = a.starting
+	}
+	if run == nil {
+		a.mu.Unlock()
 		return
 	}
+	a.scenarioStatus[run.name] = statusStopping
+	a.mu.Unlock()
 
-	a.active.cancel()
-	a.scenarioStatus[a.active.name] = statusStopping
+	run.cancel()
 }
 
 func (a *app) resetCircuitBreakers(ctx context.Context) error {
@@ -92,14 +98,18 @@ func (a *app) resetCircuitBreakers(ctx context.Context) error {
 }
 
 func (a *app) flushRedisRateLimitKeys(ctx context.Context) error {
+	if a.redis == nil {
+		return nil
+	}
+
 	var cursor uint64
 	for {
-		keys, nextCursor, err := a.redis.Scan(ctx, cursor, "rate_limit:*", 100).Result()
+		keys, nextCursor, err := a.redis.Scan(ctx, cursor, "rate_limit:*", 100)
 		if err != nil {
 			return fmt.Errorf("scan redis rate limit keys: %w", err)
 		}
 		if len(keys) > 0 {
-			if err := a.redis.Del(ctx, keys...).Err(); err != nil {
+			if err := a.redis.Del(ctx, keys...); err != nil {
 				return fmt.Errorf("delete redis rate limit keys: %w", err)
 			}
 		}

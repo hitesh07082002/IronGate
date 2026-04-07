@@ -105,8 +105,8 @@ var serviceEndpoints = []serviceEndpoint{
 type app struct {
 	logger *slog.Logger
 
-	docker *client.Client
-	redis  *redis.Client
+	docker dockerClient
+	redis  rateLimitStore
 
 	httpClient *http.Client
 
@@ -124,6 +124,7 @@ type app struct {
 	mu             sync.Mutex
 	scenarios      map[string]*Scenario
 	scenarioStatus map[string]scenarioStatus
+	starting       *scenarioRun
 	active         *scenarioRun
 
 	eventHub       *EventHub
@@ -182,7 +183,7 @@ func newApp(ctx context.Context, logger *slog.Logger) (*app, error) {
 	app := &app{
 		logger:               logger,
 		docker:               dockerClient,
-		redis:                redis.NewClient(&redis.Options{Addr: redisAddr}),
+		redis:                newRedisRateLimitStore(redis.NewClient(&redis.Options{Addr: redisAddr})),
 		httpClient:           httpClient,
 		demoToken:            demoToken,
 		adminToken:           adminToken,
@@ -216,6 +217,14 @@ func newApp(ctx context.Context, logger *slog.Logger) (*app, error) {
 func (a *app) close() {
 	if a == nil {
 		return
+	}
+
+	a.cancelActiveScenario()
+	if a.runner != nil {
+		_ = a.runner.StopManagedContainers(context.Background())
+	}
+	if a.docker != nil && a.httpClient != nil {
+		_ = a.resetChaos(context.Background())
 	}
 	if a.redis != nil {
 		_ = a.redis.Close()
@@ -451,27 +460,41 @@ func (a *app) startScenario(scenario *Scenario, params runParams) error {
 	}
 
 	a.mu.Lock()
-	if a.active != nil {
+	if a.active != nil || a.starting != nil {
 		a.mu.Unlock()
 		return errScenarioAlreadyRunning
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
 	run := &scenarioRun{name: scenario.Name, cancel: cancel}
-	a.active = run
+	a.starting = run
 	a.setScenarioStatusLocked(scenario.Name, statusRunning)
 	a.mu.Unlock()
 
 	containerID, err := a.runner.Start(runCtx, scenario, intensity.RPS, durationSeconds, a.currentDemoJWT())
+	a.mu.Lock()
+	if a.starting == run {
+		a.starting = nil
+	}
 	if err != nil {
-		cancel()
-		a.mu.Lock()
-		a.active = nil
-		a.setScenarioStatusLocked(scenario.Name, statusError)
+		if errors.Is(err, context.Canceled) && a.scenarioStatus[scenario.Name] == statusStopping {
+			a.setScenarioStatusLocked(scenario.Name, statusIdle)
+		} else {
+			a.setScenarioStatusLocked(scenario.Name, statusError)
+		}
 		a.mu.Unlock()
+		cancel()
 		return err
 	}
-
 	run.containerID = containerID
+	if runCtx.Err() != nil {
+		a.mu.Unlock()
+		_ = a.runner.Stop(context.Background(), containerID)
+		a.completeScenario(run, scenario.Name, nil)
+		return context.Canceled
+	}
+	a.active = run
+	a.mu.Unlock()
+
 	a.eventHub.Publish(SystemEvent("scenario_started", "scenario started", map[string]any{
 		"scenario":  scenario.Name,
 		"intensity": params.Intensity,
@@ -507,15 +530,19 @@ func (a *app) watchScenario(ctx context.Context, run *scenarioRun, scenario *Sce
 func (a *app) stopScenario(ctx context.Context, name string) error {
 	a.mu.Lock()
 	run := a.active
+	if run == nil {
+		run = a.starting
+	}
 	if run == nil || run.name != name {
 		a.mu.Unlock()
 		return errScenarioNotRunning
 	}
 	a.setScenarioStatusLocked(name, statusStopping)
+	containerID := run.containerID
 	a.mu.Unlock()
 
 	run.cancel()
-	return a.runner.Stop(ctx, run.containerID)
+	return a.runner.Stop(ctx, containerID)
 }
 
 func (a *app) completeScenario(run *scenarioRun, name string, err error) {
@@ -525,6 +552,9 @@ func (a *app) completeScenario(run *scenarioRun, name string, err error) {
 
 		if a.active == run {
 			a.active = nil
+		}
+		if a.starting == run {
+			a.starting = nil
 		}
 		if err != nil {
 			a.setScenarioStatusLocked(name, statusError)
