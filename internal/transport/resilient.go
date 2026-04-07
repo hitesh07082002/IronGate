@@ -327,11 +327,17 @@ func wrapAttemptError(err error, metadata attemptMetadata) error {
 }
 
 func countsTowardCircuit(ctx context.Context, err error) bool {
+	if err == nil {
+		return false
+	}
 	if isCallerContextError(ctx, err) {
 		return false
 	}
+	if errors.Is(err, ErrCircuitOpen) || errors.Is(err, ErrNoHealthyTargets) {
+		return false
+	}
 
-	return isTransientError(err)
+	return true
 }
 
 func (ct *CircuitBreakerTransport) recordBreakerFailure(breaker *circuitbreaker.Breaker, service string, targets []config.Target, fallbackTarget string) {

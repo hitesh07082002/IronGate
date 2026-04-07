@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -265,6 +267,74 @@ func TestCircuitBreakerTransportIgnoresBodyCloseErrorFromCallerDeadline(t *testi
 	}
 	if breaker.State() != circuitbreaker.StateHalfOpen {
 		t.Fatalf("expected caller deadline to leave breaker half-open, got %s", breaker.State())
+	}
+}
+
+func TestCircuitBreakerOpensForRepeatedFailuresOnWeightedTarget(t *testing.T) {
+	route := config.RouteConfig{
+		Path:         "/api/users",
+		Service:      "user-service",
+		LoadBalancer: "weighted",
+		Retry: config.RetryConfig{
+			MaxAttempts: 3,
+			BaseDelay:   time.Millisecond,
+			MaxDelay:    time.Millisecond,
+			Jitter:      "none",
+		},
+		Targets: []config.Target{
+			{Host: "user-service-1", Port: 8081, Weight: 3},
+			{Host: "user-service-2", Port: 8091, Weight: 1},
+		},
+	}
+	breakerConfig := config.CBConfig{
+		FailureThreshold:    5,
+		SuccessThreshold:    3,
+		Timeout:             30 * time.Second,
+		WindowSize:          time.Minute,
+		HalfOpenMaxRequests: 3,
+	}
+	breakers := circuitbreaker.NewRegistry(breakerConfig, nil)
+	transport := NewResilientTransport(roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Host {
+		case "user-service-1:8081":
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader("ok")),
+				Request:    req,
+			}, nil
+		case "user-service-2:8091":
+			return nil, &url.Error{
+				Err: &net.DNSError{
+					Err: "no such host",
+				},
+			}
+		default:
+			t.Fatalf("unexpected target %q", req.URL.Host)
+			return nil, nil
+		}
+	}), []config.RouteConfig{route}, breakerConfig, nil, breakers, nil)
+
+	for i := 0; i < 60; i++ {
+		req, err := http.NewRequest(http.MethodGet, "http://gateway/api/users", nil)
+		if err != nil {
+			t.Fatalf("new request: %v", err)
+		}
+		req = req.WithContext(context.WithValue(req.Context(), middleware.RouteConfigKey, &route))
+
+		resp, err := transport.RoundTrip(req)
+		if err == nil && resp != nil {
+			if _, readErr := io.ReadAll(resp.Body); readErr != nil {
+				t.Fatalf("read body: %v", readErr)
+			}
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				t.Fatalf("close body: %v", closeErr)
+			}
+		}
+	}
+
+	if state, ok := breakers.State("user-service-2:8091"); !ok || state != circuitbreaker.StateOpen {
+		t.Fatalf("expected failing weighted target breaker open, got state=%v ok=%t", state, ok)
 	}
 }
 
