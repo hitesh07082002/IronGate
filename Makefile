@@ -33,7 +33,7 @@ coverage:
 		awk "BEGIN { exit !($$total >= $(COVERAGE_MIN)) }" || (echo "coverage $$total% is below $(COVERAGE_MIN)%"; exit 1)
 
 run:
-	go run ./cmd/gateway
+	REDIS_ADDR=$${REDIS_ADDR:-127.0.0.1:6379} go run ./cmd/gateway
 
 docker-up:
 	@test -n "$(DOCKER_COMPOSE)" || (echo "Docker Compose is required"; exit 1)
@@ -45,8 +45,6 @@ docker-down:
 
 observatory-up: ## Start full observatory stack (Tempo + OTel Collector + gateway)
 	@command -v docker >/dev/null 2>&1 || (echo "Docker is required for observatory-up"; exit 1)
-	@echo "Pre-pulling k6 image for later demo/load-test runs once the observatory stack is up..."
-	docker pull grafana/k6:0.51.0
 	@test -n "$(DOCKER_COMPOSE)" || (echo "Docker Compose is required"; exit 1)
 	$(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.observatory.yml up -d --build
 

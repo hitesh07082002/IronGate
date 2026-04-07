@@ -92,6 +92,32 @@ func TestRateLimiterSpanRecordsRejectedAttributes(t *testing.T) {
 	}
 }
 
+func TestRateLimiterSpanRecordsFailOpenAttributes(t *testing.T) {
+	registry := metrics.NewRegistry()
+	recorder := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+
+	handler := RateLimiterWithMetrics(nil, testRateLimitLogger(), registry, RateLimiterOptions{}, tp.Tracer("irongate.middleware.ratelimiter"))(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	req := rateLimitedRequest(t)
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("expected fail-open request to reach next handler, got %d", resp.Code)
+	}
+
+	span := findEndedSpanByName(t, recorder.Ended(), "irongate.middleware.ratelimiter")
+	if got := spanAttribute(span.Attributes(), "ratelimit.outcome"); got != "fail_open" {
+		t.Fatalf("expected ratelimit.outcome fail_open, got %v", got)
+	}
+	if span.Status().Code == codes.Error {
+		t.Fatalf("expected fail-open span status to avoid error, got %s", span.Status().Code)
+	}
+}
+
 func TestMetricsMiddlewareRecordsExemplarForSampledSpan(t *testing.T) {
 	registry := metrics.NewRegistry()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSampler(sdktrace.AlwaysSample()))

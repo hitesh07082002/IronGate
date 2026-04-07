@@ -6,10 +6,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
 )
@@ -35,7 +33,6 @@ func Tracing(logger *slog.Logger, tracer trace.Tracer) Middleware {
 			req = req.WithContext(ctx)
 
 			ctx, tracingSpan := tracer.Start(ctx, "irongate.middleware.tracing")
-			defer tracingSpan.End()
 			req = req.WithContext(ctx)
 			req.Header.Del(HeaderUserID)
 			req.Header.Del(HeaderUserRole)
@@ -43,7 +40,6 @@ func Tracing(logger *slog.Logger, tracer trace.Tracer) Middleware {
 
 			requestID := uuid.NewString()
 			req.Header.Set(HeaderRequestID, requestID)
-			otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))
 
 			recorder := &statusRecorder{
 				ResponseWriter: w,
@@ -73,6 +69,7 @@ func Tracing(logger *slog.Logger, tracer trace.Tracer) Middleware {
 			if recorder.statusCode >= http.StatusInternalServerError {
 				rootSpan.SetStatus(codes.Error, http.StatusText(recorder.statusCode))
 			}
+			tracingSpan.End()
 			rootSpan.End()
 
 			logger.Info("request completed",

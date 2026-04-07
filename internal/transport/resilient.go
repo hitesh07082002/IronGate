@@ -88,7 +88,7 @@ func NewBaseTransport() http.RoundTripper {
 func (lt *LoadBalancerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	ctx, span := transportTracerOrNoop(lt.tracer, "irongate.transport").Start(req.Context(), "irongate.transport.loadbalancer")
 	defer span.End()
-	req = req.Clone(ctx)
+	req = req.WithContext(ctx)
 
 	route := middleware.GetRouteConfig(req)
 	if route == nil {

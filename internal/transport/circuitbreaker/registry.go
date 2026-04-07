@@ -1,7 +1,7 @@
 package circuitbreaker
 
 import (
-	"log"
+	"log/slog"
 	"sync"
 
 	"github.com/hitesh07082002/irongate/internal/config"
@@ -32,7 +32,7 @@ func NewRegistry(config config.CBConfig, registerCollector func(prometheus.Colle
 	}
 	if registerCollector != nil && registry.circuitStateGauge != nil {
 		if err := registerCollector(registry.circuitStateGauge); err != nil {
-			log.Printf("circuitbreaker: failed to register circuit state gauge: %v", err)
+			slog.Warn("failed to register circuit state gauge", "error", err)
 			registry.circuitStateGauge = nil
 		}
 	}
