@@ -29,10 +29,12 @@ func Tracing(logger *slog.Logger, tracer trace.Tracer) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			ctx, rootSpan := tracer.Start(req.Context(), "irongate.request")
+			defer rootSpan.End()
 			ctx, routeCapture := withRouteCapture(ctx)
 			req = req.WithContext(ctx)
 
 			ctx, tracingSpan := tracer.Start(ctx, "irongate.middleware.tracing")
+			defer tracingSpan.End()
 			req = req.WithContext(ctx)
 			req.Header.Del(HeaderUserID)
 			req.Header.Del(HeaderUserRole)
@@ -69,8 +71,6 @@ func Tracing(logger *slog.Logger, tracer trace.Tracer) Middleware {
 			if recorder.statusCode >= http.StatusInternalServerError {
 				rootSpan.SetStatus(codes.Error, http.StatusText(recorder.statusCode))
 			}
-			tracingSpan.End()
-			rootSpan.End()
 
 			logger.Info("request completed",
 				"method", req.Method,

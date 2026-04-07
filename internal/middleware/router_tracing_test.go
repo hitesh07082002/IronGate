@@ -269,6 +269,37 @@ func TestTracingRecordsRootSpanWithRouteTemplate(t *testing.T) {
 	if tracingSpan.EndTime().Before(routerSpan.EndTime()) {
 		t.Fatal("expected tracing middleware span to remain open until downstream middleware finishes")
 	}
+	if root.EndTime().Before(tracingSpan.EndTime()) {
+		t.Fatal("expected root span to end after tracing middleware span")
+	}
+}
+
+func TestTracingEndsSpansWhenDownstreamPanics(t *testing.T) {
+	recorder := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+
+	handler := Tracing(testRateLimitLogger(), tp.Tracer("irongate.middleware.tracing"))(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		panic("boom")
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/users", nil)
+	response := httptest.NewRecorder()
+
+	defer func() {
+		if recovered := recover(); recovered != "boom" {
+			t.Fatalf("expected downstream panic to propagate, got %v", recovered)
+		}
+
+		spans := recorder.Ended()
+		tracingSpan := findEndedSpanByName(t, spans, "irongate.middleware.tracing")
+		rootSpan := findEndedSpanByName(t, spans, "irongate.request")
+		if rootSpan.EndTime().Before(tracingSpan.EndTime()) {
+			t.Fatal("expected root span to end after tracing middleware span during panic unwinding")
+		}
+	}()
+
+	handler.ServeHTTP(response, req)
+	t.Fatal("expected panic from downstream handler")
 }
 
 func TestRouterMarksNoMatchAsError(t *testing.T) {
