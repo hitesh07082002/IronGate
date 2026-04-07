@@ -51,7 +51,7 @@ func newCircuitStateGauge() *prometheus.GaugeVec {
 }
 
 func (r *Registry) Breaker(target string) *Breaker {
-	return r.BreakerForService(target, target)
+	return r.BreakerForService(target, r.serviceForTarget(target))
 }
 
 func (r *Registry) BreakerForService(target, service string) *Breaker {
@@ -201,7 +201,7 @@ func (r *Registry) setGauge(target, service string, state State) {
 
 func (r *Registry) serviceForTarget(target string) string {
 	if r == nil {
-		return normalizeService(target)
+		return normalizeService("")
 	}
 
 	r.statesMu.Lock()
@@ -211,7 +211,7 @@ func (r *Registry) serviceForTarget(target string) string {
 		return state.service
 	}
 
-	return normalizeService(target)
+	return normalizeService("")
 }
 
 func (r *Registry) ensureBreakerService(target, service string, breaker *Breaker) {

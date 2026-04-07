@@ -485,7 +485,7 @@ func TestRegistryRegistrationFailureFallsBackWithoutCollector(t *testing.T) {
 	}
 }
 
-func TestRegistryBreakerForServiceReplacesRawTargetSeries(t *testing.T) {
+func TestRegistryBreakerForServiceReplacesUnknownSeriesAndPreservesServiceBinding(t *testing.T) {
 	metricsRegistry := metrics.NewRegistry()
 	registry := NewRegistry(config.CBConfig{FailureThreshold: 1}, metricsRegistry.RegisterCollector)
 
@@ -495,8 +495,11 @@ func TestRegistryBreakerForServiceReplacesRawTargetSeries(t *testing.T) {
 	}
 	breaker.RecordFailure()
 
-	if !circuitStateGaugeHasService(t, metricsRegistry, "user-service-1:8081") {
-		t.Fatal("expected raw target series before service mapping is known")
+	if got := circuitStateGaugeValueForService(t, metricsRegistry, "unknown"); got != 1 {
+		t.Fatalf("expected unknown fallback series before service mapping is known, got %v", got)
+	}
+	if circuitStateGaugeHasService(t, metricsRegistry, "user-service-1:8081") {
+		t.Fatal("expected plain breaker lookup to avoid creating a raw target series")
 	}
 
 	serviceBreaker := registry.BreakerForService("user-service-1:8081", "user-service")
@@ -506,8 +509,18 @@ func TestRegistryBreakerForServiceReplacesRawTargetSeries(t *testing.T) {
 	if got := circuitStateGaugeValueForService(t, metricsRegistry, "user-service"); got != 1 {
 		t.Fatalf("expected remapped service series to reflect the open breaker, got %v", got)
 	}
+	if circuitStateGaugeHasService(t, metricsRegistry, "unknown") {
+		t.Fatal("expected unknown fallback series to be removed after remapping to the service label")
+	}
+
+	if rebound := registry.Breaker("user-service-1:8081"); rebound != breaker {
+		t.Fatal("expected plain target lookup to reuse the cached breaker after remapping")
+	}
+	if got := circuitStateGaugeValueForService(t, metricsRegistry, "user-service"); got != 1 {
+		t.Fatalf("expected plain target lookup to preserve the mapped service series, got %v", got)
+	}
 	if circuitStateGaugeHasService(t, metricsRegistry, "user-service-1:8081") {
-		t.Fatal("expected raw target series to be removed after remapping to the service label")
+		t.Fatal("expected plain target lookup to avoid rebinding the metric back to a raw target label")
 	}
 }
 
