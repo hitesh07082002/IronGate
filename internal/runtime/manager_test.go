@@ -25,6 +25,7 @@ func TestNextCircuitBreakerRegistry_ReplacesCollectorOnConfigChange(t *testing.T
 	initial := nextCircuitBreakerRegistry(
 		config.CBConfig{FailureThreshold: 1},
 		nil,
+		nil,
 		func(prometheus.Collector) error {
 			registerCalls++
 			return nil
@@ -44,6 +45,7 @@ func TestNextCircuitBreakerRegistry_ReplacesCollectorOnConfigChange(t *testing.T
 
 	reloaded := nextCircuitBreakerRegistry(
 		config.CBConfig{FailureThreshold: 2},
+		nil,
 		snapshot,
 		func(prometheus.Collector) error {
 			registerCalls++

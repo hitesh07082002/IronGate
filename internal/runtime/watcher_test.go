@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -107,4 +108,31 @@ func TestWatcherHelpersAndRun(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("expected watcher run to stop after cancellation")
 	}
+}
+
+func TestWatcherReadyConcurrent(t *testing.T) {
+	manager, err := NewManager(runtimeConfigForServer(t, "http://127.0.0.1:8081"), BuilderOptions{})
+	if err != nil {
+		t.Fatalf("new runtime manager: %v", err)
+	}
+
+	watcher, err := NewWatcher(writeRuntimeConfigFile(t, runtimeConfigForServer(t, "http://127.0.0.1:8081")), manager, nil, 0)
+	if err != nil {
+		t.Fatalf("new watcher: %v", err)
+	}
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for range 100 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			watcher.signalReady()
+			<-watcher.Ready()
+		}()
+	}
+
+	close(start)
+	wg.Wait()
 }

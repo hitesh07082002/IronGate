@@ -92,6 +92,28 @@ func (r *Registry) CloneWithConfig(cfg config.CBConfig, registerCollector func(p
 	return clone
 }
 
+func (r *Registry) ReconcileTargetServices(targetServices map[string]string) {
+	if r == nil {
+		return
+	}
+
+	r.breakers.Range(func(key, value any) bool {
+		target := key.(string)
+		breaker := value.(*Breaker)
+
+		service, ok := targetServices[target]
+		if !ok {
+			breaker.setStateChangeCallback(nil)
+			r.breakers.Delete(target)
+			r.removeTarget(target)
+			return true
+		}
+
+		r.ensureBreakerService(target, service, breaker)
+		return true
+	})
+}
+
 func (r *Registry) Reset() int {
 	if r == nil {
 		return 0
@@ -164,8 +186,6 @@ func (r *Registry) setGauge(target, service string, state State) {
 			deleteOldSeries = true
 		}
 	}
-	r.statesMu.Unlock()
-
 	if oldService != "" {
 		if deleteOldSeries {
 			r.circuitStateGauge.DeleteLabelValues(oldService)
@@ -174,6 +194,7 @@ func (r *Registry) setGauge(target, service string, state State) {
 		}
 	}
 	r.circuitStateGauge.WithLabelValues(service).Set(circuitStateValue(aggregate))
+	r.statesMu.Unlock()
 }
 
 func (r *Registry) serviceForTarget(target string) string {
@@ -245,6 +266,33 @@ func (r *Registry) serviceHasTargetsLocked(service string) bool {
 	}
 
 	return false
+}
+
+func (r *Registry) removeTarget(target string) {
+	if r == nil {
+		return
+	}
+
+	r.statesMu.Lock()
+	defer r.statesMu.Unlock()
+
+	state, ok := r.targetStates[target]
+	if !ok {
+		return
+	}
+	delete(r.targetStates, target)
+
+	if r.circuitStateGauge == nil {
+		return
+	}
+	if r.serviceHasTargetsLocked(state.service) {
+		r.circuitStateGauge.WithLabelValues(state.service).Set(
+			circuitStateValue(r.aggregateServiceStateLocked(state.service)),
+		)
+		return
+	}
+
+	r.circuitStateGauge.DeleteLabelValues(state.service)
 }
 
 func normalizeService(service string) string {

@@ -171,6 +171,51 @@ func TestRegistryReturnsBreakerPerTarget(t *testing.T) {
 	}
 }
 
+func TestRegistryBreakerForServiceConcurrentSameTargetReusesStoredBreaker(t *testing.T) {
+	metricsRegistry := metrics.NewRegistry()
+	registry := NewRegistry(config.CBConfig{FailureThreshold: 1}, metricsRegistry.RegisterCollector)
+
+	const workers = 100
+	start := make(chan struct{})
+	results := make(chan *Breaker, workers)
+	var wg sync.WaitGroup
+
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			results <- registry.BreakerForService("user-service-1:8081", "user-service")
+		}()
+	}
+
+	close(start)
+	wg.Wait()
+	close(results)
+
+	var first *Breaker
+	for breaker := range results {
+		if first == nil {
+			first = breaker
+			continue
+		}
+		if breaker != first {
+			t.Fatal("expected concurrent lookup to reuse the stored breaker instance")
+		}
+	}
+
+	state, ok := registry.targetState("user-service-1:8081")
+	if !ok {
+		t.Fatal("expected concurrent lookup to record target state")
+	}
+	if state.service != "user-service" {
+		t.Fatalf("expected target to remain mapped to user-service, got %q", state.service)
+	}
+	if got := circuitStateGaugeValueForService(t, metricsRegistry, "user-service"); got != 0 {
+		t.Fatalf("expected concurrent lookup to keep gauge closed, got %v", got)
+	}
+}
+
 func TestRegistryCloneWithConfigPreservesOpenState(t *testing.T) {
 	registry := NewRegistry(config.CBConfig{
 		FailureThreshold:    1,
@@ -453,6 +498,71 @@ func TestRegistryStateDoesNotCreateBreakers(t *testing.T) {
 	}
 	if circuitStateGaugeHasService(t, metricsRegistry, "user-service-1:8081") {
 		t.Fatal("expected state lookups to avoid creating a raw target gauge series")
+	}
+}
+
+func TestRegistryReconcileTargetServicesRemovesRetiredTargets(t *testing.T) {
+	metricsRegistry := metrics.NewRegistry()
+	registry := NewRegistry(config.CBConfig{FailureThreshold: 1}, metricsRegistry.RegisterCollector)
+
+	kept := registry.BreakerForService("user-service-1:8081", "user-service")
+	retired := registry.BreakerForService("order-service-1:8082", "order-service")
+	kept.RecordFailure()
+	retired.RecordFailure()
+
+	registry.ReconcileTargetServices(map[string]string{
+		"user-service-1:8081": "renamed-user-service",
+	})
+
+	if _, ok := registry.State("order-service-1:8082"); ok {
+		t.Fatal("expected retired target to be removed from the registry")
+	}
+	if got := registry.Reset(); got != 1 {
+		t.Fatalf("expected reset to clear only the kept breaker, got %d", got)
+	}
+	if circuitStateGaugeHasService(t, metricsRegistry, "order-service") {
+		t.Fatal("expected retired service gauge series to be removed")
+	}
+	if circuitStateGaugeHasService(t, metricsRegistry, "user-service") {
+		t.Fatal("expected previous service label to be removed after rename")
+	}
+	if got := circuitStateGaugeValueForService(t, metricsRegistry, "renamed-user-service"); got != 0 {
+		t.Fatalf("expected renamed service gauge to reset to 0, got %v", got)
+	}
+}
+
+func TestCircuitStateGaugeConcurrentTransitionsRemainConsistent(t *testing.T) {
+	cfg := config.CBConfig{
+		FailureThreshold:    1,
+		SuccessThreshold:    1,
+		Timeout:             time.Minute,
+		WindowSize:          time.Minute,
+		HalfOpenMaxRequests: 1,
+	}
+	metricsRegistry := metrics.NewRegistry()
+	registry := NewRegistry(cfg, metricsRegistry.RegisterCollector)
+	first := registry.BreakerForService("user-service-1:8081", "user-service")
+	second := registry.BreakerForService("user-service-2:8081", "user-service")
+
+	var sequence atomic.Uint32
+	runConcurrentWorkers(100, func() {
+		switch sequence.Add(1) % 4 {
+		case 0:
+			first.ForceClose()
+		case 1:
+			second.ForceClose()
+		case 2:
+			first.RecordFailure()
+		default:
+			second.RecordFailure()
+		}
+	})
+
+	registry.statesMu.Lock()
+	want := circuitStateValue(registry.aggregateServiceStateLocked("user-service"))
+	registry.statesMu.Unlock()
+	if got := circuitStateGaugeValueForService(t, metricsRegistry, "user-service"); got != want {
+		t.Fatalf("expected concurrent gauge updates to end at %v, got %v", want, got)
 	}
 }
 

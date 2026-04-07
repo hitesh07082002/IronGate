@@ -95,13 +95,9 @@ func TracerOrNoop(tp trace.TracerProvider, name string) trace.Tracer {
 	return tp.Tracer(name)
 }
 
-func hashAttr(value string) string {
+func HashAttr(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])[:8]
-}
-
-func HashAttr(value string) string {
-	return hashAttr(value)
 }
 
 func traceSampler() sdktrace.Sampler {

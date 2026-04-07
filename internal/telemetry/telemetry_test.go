@@ -216,8 +216,8 @@ func TestTraceSamplerRatio_InvalidFallsBack(t *testing.T) {
 }
 
 func TestHashAttr_IsDeterministic(t *testing.T) {
-	if got := HashAttr("user-42"); got != hashAttr("user-42") {
-		t.Fatalf("expected HashAttr to delegate to hashAttr, got %q", got)
+	if got := HashAttr("user-42"); got != "6d894aa3" {
+		t.Fatalf("expected stable hashed attribute, got %q", got)
 	}
 	if got := HashAttr("user-42"); len(got) != 8 {
 		t.Fatalf("expected 8-char hashed attribute, got %q", got)

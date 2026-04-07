@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -150,6 +152,66 @@ func TestNewManagerRejectsNilConfigAndServeHTTPWithoutSnapshot(t *testing.T) {
 	manager.ServeHTTP(resp, req)
 	if resp.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected nil snapshot request 503, got %d", resp.Code)
+	}
+}
+
+func TestManagerConcurrentReloadAndServe(t *testing.T) {
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		response.WriteJSON(w, http.StatusOK, map[string]string{"upstream": "first"})
+	}))
+	defer first.Close()
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		response.WriteJSON(w, http.StatusOK, map[string]string{"upstream": "second"})
+	}))
+	defer second.Close()
+
+	manager, err := NewManager(runtimeConfigForServer(t, first.URL), BuilderOptions{})
+	if err != nil {
+		t.Fatalf("new runtime manager: %v", err)
+	}
+
+	configs := []*config.Config{
+		runtimeConfigForServer(t, first.URL),
+		runtimeConfigForServer(t, second.URL),
+	}
+	start := make(chan struct{})
+	errs := make(chan error, 100)
+	var wg sync.WaitGroup
+
+	for index := 0; index < 100; index++ {
+		cfg := configs[index%len(configs)]
+		wg.Add(1)
+		go func(cfg *config.Config) {
+			defer wg.Done()
+			<-start
+
+			for range 5 {
+				if manager.Current() == nil {
+					errs <- errors.New("expected current snapshot during concurrent access")
+					return
+				}
+				_ = manager.Ready()
+
+				resp := httptest.NewRecorder()
+				manager.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/api/users/1", nil))
+				if resp.Code != http.StatusOK {
+					errs <- errors.New("expected concurrent ServeHTTP to stay healthy")
+					return
+				}
+				if err := manager.Reload(cfg); err != nil {
+					errs <- err
+					return
+				}
+			}
+		}(cfg)
+	}
+
+	close(start)
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		t.Fatalf("concurrent manager access failed: %v", err)
 	}
 }
 

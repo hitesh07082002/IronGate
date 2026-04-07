@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -139,10 +140,95 @@ func TestChaosMiddlewareBypassesChaosRoutes(t *testing.T) {
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/chaos/reset", nil))
 
 	if recorder.Code != http.StatusOK {
-		t.Fatalf("expected /chaos path to bypass injection, got %d", recorder.Code)
+		t.Fatalf("expected /chaos/ routes to bypass injection, got %d", recorder.Code)
 	}
 	if nextCalls.Load() != 1 {
 		t.Fatalf("expected /chaos path to reach next handler, got %d calls", nextCalls.Load())
+	}
+}
+
+func TestChaosStateConcurrencyRace(t *testing.T) {
+	state := NewChaosState()
+	mux := http.NewServeMux()
+	RegisterChaosHandlers(mux, state)
+
+	var nextCalls atomic.Int32
+	handler := state.Middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		nextCalls.Add(1)
+		WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	}))
+
+	const (
+		requestWorkers = 100
+		mutatorWorkers = 4
+		iterations     = 8
+	)
+
+	start := make(chan struct{})
+	errs := make(chan string, requestWorkers*iterations)
+	var wg sync.WaitGroup
+
+	for range requestWorkers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+
+			for range iterations {
+				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+				req := httptest.NewRequest(http.MethodGet, "/orders", nil).WithContext(ctx)
+				recorder := httptest.NewRecorder()
+				handler.ServeHTTP(recorder, req)
+				cancel()
+
+				switch recorder.Code {
+				case 0, http.StatusOK, http.StatusInternalServerError:
+				default:
+					errs <- recorder.Body.String()
+					return
+				}
+			}
+		}()
+	}
+
+	mutators := []struct {
+		path string
+		body string
+	}{
+		{path: "/chaos/latency", body: `{"delay_ms":1}`},
+		{path: "/chaos/errors", body: `{"rate":0.5}`},
+		{path: "/chaos/down", body: `{}`},
+		{path: "/chaos/reset", body: `{}`},
+	}
+	for index := 0; index < mutatorWorkers; index++ {
+		mutator := mutators[index]
+		wg.Add(1)
+		go func(path, body string) {
+			defer wg.Done()
+			<-start
+
+			for range iterations {
+				req := httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(body))
+				req.Header.Set("Content-Type", "application/json")
+				recorder := httptest.NewRecorder()
+				mux.ServeHTTP(recorder, req)
+				if recorder.Code != http.StatusOK {
+					errs <- recorder.Body.String()
+					return
+				}
+			}
+		}(mutator.path, mutator.body)
+	}
+
+	close(start)
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		t.Fatalf("unexpected chaos concurrency error: %s", err)
+	}
+	if nextCalls.Load() == 0 {
+		t.Fatal("expected concurrent requests to reach the wrapped handler at least once")
 	}
 }
 

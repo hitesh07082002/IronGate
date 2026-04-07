@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"strconv"
 	"strings"
 	"sync/atomic"
 
@@ -211,6 +212,7 @@ func (m *Manager) buildSnapshot(next *config.Config, previous *Snapshot) (*Snaps
 	rateLimitStore := m.rateLimitStoreFactor(cfg, previous)
 	breakerRegistry := nextCircuitBreakerRegistry(
 		cfg.CircuitBreaker,
+		circuitBreakerTargetServices(cfg.Routes),
 		previous,
 		m.metricsRegistry.RegisterCollector,
 		m.metricsRegistry.UnregisterCollector,
@@ -294,14 +296,18 @@ func defaultRateLimitStoreFactory(cfg *config.Config, previous *Snapshot) rateli
 
 func nextCircuitBreakerRegistry(
 	cfg config.CBConfig,
+	targetServices map[string]string,
 	previous *Snapshot,
 	registerCollector func(prometheus.Collector) error,
 	unregisterCollector func(prometheus.Collector) bool,
 ) *circuitbreaker.Registry {
 	if previous == nil || previous.CircuitBreaker == nil {
-		return circuitbreaker.NewRegistry(cfg, registerCollector)
+		registry := circuitbreaker.NewRegistry(cfg, registerCollector)
+		registry.ReconcileTargetServices(targetServices)
+		return registry
 	}
 	if previous.Config != nil && previous.Config.CircuitBreaker == cfg {
+		previous.CircuitBreaker.ReconcileTargetServices(targetServices)
 		return previous.CircuitBreaker
 	}
 
@@ -309,7 +315,20 @@ func nextCircuitBreakerRegistry(
 		unregisterCollector(previous.CircuitBreaker.Collector())
 	}
 
-	return previous.CircuitBreaker.CloneWithConfig(cfg, registerCollector)
+	cloned := previous.CircuitBreaker.CloneWithConfig(cfg, registerCollector)
+	cloned.ReconcileTargetServices(targetServices)
+	return cloned
+}
+
+func circuitBreakerTargetServices(routes []config.RouteConfig) map[string]string {
+	targetServices := make(map[string]string)
+	for _, route := range routes {
+		for _, target := range route.Targets {
+			targetServices[net.JoinHostPort(target.Host, strconv.Itoa(target.Port))] = route.Service
+		}
+	}
+
+	return targetServices
 }
 
 func hasRateLimitedRoutes(routes []config.RouteConfig) bool {
