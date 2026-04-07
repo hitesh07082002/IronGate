@@ -20,6 +20,7 @@ services:
       - "${IRONGATE_GATEWAY_BIND_HOST:-127.0.0.1}:8080:8080"
     environment:
       JWT_SECRET: "${JWT_SECRET:?JWT_SECRET must be set}"
+      REDIS_ADDR: redis:6379
       IRONGATE_TRUSTED_PROXIES: "${IRONGATE_TRUSTED_PROXIES:-}"
 
   prometheus:
@@ -30,6 +31,7 @@ services:
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
+      - --enable-feature=exemplar-storage
     ports:
       - "127.0.0.1:9090:9090"
     volumes:
@@ -47,6 +49,7 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be set}"
       GF_AUTH_ANONYMOUS_ENABLED: "false"
     volumes:
+      - ./monitoring/grafana/provisioning/grafana.ini:/etc/grafana/grafana.ini:ro
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
 

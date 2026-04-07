@@ -4,7 +4,7 @@
 >
 > Start with [`README.md`](./README.md) for the overview and demo path. Use [`PROJECT_SPEC.md`](./PROJECT_SPEC.md) for full scope and [`DESIGN_DOC.md`](./DESIGN_DOC.md) for target-state design. If those documents disagree with the code, this file is the source of truth for current behavior.
 >
-> The Phase 9 planning docs under [`docs/phase9-planning/`](./docs/phase9-planning/) describe future work only. Until that phase ships, this file wins whenever planning docs disagree with current runtime behavior.
+> Phase 9 Milestone 1 is now part of the shipped runtime. The remaining Phase 9 planning docs under [`docs/phase9-planning/`](./docs/phase9-planning/) describe future work only. This file wins whenever planning docs disagree with current runtime behavior.
 
 ---
 
@@ -21,7 +21,7 @@ For broader product scope and future work, use:
 - [`DESIGN_DOC.md`](./DESIGN_DOC.md) for target architecture, algorithms, and tradeoffs
 - [`PROJECT_SPEC.md`](./PROJECT_SPEC.md) for full feature scope and project requirements
 - [`PROGRESS.md`](./PROGRESS.md) for what is shipped now versus planned next
-- [`docs/phase9-planning/`](./docs/phase9-planning/) for the planned Chaos Observatory expansion
+- [`docs/phase9-planning/`](./docs/phase9-planning/) for the remaining Chaos Observatory milestones beyond shipped M1
 
 ---
 
@@ -32,6 +32,8 @@ For broader product scope and future work, use:
 - Reverse proxy gateway built with `net/http` and `httputil.ReverseProxy`
 - Outer middleware chain: `Tracing -> Router -> Metrics -> Auth -> RateLimiter -> Proxy`
 - Inner transport chain: `Retry -> LoadBalancer -> CircuitBreaker -> BaseTransport`
+- OpenTelemetry root and middleware spans when `OTEL_EXPORTER_OTLP_ENDPOINT` is configured
+- W3C `traceparent` propagation to upstream services plus trace-linked request duration exemplars on OpenMetrics scrapes
 - Load-balancing strategies:
   - `round_robin` via atomic counter
   - `weighted` via smooth weighted round robin
@@ -44,8 +46,10 @@ For broader product scope and future work, use:
 - Atomic runtime snapshot manager backed by `atomic.Pointer[*runtime.Snapshot]`
 - fsnotify-based config hot reload with debounce and fail-safe rollback to the last valid snapshot
 - Direct gateway-served `/health`, `/ready`, and `/metrics` handling
+- Optional admin server serving `POST /admin/circuit-breakers/reset` when `ADMIN_TOKEN` is set; defaults to `127.0.0.1:9090` unless `ADMIN_ADDR` overrides it
 - Graceful shutdown that flips `/ready` to `503` before draining in-flight requests
 - Direct `/metrics` Prometheus handler with service-only labels
+- `gateway_circuit_state{service}` gauge showing `0=CLOSED`, `1=OPEN`, `2=HALF_OPEN` for the current per-service breaker aggregate
 - Gateway-exposed payment routes: `POST /api/payments` for creation and `GET /api/payments/{id}` for status lookup
 - `make load-test` backed by [`benchmarks/smoke.js`](./benchmarks/smoke.js)
 - `make benchmark` backed by [`benchmarks/scenarios.json`](./benchmarks/scenarios.json), [`benchmarks/route.js`](./benchmarks/route.js), and [`benchmarks/runner.py`](./benchmarks/runner.py)
@@ -66,6 +70,7 @@ For broader product scope and future work, use:
   - `GRAFANA_ADMIN_USER` and `GRAFANA_ADMIN_PASSWORD` provided to Grafana at startup
   - Redis kept internal-only on the Compose network
   - Prometheus and Grafana bound to `127.0.0.1` on the host for local-only access
+- Optional observatory overlay via [`docker-compose.observatory.yml`](./docker-compose.observatory.yml) adding Tempo, the OTel Collector, and gateway OTel/admin environment wiring
 
 The codebase still contains some future-facing config fields so later phases can plug into the same route model. In the current implementation, unsupported later-phase features such as non-sliding-window rate limiting still fail closed instead of being silently ignored.
 
@@ -81,6 +86,7 @@ irongate/
 │       └── README.md
 ├── cmd/
 │   └── gateway/
+│       ├── admin_test.go
 │       ├── main.go
 │       ├── main_test.go
 │       └── phase7_test.go
@@ -100,13 +106,19 @@ irongate/
 │   ├── config/
 │   │   ├── config.go
 │   │   └── config_test.go
+│   ├── metrics/
+│   │   ├── registry.go
+│   │   └── registry_test.go
 │   ├── middleware/
 │   │   ├── chain.go
 │   │   ├── auth.go
 │   │   ├── auth_test.go
+│   │   ├── metrics.go
+│   │   ├── observability_test.go
 │   │   ├── ratelimit.go
 │   │   ├── ratelimit_test.go
 │   │   ├── router.go
+│   │   ├── router_tracing_test.go
 │   │   ├── tracing.go
 │   │   └── unsupported.go
 │   ├── proxy/
@@ -119,6 +131,9 @@ irongate/
 │   ├── runtime/
 │   │   ├── manager.go
 │   │   └── watcher.go
+│   ├── telemetry/
+│   │   ├── telemetry.go
+│   │   └── telemetry_test.go
 │   ├── testutil/
 │   │   └── redis.go
 │   └── transport/
@@ -127,6 +142,7 @@ irongate/
 │       ├── errors.go
 │       ├── observability_test.go
 │       ├── resilient.go
+│       ├── resilient_otel_test.go
 │       ├── resilient_test.go
 │       ├── retry.go
 │       ├── retry_test.go
@@ -148,7 +164,14 @@ irongate/
 │   ├── user-service/
 │   ├── order-service/
 │   └── payment-service/
+├── docker-compose.observatory.yml
 ├── docker-compose.yml
+├── monitoring/
+│   ├── grafana/
+│   └── prometheus/
+├── otel/
+│   ├── collector-config.yaml
+│   └── tempo.yaml
 ├── ADR/
 ├── DESIGN_DOC.md
 ├── PROJECT_SPEC.md
@@ -198,11 +221,24 @@ Implemented in [`internal/middleware/tracing.go`](./internal/middleware/tracing.
 - Strips incoming `X-Request-ID`, `X-User-ID`, and `X-User-Role`
 - Always generates a fresh UUID request ID
 - Writes the generated `X-Request-ID` to both the upstream request and client response
+- Starts the root `irongate.request` span plus a tracing middleware child span
+- Injects W3C trace headers into the upstream request via the global OTel propagator
 - Logs request start and completion with status and latency
 
 This is a deliberate sanitization boundary. Client-supplied request IDs are not trusted in the current runtime.
 
 The direct `/health`, `/ready`, and `/metrics` handlers also strip `X-Request-ID`, `X-User-ID`, and `X-User-Role`, then issue a fresh gateway request ID before responding.
+
+### Admin Control Plane
+
+When `ADMIN_TOKEN` is set, `main` starts a second HTTP server for observatory-only administrative actions.
+
+- `POST /admin/circuit-breakers/reset`
+- Requires `Authorization: Bearer $ADMIN_TOKEN`
+- Uses constant-time token comparison
+- Calls `Registry.Reset()` on the active circuit-breaker registry and returns `{"reset":true,"targets_cleared":N}`
+
+This server is separate from the public gateway listener on `:8080`. The default bind address is `127.0.0.1:9090`; the observatory overlay sets `ADMIN_ADDR=:9090` so the admin plane stays reachable inside Docker without publishing a host port.
 
 #### `Router`
 

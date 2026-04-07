@@ -1,15 +1,23 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	dto "github.com/prometheus/client_model/go"
+	"go.opentelemetry.io/otel/codes"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
+	"github.com/hitesh07082002/irongate/internal/config"
 	"github.com/hitesh07082002/irongate/internal/metrics"
 	"github.com/hitesh07082002/irongate/internal/ratelimit"
+	"github.com/hitesh07082002/irongate/internal/telemetry"
 )
 
 func TestRateLimiterRecordsRejectionMetric(t *testing.T) {
@@ -23,7 +31,7 @@ func TestRateLimiterRecordsRejectionMetric(t *testing.T) {
 	}
 
 	nextCalled := false
-	handler := RateLimiterWithMetrics(store, testRateLimitLogger(), registry, RateLimiterOptions{})(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	handler := RateLimiterWithMetrics(store, testRateLimitLogger(), registry, RateLimiterOptions{}, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		nextCalled = true
 		w.WriteHeader(http.StatusNoContent)
 	}))
@@ -46,6 +54,177 @@ func TestRateLimiterRecordsRejectionMetric(t *testing.T) {
 
 	if got := counterValueForService(t, families, metrics.MetricRateLimitRejections, "order-service"); got != 1 {
 		t.Fatalf("expected one rate-limit rejection, got %v", got)
+	}
+}
+
+func TestRateLimiterSpanRecordsRejectedAttributes(t *testing.T) {
+	registry := metrics.NewRegistry()
+	store := &stubRateLimitStore{
+		decision: ratelimit.Decision{
+			Allowed:   false,
+			Remaining: 0,
+			ResetAt:   time.Now().Add(time.Minute),
+		},
+	}
+	recorder := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+
+	handler := RateLimiterWithMetrics(store, testRateLimitLogger(), registry, RateLimiterOptions{}, tp.Tracer("irongate.middleware.ratelimiter"))(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("expected rate limiter rejection to stop before next handler")
+	}))
+
+	req := rateLimitedRequest(t)
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+
+	span := findEndedSpanByName(t, recorder.Ended(), "irongate.middleware.ratelimiter")
+	if got := spanAttribute(span.Attributes(), "ratelimit.outcome"); got != "rejected" {
+		t.Fatalf("expected ratelimit.outcome rejected, got %v", got)
+	}
+	if got := spanAttribute(span.Attributes(), "ratelimit.remaining"); got != int64(0) {
+		t.Fatalf("expected ratelimit.remaining 0, got %v", got)
+	}
+	if got := spanAttribute(span.Attributes(), "ratelimit.client_key"); got != telemetry.HashAttr("ip:127.0.0.1") {
+		t.Fatalf("expected hashed ratelimit.client_key, got %v", got)
+	}
+	if span.Status().Code != codes.Error {
+		t.Fatalf("expected rate limiter span status error, got %s", span.Status().Code)
+	}
+}
+
+func TestRateLimiterSpanRecordsFailOpenAttributes(t *testing.T) {
+	registry := metrics.NewRegistry()
+	recorder := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+
+	handler := RateLimiterWithMetrics(nil, testRateLimitLogger(), registry, RateLimiterOptions{}, tp.Tracer("irongate.middleware.ratelimiter"))(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	req := rateLimitedRequest(t)
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("expected fail-open request to reach next handler, got %d", resp.Code)
+	}
+
+	span := findEndedSpanByName(t, recorder.Ended(), "irongate.middleware.ratelimiter")
+	if got := spanAttribute(span.Attributes(), "ratelimit.outcome"); got != "fail_open" {
+		t.Fatalf("expected ratelimit.outcome fail_open, got %v", got)
+	}
+	if span.Status().Code == codes.Error {
+		t.Fatalf("expected fail-open span status to avoid error, got %s", span.Status().Code)
+	}
+}
+
+func TestMetricsMiddlewareRecordsExemplarForSampledSpan(t *testing.T) {
+	registry := metrics.NewRegistry()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSampler(sdktrace.AlwaysSample()))
+
+	handler := Metrics(registry)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/orders", nil)
+	req = req.WithContext(context.WithValue(req.Context(), RouteConfigKey, &config.RouteConfig{
+		Path:    "/api/orders",
+		Service: "order-service",
+	}))
+	ctx, span := tp.Tracer("irongate.middleware.metrics").Start(req.Context(), "irongate.request")
+	req = req.WithContext(ctx)
+
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+	traceID := span.SpanContext().TraceID().String()
+	span.End()
+
+	metricsReq := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	metricsReq.Header.Set("Accept", "application/openmetrics-text")
+	metricsResp := httptest.NewRecorder()
+	registry.Handler().ServeHTTP(metricsResp, metricsReq)
+
+	if body := metricsResp.Body.String(); !strings.Contains(body, `traceID="`+traceID+`"`) {
+		t.Fatalf("expected exemplar traceID %s in metrics output, got %s", traceID, body)
+	}
+}
+
+func TestMiddlewareSpansPropagateContextDownstream(t *testing.T) {
+	recorder := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder), sdktrace.WithSampler(sdktrace.AlwaysSample()))
+	registry := metrics.NewRegistry()
+	store := &stubRateLimitStore{
+		decision: ratelimit.Decision{
+			Allowed:   true,
+			Remaining: 4,
+			ResetAt:   time.Now().Add(time.Minute),
+		},
+	}
+	secret := "test-secret"
+	now := time.Now()
+	routes := []config.RouteConfig{{
+		Path:         "/api/orders",
+		Service:      "order-service",
+		AuthRequired: true,
+		RateLimit: &config.RateLimitConfig{
+			Requests: 5,
+			Window:   time.Minute,
+		},
+	}}
+
+	handler := Tracing(testRateLimitLogger(), tp.Tracer("irongate.middleware.tracing"))(
+		Router(routes, tp.Tracer("irongate.middleware.router"))(
+			Auth(config.AuthConfig{
+				JWTSecret:    secret,
+				JWTAlgorithm: "HS256",
+			}, tp.Tracer("irongate.middleware.auth"))(
+				RateLimiterWithMetrics(store, testRateLimitLogger(), registry, RateLimiterOptions{}, tp.Tracer("irongate.middleware.ratelimiter"))(
+					http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+						_, downstream := tp.Tracer("downstream").Start(req.Context(), "downstream")
+						downstream.End()
+						w.WriteHeader(http.StatusNoContent)
+					}),
+				),
+			),
+		),
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/orders", nil)
+	req.RemoteAddr = "127.0.0.1:1234"
+	req.Header.Set("Authorization", bearerAuthorization(t, secret, jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub":  "u-42",
+		"role": "admin",
+		"iat":  now.Unix(),
+		"exp":  now.Add(time.Hour).Unix(),
+	}))
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", resp.Code)
+	}
+
+	spans := recorder.Ended()
+	tracingSpan := findEndedSpanByName(t, spans, "irongate.middleware.tracing")
+	routerSpan := findEndedSpanByName(t, spans, "irongate.middleware.router")
+	authSpan := findEndedSpanByName(t, spans, "irongate.middleware.auth")
+	rateLimitSpan := findEndedSpanByName(t, spans, "irongate.middleware.ratelimiter")
+	downstreamSpan := findEndedSpanByName(t, spans, "downstream")
+
+	assertParentSpan(t, routerSpan, tracingSpan)
+	assertParentSpan(t, authSpan, routerSpan)
+	assertParentSpan(t, rateLimitSpan, authSpan)
+	assertParentSpan(t, downstreamSpan, rateLimitSpan)
+}
+
+func assertParentSpan(t *testing.T, child, parent sdktrace.ReadOnlySpan) {
+	t.Helper()
+
+	if child.Parent().SpanID() != parent.SpanContext().SpanID() {
+		t.Fatalf("expected %s parent %s, got %s", child.Name(), parent.Name(), child.Parent().SpanID())
+	}
+	if child.Parent().TraceID() != parent.SpanContext().TraceID() {
+		t.Fatalf("expected %s to share trace with %s", child.Name(), parent.Name())
 	}
 }
 

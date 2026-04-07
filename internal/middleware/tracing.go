@@ -6,6 +6,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
 const (
@@ -14,13 +18,24 @@ const (
 	HeaderUserRole  = "X-User-Role"
 )
 
-func Tracing(logger *slog.Logger) Middleware {
+func Tracing(logger *slog.Logger, tracer trace.Tracer) Middleware {
 	if logger == nil {
 		logger = slog.Default()
+	}
+	if tracer == nil {
+		tracer = noop.NewTracerProvider().Tracer("irongate.middleware.tracing")
 	}
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			ctx, rootSpan := tracer.Start(req.Context(), "irongate.request")
+			defer rootSpan.End()
+			ctx, routeCapture := withRouteCapture(ctx)
+			req = req.WithContext(ctx)
+
+			ctx, tracingSpan := tracer.Start(ctx, "irongate.middleware.tracing")
+			defer tracingSpan.End()
+			req = req.WithContext(ctx)
 			req.Header.Del(HeaderUserID)
 			req.Header.Del(HeaderUserRole)
 			req.Header.Del(HeaderRequestID)
@@ -42,6 +57,20 @@ func Tracing(logger *slog.Logger) Middleware {
 			)
 
 			next.ServeHTTP(recorder, req)
+
+			routePath := req.URL.Path
+			if routeCapture != nil && routeCapture.route != nil {
+				routePath = routeCapture.route.Path
+			}
+			rootSpan.SetAttributes(
+				attribute.String("request_id", requestID),
+				attribute.String("http.method", req.Method),
+				attribute.String("http.path", routePath),
+				attribute.Int("http.status_code", recorder.statusCode),
+			)
+			if recorder.statusCode >= http.StatusInternalServerError {
+				rootSpan.SetStatus(codes.Error, http.StatusText(recorder.statusCode))
+			}
 
 			logger.Info("request completed",
 				"method", req.Method,

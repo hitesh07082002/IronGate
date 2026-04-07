@@ -347,6 +347,7 @@ func TestValidateTrimsRoutePathBeforeMetricsConflictChecks(t *testing.T) {
 
 func TestGatewayConfigPhaseSevenEnablesRuntimeReadinessAndMetrics(t *testing.T) {
 	t.Setenv("JWT_SECRET", "test-secret")
+	t.Setenv("REDIS_ADDR", "redis:6379")
 
 	cfg, err := Load(repoPathFromThisFile("configs", "gateway.yaml"))
 	if err != nil {

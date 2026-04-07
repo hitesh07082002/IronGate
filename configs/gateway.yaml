@@ -126,7 +126,7 @@ auth:
   jwt_algorithm: "HS256"
 
 redis:
-  address: "redis:6379"
+  address: "${REDIS_ADDR}"
   password: ""
   db: 0
 

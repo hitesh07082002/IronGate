@@ -225,7 +225,7 @@ func (r *Registry) Handler() http.Handler {
 		return http.NotFoundHandler()
 	}
 
-	return promhttp.HandlerFor(r.registry, promhttp.HandlerOpts{})
+	return promhttp.HandlerFor(r.registry, promhttp.HandlerOpts{EnableOpenMetrics: true})
 }
 
 func (r *Registry) Gather() ([]*dto.MetricFamily, error) {
@@ -234,6 +234,22 @@ func (r *Registry) Gather() ([]*dto.MetricFamily, error) {
 	}
 
 	return r.registry.Gather()
+}
+
+func (r *Registry) RegisterCollector(c prometheus.Collector) error {
+	if r == nil || r.registry == nil || c == nil {
+		return nil
+	}
+
+	return r.registry.Register(c)
+}
+
+func (r *Registry) UnregisterCollector(c prometheus.Collector) bool {
+	if r == nil || r.registry == nil || c == nil {
+		return false
+	}
+
+	return r.registry.Unregister(c)
 }
 
 func (r *Registry) ObserveRequest(service string, statusCode int, duration time.Duration) {
@@ -246,6 +262,29 @@ func (r *Registry) ObserveRequest(service string, statusCode int, duration time.
 	if statusCode >= http.StatusInternalServerError {
 		r.requestFailuresTotal.Inc(service)
 	}
+}
+
+func (r *Registry) ObserveRequestWithExemplar(service string, statusCode int, duration time.Duration, traceID string) {
+	if r == nil {
+		return
+	}
+
+	r.requestsTotal.Inc(service)
+	if statusCode >= http.StatusInternalServerError {
+		r.requestFailuresTotal.Inc(service)
+	}
+	if r.requestDuration.vec == nil {
+		return
+	}
+
+	svc := normalizeService(service)
+	if traceID != "" {
+		r.requestDuration.vec.WithLabelValues(svc).(prometheus.ExemplarObserver).
+			ObserveWithExemplar(duration.Seconds(), prometheus.Labels{"traceID": traceID})
+		return
+	}
+
+	r.requestDuration.vec.WithLabelValues(svc).Observe(duration.Seconds())
 }
 
 func (r *Registry) IncRateLimitRejection(service string) {

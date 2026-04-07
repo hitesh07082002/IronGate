@@ -3,6 +3,7 @@ package metrics
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -74,6 +75,24 @@ func TestObserveRequestCountsOnly5xxAsFailures(t *testing.T) {
 	}
 }
 
+func TestHandlerServesOpenMetricsExemplars(t *testing.T) {
+	registry := NewRegistry()
+	traceID := "0123456789abcdef0123456789abcdef"
+	registry.ObserveRequestWithExemplar("payment-service", http.StatusOK, 5*time.Millisecond, traceID)
+
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	req.Header.Set("Accept", "application/openmetrics-text")
+	recorder := httptest.NewRecorder()
+	registry.Handler().ServeHTTP(recorder, req)
+
+	if got := recorder.Header().Get("Content-Type"); !strings.Contains(got, "application/openmetrics-text") {
+		t.Fatalf("expected OpenMetrics content type, got %q", got)
+	}
+	if body := recorder.Body.String(); !strings.Contains(body, `traceID="`+traceID+`"`) {
+		t.Fatalf("expected exemplar traceID in metrics output, got %s", body)
+	}
+}
+
 func TestZeroValueRegistryHandlerReturnsNotFound(t *testing.T) {
 	var registry Registry
 
@@ -96,6 +115,12 @@ func TestZeroValueRegistryGatherReturnsNilFamilies(t *testing.T) {
 	if families != nil {
 		t.Fatalf("expected nil metric families from zero-value registry, got %v", families)
 	}
+}
+
+func TestZeroValueObserveRequestWithExemplarIsNoop(t *testing.T) {
+	var registry Registry
+
+	registry.ObserveRequestWithExemplar("payment-service", http.StatusOK, time.Millisecond, "trace-id")
 }
 
 func counterValueForService(t *testing.T, families []*dto.MetricFamily, name, service string) float64 {

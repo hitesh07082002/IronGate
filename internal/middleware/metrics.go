@@ -5,6 +5,7 @@ import (
 	"time"
 
 	gatewaymetrics "github.com/hitesh07082002/irongate/internal/metrics"
+	"go.opentelemetry.io/otel/trace"
 )
 
 func Metrics(registry *gatewaymetrics.Registry) Middleware {
@@ -31,7 +32,19 @@ func Metrics(registry *gatewaymetrics.Registry) Middleware {
 			start := time.Now()
 			defer func() {
 				registry.DecInFlight(route.Service)
-				registry.ObserveRequest(route.Service, recorder.statusCode, time.Since(start))
+				spanCtx := trace.SpanFromContext(req.Context()).SpanContext()
+				duration := time.Since(start)
+				if spanCtx.IsValid() && spanCtx.IsSampled() {
+					registry.ObserveRequestWithExemplar(
+						route.Service,
+						recorder.statusCode,
+						duration,
+						spanCtx.TraceID().String(),
+					)
+					return
+				}
+
+				registry.ObserveRequest(route.Service, recorder.statusCode, duration)
 			}()
 
 			next.ServeHTTP(recorder, req)

@@ -7,10 +7,13 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"strconv"
 	"strings"
 	"sync/atomic"
 
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/hitesh07082002/irongate/internal/config"
 	gatewaymetrics "github.com/hitesh07082002/irongate/internal/metrics"
@@ -18,6 +21,7 @@ import (
 	"github.com/hitesh07082002/irongate/internal/proxy"
 	"github.com/hitesh07082002/irongate/internal/ratelimit"
 	"github.com/hitesh07082002/irongate/internal/response"
+	"github.com/hitesh07082002/irongate/internal/telemetry"
 	"github.com/hitesh07082002/irongate/internal/transport"
 	"github.com/hitesh07082002/irongate/internal/transport/circuitbreaker"
 )
@@ -37,6 +41,7 @@ type BuilderOptions struct {
 	TrustedProxies        []netip.Prefix
 	MetricsRegistry       *gatewaymetrics.Registry
 	RateLimitStoreFactory RateLimitStoreFactory
+	TracerProvider        trace.TracerProvider
 }
 
 type Snapshot struct {
@@ -55,6 +60,7 @@ type Manager struct {
 	startupServer        config.ServerConfig
 	trustedProxies       []netip.Prefix
 	rateLimitStoreFactor RateLimitStoreFactory
+	tracerProvider       trace.TracerProvider
 
 	current  atomic.Pointer[Snapshot]
 	ready    atomic.Bool
@@ -83,6 +89,7 @@ func NewManager(initial *config.Config, options BuilderOptions) (*Manager, error
 		startupServer:        initial.Server,
 		trustedProxies:       append([]netip.Prefix(nil), options.TrustedProxies...),
 		rateLimitStoreFactor: options.RateLimitStoreFactory,
+		tracerProvider:       options.TracerProvider,
 	}
 	if manager.rateLimitStoreFactor == nil {
 		manager.rateLimitStoreFactor = defaultRateLimitStoreFactory
@@ -203,21 +210,32 @@ func (m *Manager) buildSnapshot(next *config.Config, previous *Snapshot) (*Snaps
 	}
 
 	rateLimitStore := m.rateLimitStoreFactor(cfg, previous)
-	breakerRegistry := nextCircuitBreakerRegistry(cfg.CircuitBreaker, previous)
+	breakerRegistry := nextCircuitBreakerRegistry(
+		cfg.CircuitBreaker,
+		circuitBreakerTargetServices(cfg.Routes),
+		previous,
+		m.metricsRegistry.RegisterCollector,
+		m.metricsRegistry.UnregisterCollector,
+	)
+	tracingTracer := telemetry.TracerOrNoop(m.tracerProvider, "irongate.middleware.tracing")
+	routerTracer := telemetry.TracerOrNoop(m.tracerProvider, "irongate.middleware.router")
+	authTracer := telemetry.TracerOrNoop(m.tracerProvider, "irongate.middleware.auth")
+	rateLimiterTracer := telemetry.TracerOrNoop(m.tracerProvider, "irongate.middleware.ratelimiter")
+	transportTracer := telemetry.TracerOrNoop(m.tracerProvider, "irongate.transport")
 	proxyHandler := proxy.New(
 		m.logger,
 		cfg.Server.WriteTimeout,
-		transport.NewResilientTransport(nil, cfg.Routes, cfg.CircuitBreaker, metricsRegistry, breakerRegistry),
+		transport.NewResilientTransport(nil, cfg.Routes, cfg.CircuitBreaker, metricsRegistry, breakerRegistry, transportTracer),
 	)
 	applicationHandler := middleware.Chain(
 		proxyHandler,
-		middleware.Tracing(m.logger),
-		middleware.Router(cfg.Routes),
+		middleware.Tracing(m.logger, tracingTracer),
+		middleware.Router(cfg.Routes, routerTracer),
 		middleware.Metrics(metricsRegistry),
-		middleware.Auth(cfg.Auth),
+		middleware.Auth(cfg.Auth, authTracer),
 		middleware.RateLimiterWithMetrics(rateLimitStore, m.logger, metricsRegistry, middleware.RateLimiterOptions{
 			TrustedProxies: m.trustedProxies,
-		}),
+		}, rateLimiterTracer),
 	)
 
 	return &Snapshot{
@@ -276,15 +294,41 @@ func defaultRateLimitStoreFactory(cfg *config.Config, previous *Snapshot) rateli
 	return ratelimit.NewRedisStore(cfg.Redis)
 }
 
-func nextCircuitBreakerRegistry(cfg config.CBConfig, previous *Snapshot) *circuitbreaker.Registry {
+func nextCircuitBreakerRegistry(
+	cfg config.CBConfig,
+	targetServices map[string]string,
+	previous *Snapshot,
+	registerCollector func(prometheus.Collector) error,
+	unregisterCollector func(prometheus.Collector) bool,
+) *circuitbreaker.Registry {
 	if previous == nil || previous.CircuitBreaker == nil {
-		return circuitbreaker.NewRegistry(cfg)
+		registry := circuitbreaker.NewRegistry(cfg, registerCollector)
+		registry.ReconcileTargetServices(targetServices)
+		return registry
 	}
 	if previous.Config != nil && previous.Config.CircuitBreaker == cfg {
+		previous.CircuitBreaker.ReconcileTargetServices(targetServices)
 		return previous.CircuitBreaker
 	}
 
-	return previous.CircuitBreaker.CloneWithConfig(cfg)
+	if unregisterCollector != nil {
+		unregisterCollector(previous.CircuitBreaker.Collector())
+	}
+
+	cloned := previous.CircuitBreaker.CloneWithConfig(cfg, registerCollector)
+	cloned.ReconcileTargetServices(targetServices)
+	return cloned
+}
+
+func circuitBreakerTargetServices(routes []config.RouteConfig) map[string]string {
+	targetServices := make(map[string]string)
+	for _, route := range routes {
+		for _, target := range route.Targets {
+			targetServices[net.JoinHostPort(target.Host, strconv.Itoa(target.Port))] = route.Service
+		}
+	}
+
+	return targetServices
 }
 
 func hasRateLimitedRoutes(routes []config.RouteConfig) bool {

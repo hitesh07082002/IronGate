@@ -71,6 +71,9 @@
       },
       "id": 2,
       "options": {
+        "exemplars": {
+          "enabled": true
+        },
         "legend": {
           "displayMode": "table",
           "placement": "bottom"

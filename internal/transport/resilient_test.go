@@ -4,8 +4,12 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -27,7 +31,7 @@ func TestLoadBalancerTransportInitializesNilResponseHeaders(t *testing.T) {
 			Body:       http.NoBody,
 			Request:    req,
 		}, nil
-	}), nil, config.CBConfig{}, nil, nil)
+	}), nil, config.CBConfig{}, nil, nil, nil)
 
 	route := &config.RouteConfig{
 		Path:         "/api/users",
@@ -63,7 +67,7 @@ func TestCircuitBreakerTransportDelaysSuccessUntilBodyEOF(t *testing.T) {
 		Timeout:             10 * time.Millisecond,
 		WindowSize:          time.Minute,
 		HalfOpenMaxRequests: 1,
-	})
+	}, nil)
 	target := "user-service-1:8081"
 	breaker := registry.Breaker(target)
 
@@ -83,6 +87,7 @@ func TestCircuitBreakerTransportDelaysSuccessUntilBodyEOF(t *testing.T) {
 			}, nil
 		}),
 		registry: registry,
+		tracer:   nil,
 	}
 
 	req, err := http.NewRequest(http.MethodGet, "http://"+target+"/health", nil)
@@ -116,7 +121,7 @@ func TestCircuitBreakerTransportReopensOnBodyReadError(t *testing.T) {
 		Timeout:             10 * time.Millisecond,
 		WindowSize:          time.Minute,
 		HalfOpenMaxRequests: 1,
-	})
+	}, nil)
 	target := "user-service-1:8081"
 	breaker := registry.Breaker(target)
 
@@ -136,6 +141,7 @@ func TestCircuitBreakerTransportReopensOnBodyReadError(t *testing.T) {
 			}, nil
 		}),
 		registry: registry,
+		tracer:   nil,
 	}
 
 	req, err := http.NewRequest(http.MethodGet, "http://"+target+"/health", nil)
@@ -167,7 +173,7 @@ func TestCircuitBreakerTransportIgnoresBodyReadErrorFromCallerCancellation(t *te
 		Timeout:             10 * time.Millisecond,
 		WindowSize:          time.Minute,
 		HalfOpenMaxRequests: 1,
-	})
+	}, nil)
 	target := "user-service-1:8081"
 	breaker := registry.Breaker(target)
 
@@ -187,6 +193,7 @@ func TestCircuitBreakerTransportIgnoresBodyReadErrorFromCallerCancellation(t *te
 			}, nil
 		}),
 		registry: registry,
+		tracer:   nil,
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -218,7 +225,7 @@ func TestCircuitBreakerTransportIgnoresBodyCloseErrorFromCallerDeadline(t *testi
 		Timeout:             10 * time.Millisecond,
 		WindowSize:          time.Minute,
 		HalfOpenMaxRequests: 1,
-	})
+	}, nil)
 	target := "user-service-1:8081"
 	breaker := registry.Breaker(target)
 
@@ -238,6 +245,7 @@ func TestCircuitBreakerTransportIgnoresBodyCloseErrorFromCallerDeadline(t *testi
 			}, nil
 		}),
 		registry: registry,
+		tracer:   nil,
 	}
 
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
@@ -262,6 +270,74 @@ func TestCircuitBreakerTransportIgnoresBodyCloseErrorFromCallerDeadline(t *testi
 	}
 }
 
+func TestCircuitBreakerOpensForRepeatedFailuresOnWeightedTarget(t *testing.T) {
+	route := config.RouteConfig{
+		Path:         "/api/users",
+		Service:      "user-service",
+		LoadBalancer: "weighted",
+		Retry: config.RetryConfig{
+			MaxAttempts: 3,
+			BaseDelay:   time.Millisecond,
+			MaxDelay:    time.Millisecond,
+			Jitter:      "none",
+		},
+		Targets: []config.Target{
+			{Host: "user-service-1", Port: 8081, Weight: 3},
+			{Host: "user-service-2", Port: 8091, Weight: 1},
+		},
+	}
+	breakerConfig := config.CBConfig{
+		FailureThreshold:    5,
+		SuccessThreshold:    3,
+		Timeout:             30 * time.Second,
+		WindowSize:          time.Minute,
+		HalfOpenMaxRequests: 3,
+	}
+	breakers := circuitbreaker.NewRegistry(breakerConfig, nil)
+	transport := NewResilientTransport(roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Host {
+		case "user-service-1:8081":
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader("ok")),
+				Request:    req,
+			}, nil
+		case "user-service-2:8091":
+			return nil, &url.Error{
+				Err: &net.DNSError{
+					Err: "no such host",
+				},
+			}
+		default:
+			t.Fatalf("unexpected target %q", req.URL.Host)
+			return nil, nil
+		}
+	}), []config.RouteConfig{route}, breakerConfig, nil, breakers, nil)
+
+	for i := 0; i < 60; i++ {
+		req, err := http.NewRequest(http.MethodGet, "http://gateway/api/users", nil)
+		if err != nil {
+			t.Fatalf("new request: %v", err)
+		}
+		req = req.WithContext(context.WithValue(req.Context(), middleware.RouteConfigKey, &route))
+
+		resp, err := transport.RoundTrip(req)
+		if err == nil && resp != nil {
+			if _, readErr := io.ReadAll(resp.Body); readErr != nil {
+				t.Fatalf("read body: %v", readErr)
+			}
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				t.Fatalf("close body: %v", closeErr)
+			}
+		}
+	}
+
+	if state, ok := breakers.State("user-service-2:8091"); !ok || state != circuitbreaker.StateOpen {
+		t.Fatalf("expected failing weighted target breaker open, got state=%v ok=%t", state, ok)
+	}
+}
+
 func TestCountsTowardCircuitIgnoresCallerDeadlineExceeded(t *testing.T) {
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 	defer cancel()
@@ -274,6 +350,118 @@ func TestCountsTowardCircuitIgnoresCallerDeadlineExceeded(t *testing.T) {
 	}
 	if !countsTowardCircuit(context.Background(), context.DeadlineExceeded) {
 		t.Fatal("expected upstream deadline to count toward the circuit breaker")
+	}
+}
+
+func TestReleaseOnReadCloserReadReleasesOnceAtEOF(t *testing.T) {
+	var releases atomic.Int32
+	body := &releaseOnReadCloser{
+		ReadCloser: io.NopCloser(strings.NewReader("ok")),
+		release: func() {
+			releases.Add(1)
+		},
+	}
+
+	if _, err := io.ReadAll(body); err != nil {
+		t.Fatalf("read release-on-read body: %v", err)
+	}
+	if err := body.Close(); err != nil {
+		t.Fatalf("close release-on-read body: %v", err)
+	}
+	if got := releases.Load(); got != 1 {
+		t.Fatalf("expected release callback once, got %d", got)
+	}
+}
+
+func TestResilientTransportConcurrentStateMachine(t *testing.T) {
+	route := &config.RouteConfig{
+		Path:         "/api/orders",
+		Service:      "order-service",
+		LoadBalancer: "round_robin",
+		Retry: config.RetryConfig{
+			MaxAttempts: 2,
+			BaseDelay:   time.Millisecond,
+			MaxDelay:    time.Millisecond,
+			Jitter:      "none",
+		},
+		Targets: []config.Target{
+			{Host: "order-service-1", Port: 8081},
+			{Host: "order-service-2", Port: 8082},
+		},
+	}
+	breakerConfig := config.CBConfig{
+		FailureThreshold:    1,
+		SuccessThreshold:    1,
+		Timeout:             2 * time.Millisecond,
+		WindowSize:          time.Second,
+		HalfOpenMaxRequests: 1,
+	}
+	breakers := circuitbreaker.NewRegistry(breakerConfig, nil)
+
+	var firstTargetHits atomic.Int32
+	var secondTargetHits atomic.Int32
+	transport := NewResilientTransport(roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Host {
+		case "order-service-1:8081":
+			firstTargetHits.Add(1)
+			return &http.Response{
+				StatusCode: http.StatusServiceUnavailable,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader("fail")),
+				Request:    req,
+			}, nil
+		case "order-service-2:8082":
+			secondTargetHits.Add(1)
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader("ok")),
+				Request:    req,
+			}, nil
+		default:
+			t.Fatalf("unexpected target %q", req.URL.Host)
+			return nil, nil
+		}
+	}), []config.RouteConfig{*route}, breakerConfig, nil, breakers, nil)
+
+	errs := make(chan error, 100)
+	var wg sync.WaitGroup
+	for range 100 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			req, err := http.NewRequest(http.MethodGet, "http://gateway"+route.Path, nil)
+			if err != nil {
+				errs <- err
+				return
+			}
+			req = req.WithContext(context.WithValue(req.Context(), middleware.RouteConfigKey, route))
+
+			resp, err := transport.RoundTrip(req)
+			if err != nil {
+				errs <- err
+				return
+			}
+			defer resp.Body.Close()
+			if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+				errs <- err
+			}
+			if resp.StatusCode != http.StatusOK {
+				errs <- errors.New("expected healthy target to serve concurrent request")
+			}
+		}()
+	}
+
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("unexpected concurrent transport error: %v", err)
+		}
+	}
+	if firstTargetHits.Load() == 0 || secondTargetHits.Load() == 0 {
+		t.Fatalf("expected concurrent transport to exercise both targets, got first=%d second=%d", firstTargetHits.Load(), secondTargetHits.Load())
 	}
 }
 

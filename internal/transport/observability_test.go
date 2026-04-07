@@ -37,6 +37,7 @@ func TestRetryTransportRecordsRetryMetrics(t *testing.T) {
 		func(context.Context, time.Duration) error { return nil },
 		rand.New(rand.NewSource(1)),
 		registry,
+		nil,
 	)
 
 	req, err := http.NewRequest(http.MethodGet, "http://gateway/api/orders", nil)
@@ -86,7 +87,7 @@ func TestCircuitBreakerTransportRecordsMetrics(t *testing.T) {
 		Timeout:             10 * time.Millisecond,
 		WindowSize:          time.Minute,
 		HalfOpenMaxRequests: 1,
-	})
+	}, nil)
 
 	transport := &CircuitBreakerTransport{
 		next: roundTripFunc(func(req *http.Request) (*http.Response, error) {
@@ -99,6 +100,7 @@ func TestCircuitBreakerTransportRecordsMetrics(t *testing.T) {
 		}),
 		registry: breakers,
 		metrics:  registry,
+		tracer:   nil,
 	}
 
 	route := &config.RouteConfig{

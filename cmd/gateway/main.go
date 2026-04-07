@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"errors"
 	"flag"
 	"fmt"
@@ -14,21 +16,36 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/hitesh07082002/irongate/internal/config"
 	gatewaymetrics "github.com/hitesh07082002/irongate/internal/metrics"
+	"github.com/hitesh07082002/irongate/internal/middleware"
 	"github.com/hitesh07082002/irongate/internal/ratelimit"
+	"github.com/hitesh07082002/irongate/internal/response"
 	gwruntime "github.com/hitesh07082002/irongate/internal/runtime"
+	"github.com/hitesh07082002/irongate/internal/telemetry"
+	"github.com/hitesh07082002/irongate/internal/transport/circuitbreaker"
 )
 
 const (
 	fallbackShutdownTimeout = 10 * time.Second
 	trustedProxiesEnvVar    = "IRONGATE_TRUSTED_PROXIES"
+	adminAddrEnvVar         = "ADMIN_ADDR"
+	defaultAdminAddr        = "127.0.0.1:9090"
 )
 
 type buildHandlerOptions struct {
 	rateLimitStore  ratelimit.Store
 	trustedProxies  []netip.Prefix
 	metricsRegistry *gatewaymetrics.Registry
+	tracerProvider  trace.TracerProvider
+}
+
+type serverError struct {
+	name string
+	err  error
 }
 
 func main() {
@@ -58,14 +75,41 @@ func main() {
 		os.Exit(1)
 	}
 
+	tp, shutdownTracing := telemetry.Init(context.Background(), "irongate", "phase9")
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = shutdownTracing(shutdownCtx)
+	}()
+
 	manager, err := newRuntimeManager(cfg, logger, buildHandlerOptions{
 		trustedProxies: trustedProxies,
+		tracerProvider: tp,
 	})
 	if err != nil {
 		slog.Error("failed to build runtime manager", "error", err)
 		os.Exit(1)
 	}
 
+	adminToken := strings.TrimSpace(os.Getenv("ADMIN_TOKEN"))
+	cbGetter := func() *circuitbreaker.Registry {
+		snapshot := manager.Current()
+		if snapshot == nil {
+			return nil
+		}
+
+		return snapshot.CircuitBreaker
+	}
+
+	var adminServer *http.Server
+	if adminToken != "" {
+		adminServer = &http.Server{
+			Addr:         resolveAdminAddr(),
+			Handler:      newAdminHandler(adminToken, cbGetter),
+			ReadTimeout:  10 * time.Second,
+			WriteTimeout: 10 * time.Second,
+		}
+	}
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),
 		Handler:      manager,
@@ -88,22 +132,27 @@ func main() {
 		}
 	}()
 
-	serverErrors := make(chan error, 1)
-	go func() {
-		serverErrors <- server.ListenAndServe()
-	}()
+	serverErrors := make(chan serverError, 2)
+	if adminServer != nil {
+		serveAsync("admin", adminServer, serverErrors)
+	}
+	serveAsync("gateway", server, serverErrors)
 
 	signalCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
 
 	select {
-	case err := <-serverErrors:
+	case serverErr := <-serverErrors:
 		cancelWatcher()
-		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			slog.Error("gateway stopped", "error", err)
-			os.Exit(1)
+		manager.BeginShutdown()
+		shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), shutdownTimeout(cfg.Server.WriteTimeout))
+		defer cancelShutdown()
+		if adminServer != nil {
+			_ = adminServer.Shutdown(shutdownCtx)
 		}
-		return
+		_ = server.Shutdown(shutdownCtx)
+		slog.Error(serverErr.name+" server stopped", "error", serverErr.err)
+		os.Exit(1)
 	case <-signalCtx.Done():
 	}
 
@@ -112,13 +161,14 @@ func main() {
 
 	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), shutdownTimeout(cfg.Server.WriteTimeout))
 	defer cancelShutdown()
+	if adminServer != nil {
+		if err := adminServer.Shutdown(shutdownCtx); err != nil {
+			slog.Error("admin graceful shutdown failed", "error", err)
+			os.Exit(1)
+		}
+	}
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		slog.Error("graceful shutdown failed", "error", err)
-		os.Exit(1)
-	}
-
-	if err := <-serverErrors; err != nil && !errors.Is(err, http.ErrServerClosed) {
-		slog.Error("gateway stopped", "error", err)
 		os.Exit(1)
 	}
 }
@@ -147,6 +197,7 @@ func newRuntimeManager(cfg *config.Config, logger *slog.Logger, options buildHan
 		Logger:          logger,
 		TrustedProxies:  options.trustedProxies,
 		MetricsRegistry: options.metricsRegistry,
+		TracerProvider:  options.tracerProvider,
 		RateLimitStoreFactory: func(next *config.Config, previous *gwruntime.Snapshot) ratelimit.Store {
 			if options.rateLimitStore != nil {
 				return options.rateLimitStore
@@ -226,4 +277,96 @@ func resolveConfigPath(flagValue string) string {
 	}
 
 	return "configs/gateway.yaml"
+}
+
+func resolveAdminAddr() string {
+	if value := strings.TrimSpace(os.Getenv(adminAddrEnvVar)); value != "" {
+		return value
+	}
+
+	return defaultAdminAddr
+}
+
+func newAdminHandler(adminToken string, cbGetter func() *circuitbreaker.Registry) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r = stampAdminRequest(w, r)
+		if r.URL.Path != "/admin/circuit-breakers/reset" {
+			response.WriteError(w, r, http.StatusNotFound, "not found")
+			return
+		}
+		if r.Method != http.MethodPost {
+			response.WriteError(w, r, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		auth, ok := adminBearerToken(r.Header.Get("Authorization"))
+		if !ok || !adminTokenMatches(auth, adminToken) {
+			response.WriteError(w, r, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+
+		n := 0
+		if cbGetter != nil {
+			if registry := cbGetter(); registry != nil {
+				n = registry.Reset()
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"reset":true,"targets_cleared":%d}`, n)
+	})
+}
+
+func serveAsync(name string, server *http.Server, errs chan<- serverError) {
+	go func() {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errs <- serverError{name: name, err: err}
+		}
+	}()
+}
+
+func adminBearerToken(header string) (string, bool) {
+	scheme, token, ok := strings.Cut(strings.TrimSpace(header), " ")
+	if !ok || scheme != "Bearer" {
+		return "", false
+	}
+
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return "", false
+	}
+
+	return token, true
+}
+
+func adminTokenMatches(provided, expected string) bool {
+	expected = strings.TrimSpace(expected)
+	if expected == "" {
+		return false
+	}
+
+	providedHash := sha256.Sum256([]byte(provided))
+	expectedHash := sha256.Sum256([]byte(expected))
+	return hmac.Equal(providedHash[:], expectedHash[:])
+}
+
+func stampAdminRequest(w http.ResponseWriter, r *http.Request) *http.Request {
+	if r == nil {
+		return nil
+	}
+	if r.Header == nil {
+		r.Header = make(http.Header)
+	}
+
+	r.Header.Del(middleware.HeaderRequestID)
+	r.Header.Del(middleware.HeaderUserID)
+	r.Header.Del(middleware.HeaderUserRole)
+
+	requestID := uuid.NewString()
+	r.Header.Set(middleware.HeaderRequestID, requestID)
+	if w != nil {
+		w.Header().Set(middleware.HeaderRequestID, requestID)
+	}
+
+	return r
 }

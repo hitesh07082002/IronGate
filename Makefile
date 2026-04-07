@@ -1,4 +1,4 @@
-.PHONY: all clean lint build test test-race coverage run docker-up docker-down load-test benchmark benchmark-scenario benchmark-render benchmark-test bootstrap-production deploy-production check-production
+.PHONY: all clean lint build test test-race coverage run docker-up docker-down load-test benchmark benchmark-scenario benchmark-render benchmark-test bootstrap-production deploy-production check-production observatory-up observatory-down observatory-logs
 
 GO_TEST_FLAGS ?=
 COVERAGE_MIN ?= 70
@@ -25,7 +25,7 @@ test-race:
 	go test ./... -v -race $(GO_TEST_FLAGS)
 
 coverage:
-	go test ./... -covermode=atomic -coverprofile=coverage.out -coverpkg=./... $(GO_TEST_FLAGS)
+	go test ./... -covermode=atomic -coverprofile=coverage.out $(GO_TEST_FLAGS)
 	@set -eu; \
 		cover_out="$$(go tool cover -func=coverage.out)"; \
 		printf '%s\n' "$$cover_out"; \
@@ -33,7 +33,7 @@ coverage:
 		awk "BEGIN { exit !($$total >= $(COVERAGE_MIN)) }" || (echo "coverage $$total% is below $(COVERAGE_MIN)%"; exit 1)
 
 run:
-	go run ./cmd/gateway
+	REDIS_ADDR=$${REDIS_ADDR:-127.0.0.1:6379} go run ./cmd/gateway
 
 docker-up:
 	@test -n "$(DOCKER_COMPOSE)" || (echo "Docker Compose is required"; exit 1)
@@ -42,6 +42,19 @@ docker-up:
 docker-down:
 	@test -n "$(DOCKER_COMPOSE)" || (echo "Docker Compose is required"; exit 1)
 	$(DOCKER_COMPOSE) down
+
+observatory-up: ## Start full observatory stack (Tempo + OTel Collector + gateway)
+	@command -v docker >/dev/null 2>&1 || (echo "Docker is required for observatory-up"; exit 1)
+	@test -n "$(DOCKER_COMPOSE)" || (echo "Docker Compose is required"; exit 1)
+	$(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.observatory.yml up -d --build
+
+observatory-down: ## Stop observatory stack
+	@test -n "$(DOCKER_COMPOSE)" || (echo "Docker Compose is required"; exit 1)
+	$(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.observatory.yml down
+
+observatory-logs: ## Tail observatory container logs
+	@test -n "$(DOCKER_COMPOSE)" || (echo "Docker Compose is required"; exit 1)
+	$(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.observatory.yml logs -f
 
 load-test:
 	@test -n "$(K6_CMD)" || (echo "k6 is required for load-test; run 'mise install' in the repo root first"; exit 1)

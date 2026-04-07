@@ -1,10 +1,10 @@
 # IronGate
 
-IronGate is a production-grade API gateway implemented in Go with the standard `net/http` stack. In one repository it combines config-driven routing, JWT authentication, Redis-backed sliding-window rate limiting, retry, load balancing, circuit breaking, Prometheus/Grafana observability, hot reload, graceful shutdown, and a documented production deployment path.
+IronGate is a production-grade API gateway implemented in Go with the standard `net/http` stack. In one repository it combines config-driven routing, JWT authentication, Redis-backed sliding-window rate limiting, retry, load balancing, circuit breaking, Prometheus/Grafana observability, OpenTelemetry tracing hooks, hot reload, graceful shutdown, and a documented production deployment path.
 
 The project is built for fast evaluation. You can run the complete stack locally, inspect the full request path across public and protected routes, and deploy the same architecture behind TLS without introducing a managed control plane or a large platform dependency.
 
-Phase 8 is the shipped baseline on `main`. The planned Phase 9 Chaos Observatory expansion lives under [`docs/phase9-planning/`](./docs/phase9-planning/) and does not describe current live behavior yet.
+Phases 1 through 8 plus Phase 9 Milestone 1 are now part of the repo's shipped runtime. The remaining Chaos Observatory expansion lives under [`docs/phase9-planning/`](./docs/phase9-planning/) and still describes future work beyond the current implementation.
 
 ## Start Here
 
@@ -113,6 +113,8 @@ After bootstrap, day-to-day deploys use the dedicated `irongate` deploy user by 
 - Round-robin, weighted round-robin, and least-connections load balancing
 - Per-target circuit breaking with failover and half-open recovery
 - Prometheus metrics plus Grafana dashboards with service-only label cardinality
+- OpenTelemetry trace export, W3C trace propagation, and Prometheus exemplars through the observatory overlay
+- Bearer-protected admin reset endpoint for circuit-breaker state recovery during observatory demos
 - Hot reload with rollback to the last valid runtime snapshot
 - Graceful shutdown that flips `/ready` before draining in-flight requests
 
@@ -151,6 +153,26 @@ make benchmark
 
 `make benchmark` writes a timestamped result bundle under `benchmarks/results/`.
 The committed benchmark snapshot and performance notes live in [`docs/benchmarks.md`](./docs/benchmarks.md).
+
+For the Phase 9 Milestone 1 observability stack:
+
+```bash
+JWT_SECRET=test-secret \
+GRAFANA_ADMIN_USER=admin \
+GRAFANA_ADMIN_PASSWORD=admin \
+ADMIN_TOKEN=admin-token \
+make observatory-up
+```
+
+That overlay adds Tempo plus the OTel Collector on top of the normal Docker stack so you can verify live traces and Prometheus exemplars. It also enables the bearer-protected admin reset plane inside Docker via `ADMIN_TOKEN` without publishing a host admin port. Tear it down with:
+
+```bash
+JWT_SECRET=test-secret \
+GRAFANA_ADMIN_USER=admin \
+GRAFANA_ADMIN_PASSWORD=admin \
+ADMIN_TOKEN=admin-token \
+make observatory-down
+```
 
 ## Demo Capture
 

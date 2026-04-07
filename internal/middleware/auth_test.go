@@ -9,8 +9,12 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"go.opentelemetry.io/otel/codes"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	"github.com/hitesh07082002/irongate/internal/config"
+	"github.com/hitesh07082002/irongate/internal/telemetry"
 )
 
 func TestAuthRejectsInvalidProtectedRequests(t *testing.T) {
@@ -85,7 +89,7 @@ func TestAuthRejectsInvalidProtectedRequests(t *testing.T) {
 			handler := Auth(config.AuthConfig{
 				JWTSecret:    sharedSecret,
 				JWTAlgorithm: "HS256",
-			})(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			}, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				t.Fatal("expected auth middleware to block request")
 			}))
 
@@ -115,7 +119,7 @@ func TestAuthPublicRoutesRemainPublic(t *testing.T) {
 	handler := Auth(config.AuthConfig{
 		JWTSecret:    "test-secret",
 		JWTAlgorithm: "HS256",
-	})(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	}, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		nextCalled = true
 		w.WriteHeader(http.StatusNoContent)
 	}))
@@ -142,7 +146,7 @@ func TestAuthRejectsWhitespaceOnlySecret(t *testing.T) {
 	handler := Auth(config.AuthConfig{
 		JWTSecret:    "   ",
 		JWTAlgorithm: "HS256",
-	})(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	}, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		t.Fatal("expected whitespace-only secret to fail closed")
 	}))
 
@@ -170,7 +174,7 @@ func TestAuthValidTokenInjectsIdentityHeaders(t *testing.T) {
 	handler := Auth(config.AuthConfig{
 		JWTSecret:    "test-secret",
 		JWTAlgorithm: "HS256",
-	})(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	}, nil)(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if got := req.Header.Get(HeaderUserID); got != "u-42" {
 			t.Fatalf("expected X-User-ID %q, got %q", "u-42", got)
 		}
@@ -188,6 +192,61 @@ func TestAuthValidTokenInjectsIdentityHeaders(t *testing.T) {
 
 	if recorder.Code != http.StatusNoContent {
 		t.Fatalf("expected 204, got %d", recorder.Code)
+	}
+}
+
+func TestAuthSpanRecordsPassedAttributes(t *testing.T) {
+	recorder := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	token := bearerAuthorization(t, "test-secret", jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub":  "u-42",
+		"role": "admin",
+		"iat":  time.Now().Add(-time.Minute).Unix(),
+		"exp":  time.Now().Add(time.Hour).Unix(),
+	})
+
+	handler := Auth(config.AuthConfig{
+		JWTSecret:    "test-secret",
+		JWTAlgorithm: "HS256",
+	}, tp.Tracer("irongate.middleware.auth"))(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, protectedRequest(t, token))
+
+	span := findEndedSpanByName(t, recorder.Ended(), "irongate.middleware.auth")
+	if got := spanAttribute(span.Attributes(), "auth.outcome"); got != "passed" {
+		t.Fatalf("expected auth.outcome passed, got %v", got)
+	}
+	if got := spanAttribute(span.Attributes(), "auth.user_id"); got != telemetry.HashAttr("u-42") {
+		t.Fatalf("expected hashed auth.user_id, got %v", got)
+	}
+	if got := spanAttribute(span.Attributes(), "auth.role"); got != "admin" {
+		t.Fatalf("expected auth.role admin, got %v", got)
+	}
+}
+
+func TestAuthSpanRecordsFailureStatus(t *testing.T) {
+	recorder := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+
+	handler := Auth(config.AuthConfig{
+		JWTSecret:    "test-secret",
+		JWTAlgorithm: "HS256",
+	}, tp.Tracer("irongate.middleware.auth"))(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("expected auth middleware to reject request")
+	}))
+
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, protectedRequest(t, ""))
+
+	span := findEndedSpanByName(t, recorder.Ended(), "irongate.middleware.auth")
+	if got := spanAttribute(span.Attributes(), "auth.outcome"); got != "failed" {
+		t.Fatalf("expected auth.outcome failed, got %v", got)
+	}
+	if span.Status().Code != codes.Error {
+		t.Fatalf("expected auth span status error, got %s", span.Status().Code)
 	}
 }
 

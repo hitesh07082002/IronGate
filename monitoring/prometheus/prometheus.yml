@@ -2,9 +2,17 @@ global:
   scrape_interval: 5s
   evaluation_interval: 5s
 
+storage:
+  exemplars:
+    max_exemplars: 100000
+
 scrape_configs:
   - job_name: irongate-gateway
     metrics_path: /metrics
+    scrape_protocols:
+      - OpenMetricsText1.0.0
+      - OpenMetricsText0.0.1
+      - PrometheusText0.0.4
     static_configs:
       - targets:
           - gateway:8080
