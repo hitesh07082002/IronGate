@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -158,5 +160,66 @@ func TestWriteSSEEventProducesJSONPayload(t *testing.T) {
 	}
 	if event.Type != "scenario_started" {
 		t.Fatalf("SSE event type = %q, want scenario_started", event.Type)
+	}
+}
+
+func TestEventHubConcurrentPublishSubscribe(t *testing.T) {
+	hub := NewEventHub(newTestLogger())
+
+	const publishers = 100
+	const subscribers = 100
+	start := make(chan struct{})
+
+	var wg sync.WaitGroup
+	wg.Add(publishers + subscribers)
+
+	for i := 0; i < subscribers; i++ {
+		go func() {
+			defer wg.Done()
+			<-start
+
+			_, eventsCh, cancel := hub.Subscribe()
+			defer cancel()
+
+			timeout := time.After(250 * time.Millisecond)
+			received := 0
+			for received < 5 {
+				select {
+				case <-eventsCh:
+					received++
+				case <-timeout:
+					return
+				}
+			}
+		}()
+	}
+
+	for i := 0; i < publishers; i++ {
+		go func(id int) {
+			defer wg.Done()
+			<-start
+
+			for j := 0; j < 10; j++ {
+				hub.Publish(Event{
+					TS:      time.Now().UTC(),
+					Type:    "test",
+					Message: fmt.Sprintf("publisher-%d-%d", id, j),
+				})
+			}
+		}(i)
+	}
+
+	close(start)
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for concurrent publish/subscribe test")
 	}
 }

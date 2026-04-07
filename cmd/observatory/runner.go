@@ -176,8 +176,11 @@ func (r *Runner) StopManagedContainers(ctx context.Context) error {
 	}
 
 	for _, listed := range containers {
-		if err := r.Stop(ctx, listed.ID); err != nil {
-			return err
+		if err := r.Stop(ctx, listed.ID); err != nil && !client.IsErrNotFound(err) {
+			return fmt.Errorf("stop managed k6 container %s: %w", listed.ID, err)
+		}
+		if err := r.docker.ContainerRemove(ctx, listed.ID, dockercontainer.RemoveOptions{Force: true, RemoveVolumes: true}); err != nil && !client.IsErrNotFound(err) {
+			return fmt.Errorf("remove managed k6 container %s: %w", listed.ID, err)
 		}
 	}
 

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"io"
@@ -82,8 +83,8 @@ func (h *EventHub) Publish(event Event) {
 			select {
 			case client <- event:
 			default:
+				h.logger.Warn("dropping oldest SSE event for slow client")
 			}
-			h.logger.Warn("dropping oldest SSE event for slow client")
 		}
 	}
 }
@@ -102,9 +103,8 @@ func (h *EventHub) Subscribe() ([]Event, <-chan Event, func()) {
 	cancel := func() {
 		h.mu.Lock()
 		defer h.mu.Unlock()
-		if existing, ok := h.clients[id]; ok {
+		if _, ok := h.clients[id]; ok {
 			delete(h.clients, id)
-			close(existing)
 		}
 	}
 
@@ -386,18 +386,28 @@ func sanitizeParsedValue(value any) any {
 
 func sanitizeParsedString(value string) string {
 	trimmed := strings.TrimSpace(value)
+	demoToken := strings.TrimSpace(os.Getenv(demoTokenEnvVar))
+	adminToken := strings.TrimSpace(os.Getenv(adminTokenEnvVar))
 	switch {
 	case trimmed == "":
 		return value
 	case jwtLikePattern.MatchString(trimmed):
 		return "[redacted-jwt]"
-	case trimmed == strings.TrimSpace(os.Getenv(demoTokenEnvVar)):
+	case observatorySecretMatch(trimmed, demoToken):
 		return "[redacted-secret]"
-	case trimmed == strings.TrimSpace(os.Getenv(adminTokenEnvVar)):
+	case observatorySecretMatch(trimmed, adminToken):
 		return "[redacted-secret]"
 	default:
 		return value
 	}
+}
+
+func observatorySecretMatch(value, secret string) bool {
+	if value == "" || secret == "" || len(value) != len(secret) {
+		return false
+	}
+
+	return subtle.ConstantTimeCompare([]byte(value), []byte(secret)) == 1
 }
 
 func (a *app) shouldSampleEvent(eventType string) bool {
