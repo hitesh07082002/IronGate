@@ -35,7 +35,7 @@ services:
   grafana:
     environment:
       GF_AUTH_ANONYMOUS_ENABLED: "true"
-      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Editor
     volumes:
       - ./monitoring/grafana/provisioning/grafana-demo.ini:/etc/grafana/grafana.ini:ro
 
