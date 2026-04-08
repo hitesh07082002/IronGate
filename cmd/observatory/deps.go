@@ -31,6 +31,7 @@ var _ dockerClient = (*client.Client)(nil)
 type rateLimitStore interface {
 	Close() error
 	Del(ctx context.Context, keys ...string) error
+	Ping(ctx context.Context) error
 	Scan(ctx context.Context, cursor uint64, match string, count int64) ([]string, uint64, error)
 }
 
@@ -56,6 +57,14 @@ func (s *redisRateLimitStore) Del(ctx context.Context, keys ...string) error {
 	}
 
 	return s.client.Del(ctx, keys...).Err()
+}
+
+func (s *redisRateLimitStore) Ping(ctx context.Context) error {
+	if s == nil || s.client == nil {
+		return nil
+	}
+
+	return s.client.Ping(ctx).Err()
 }
 
 func (s *redisRateLimitStore) Scan(ctx context.Context, cursor uint64, match string, count int64) ([]string, uint64, error) {

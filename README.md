@@ -4,7 +4,7 @@ IronGate is a production-grade API gateway implemented in Go with the standard `
 
 The project is built for fast evaluation. You can run the complete stack locally, inspect the full request path across public and protected routes, and deploy the same architecture behind TLS without introducing a managed control plane or a large platform dependency.
 
-Phases 1 through 8 plus Phase 9 Milestones 1 through 3 are now part of the repo's shipped runtime. The remaining Chaos Observatory expansion lives under [`docs/phase9-planning/`](./docs/phase9-planning/) and still describes future work beyond the current implementation.
+Phases 1 through 8 plus Phase 9 Milestones 1 through 4 are now part of the repo's shipped runtime. The remaining Chaos Observatory hardening and deploy work lives under [`docs/phase9-planning/`](./docs/phase9-planning/) and describes future work beyond the current implementation.
 
 ## Start Here
 
@@ -115,6 +115,7 @@ After bootstrap, day-to-day deploys use the dedicated `irongate` deploy user by 
 - Prometheus metrics plus Grafana dashboards with service-only label cardinality
 - OpenTelemetry trace export, W3C trace propagation, and Prometheus exemplars through the observatory overlay
 - Chaos Observatory backend core with a local `:9000` control plane, SSE event stream, scenario runner, Toxiproxy-backed Redis fault injection, and a 9-scenario demo catalog
+- React-based Chaos Observatory frontend on `:3001` with landing, about, observatory, and observability routes
 - Bearer-protected admin reset endpoint for circuit-breaker state recovery during observatory demos
 - Hot reload with rollback to the last valid runtime snapshot
 - Graceful shutdown that flips `/ready` before draining in-flight requests
@@ -166,12 +167,26 @@ DEMO_TOKEN=demo-token \
 make observatory-up
 ```
 
-That overlay adds Tempo, the OTel Collector, Toxiproxy, and the local observatory service on top of the normal Docker stack so you can verify live traces, Prometheus exemplars, scenario events, and Redis fault handling. It also enables the bearer-protected admin reset plane inside Docker via `ADMIN_TOKEN` without publishing a host admin port.
+That overlay adds Tempo, the OTel Collector, Toxiproxy, the local observatory API, and the React demo frontend on top of the normal Docker stack so you can verify live traces, Prometheus exemplars, scenario events, and Redis fault handling. It also enables the bearer-protected admin reset plane inside Docker via `ADMIN_TOKEN` without publishing a host admin port.
+
+If Docker builds in your environment cannot reach `proxy.golang.org` from inside containers, you can override the Go module proxy for the demo stack without editing Compose:
+
+```bash
+IRONGATE_GOPROXY=https://goproxy.cn,direct \
+IRONGATE_GOSUMDB=off \
+JWT_SECRET=test-secret \
+GRAFANA_ADMIN_USER=admin \
+GRAFANA_ADMIN_PASSWORD=admin \
+ADMIN_TOKEN=admin-token \
+DEMO_TOKEN=demo-token \
+make observatory-up
+```
 
 Once the overlay is up, these local URLs are useful:
 
 - gateway: `http://127.0.0.1:8080`
 - Grafana: `http://127.0.0.1:3000` with `admin/admin`
+- observatory frontend: `http://127.0.0.1:3001`
 - observatory API: `http://127.0.0.1:9000/api/health`
 - observatory SSE events: `http://127.0.0.1:9000/api/events`
 

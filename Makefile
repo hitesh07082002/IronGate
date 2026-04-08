@@ -1,4 +1,4 @@
-.PHONY: all clean lint build test test-race coverage run docker-up docker-down load-test benchmark benchmark-scenario benchmark-render benchmark-test bootstrap-production deploy-production check-production observatory-up observatory-down observatory-logs observatory-reset
+.PHONY: all clean lint build frontend-install frontend-build test test-race coverage run docker-up docker-down load-test benchmark benchmark-scenario benchmark-render benchmark-test bootstrap-production deploy-production check-production observatory-up observatory-down observatory-logs observatory-reset
 
 GO_TEST_FLAGS ?=
 COVERAGE_MIN ?= 70
@@ -18,6 +18,14 @@ build:
 	mkdir -p bin
 	go build -o bin/gateway ./cmd/gateway
 	go build -o bin/observatory ./cmd/observatory
+	$(MAKE) frontend-build
+
+frontend-install:
+	@test -f web/package.json || (echo "web/package.json not found"; exit 1)
+	cd web && npm ci
+
+frontend-build: frontend-install
+	cd web && npm run build
 
 test:
 	go test ./... -v $(GO_TEST_FLAGS)

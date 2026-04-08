@@ -39,6 +39,15 @@ func (a *app) handleGetScenario(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, scenario)
 }
 
+func (a *app) handleScenarioStatuses(w http.ResponseWriter, _ *http.Request) {
+	statuses := make(map[string]scenarioStatus, len(a.scenarios))
+	for _, scenario := range sortedScenarios(a.scenarios) {
+		statuses[scenario.Name] = a.scenarioStatusFor(scenario.Name)
+	}
+
+	writeJSON(w, http.StatusOK, statuses)
+}
+
 func (a *app) handleScenarioStatus(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if _, ok := a.scenarios[name]; !ok {

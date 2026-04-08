@@ -120,10 +120,8 @@ func allowedPrometheusQuery(query string) bool {
 		if isPromQLDurationUnit(trimmed, index[0], lower) {
 			continue
 		}
-		if nextPromQLChar(trimmed, index[1]) == '(' {
-			if _, ok := allowedPromQLFunctions[lower]; ok {
-				continue
-			}
+		if _, ok := allowedPromQLFunctions[lower]; ok {
+			continue
 		}
 
 		return false

@@ -140,6 +140,8 @@ func logAuthFailure(req *http.Request, route *config.RouteConfig, reason string)
 	attrs := map[string]any{
 		"request_id": response.RequestID(req),
 		"trace_id":   telemetry.TraceIDFromContext(req.Context()),
+		"method":     req.Method,
+		"status":     http.StatusUnauthorized,
 	}
 	if route != nil {
 		attrs["service"] = route.Service

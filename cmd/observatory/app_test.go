@@ -113,6 +113,9 @@ func TestRoutesServeHealthAndScenarioEndpoints(t *testing.T) {
 	if !healthPayload.JWTValid || healthPayload.SpecVersion != observatorySpecVersion {
 		t.Fatalf("unexpected health payload: %#v", healthPayload)
 	}
+	if len(healthPayload.Services) != len(observatoryHealthServices) {
+		t.Fatalf("expected %d health services, got %#v", len(observatoryHealthServices), healthPayload.Services)
+	}
 
 	list := request(http.MethodGet, "/api/scenarios", nil)
 	if list.Code != http.StatusOK {
@@ -139,6 +142,15 @@ func TestRoutesServeHealthAndScenarioEndpoints(t *testing.T) {
 	statusPayload := decodeJSONResponse[map[string]scenarioStatus](t, status)
 	if statusPayload["status"] != statusIdle {
 		t.Fatalf("expected idle scenario status, got %#v", statusPayload)
+	}
+
+	statuses := request(http.MethodGet, "/api/scenarios/statuses", nil)
+	if statuses.Code != http.StatusOK {
+		t.Fatalf("scenario statuses code = %d, want %d", statuses.Code, http.StatusOK)
+	}
+	statusesPayload := decodeJSONResponse[map[string]scenarioStatus](t, statuses)
+	if statusesPayload["happy-path"] != statusIdle {
+		t.Fatalf("expected idle status map entry, got %#v", statusesPayload)
 	}
 
 	notFound := request(http.MethodGet, "/api/scenarios/missing", nil)

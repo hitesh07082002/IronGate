@@ -39,11 +39,13 @@ func Metrics(registry *gatewaymetrics.Registry) Middleware {
 				duration := time.Since(start)
 				if recorder.statusCode < http.StatusBadRequest {
 					telemetry.LogGatewayEvent(slog.Default(), slog.LevelInfo, "request_success", "request completed successfully", map[string]any{
-						"service":    route.Service,
-						"route":      route.Path,
-						"status":     recorder.statusCode,
-						"request_id": response.RequestID(req),
-						"trace_id":   spanCtx.TraceID().String(),
+						"service":     route.Service,
+						"route":       route.Path,
+						"method":      req.Method,
+						"status":      recorder.statusCode,
+						"duration_ms": duration.Milliseconds(),
+						"request_id":  response.RequestID(req),
+						"trace_id":    spanCtx.TraceID().String(),
 					})
 				}
 				if spanCtx.IsValid() && spanCtx.IsSampled() {

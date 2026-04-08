@@ -1,6 +1,6 @@
 # IronGate Progress Tracker
 
-> Status: Phases 1 through 8 and Phase 9 Milestones 1 through 3 are complete. Remaining Phase 9 milestones are planned.
+> Status: Phases 1 through 8 and Phase 9 Milestones 1 through 4 are complete. Remaining Phase 9 hardening and deploy milestones are planned.
 >
 > Use this file as the delivery checklist. Use [`README.md`](./README.md) for the public overview and [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the current runtime reference.
 > Remaining Phase 9 planning docs live in [`docs/phase9-planning/`](./docs/phase9-planning/).
@@ -118,7 +118,8 @@
 - [x] Milestone 1 shipped in the repo: OpenTelemetry bootstrap, exemplars, `gateway_circuit_state`, admin reset endpoint, and observatory overlay
 - [x] Milestone 2 shipped in the repo: observatory API/service, SSE event stream, k6-backed scenarios, Redis fault injection through Toxiproxy, and gateway event emission
 - [x] Milestone 3 shipped in the repo: remaining scenario catalog, extended chaos actions, and k6 scripts for auth, rate limiting, resilience, Redis impairment, and latency demos
-- [ ] Remaining Chaos Observatory milestones shipped
+- [x] Milestone 4 shipped in the repo: React frontend, observatory UX, Grafana embedding, and Docker/CI wiring for the demo UI
+- [ ] Remaining Chaos Observatory hardening and deploy milestones shipped
 - [ ] Full Phase 9 demo platform verified on production
 
 ## Stretch Goals

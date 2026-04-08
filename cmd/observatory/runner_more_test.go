@@ -238,6 +238,7 @@ type mockRateLimitStore struct {
 	scanResults []mockScanResult
 	deleted     [][]string
 	closeCalls  int
+	pingErr     error
 }
 
 func (m *mockRateLimitStore) Close() error {
@@ -252,6 +253,12 @@ func (m *mockRateLimitStore) Del(_ context.Context, keys ...string) error {
 	defer m.mu.Unlock()
 	m.deleted = append(m.deleted, append([]string(nil), keys...))
 	return nil
+}
+
+func (m *mockRateLimitStore) Ping(_ context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.pingErr
 }
 
 func (m *mockRateLimitStore) Scan(_ context.Context, cursor uint64, match string, count int64) ([]string, uint64, error) {
