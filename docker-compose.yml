@@ -1,8 +1,13 @@
+x-go-build-args: &go-build-args
+  GOPROXY: "${IRONGATE_GOPROXY:-https://proxy.golang.org,direct}"
+  GOSUMDB: "${IRONGATE_GOSUMDB:-sum.golang.org}"
+
 services:
   gateway:
     build:
       context: .
       dockerfile: Dockerfile
+      args: *go-build-args
     depends_on:
       redis:
         condition: service_healthy
@@ -66,6 +71,7 @@ services:
     build:
       context: .
       dockerfile: services/user-service/Dockerfile
+      args: *go-build-args
     environment:
       JWT_SECRET: "${JWT_SECRET:?JWT_SECRET must be set}"
       IRONGATE_ALLOW_LOGIN_OVERRIDES: "${IRONGATE_ALLOW_LOGIN_OVERRIDES:-false}"
@@ -74,6 +80,7 @@ services:
     build:
       context: .
       dockerfile: services/user-service/Dockerfile
+      args: *go-build-args
     environment:
       PORT: 8091
       JWT_SECRET: "${JWT_SECRET:?JWT_SECRET must be set}"
@@ -83,11 +90,13 @@ services:
     build:
       context: .
       dockerfile: services/order-service/Dockerfile
+      args: *go-build-args
 
   order-service-2:
     build:
       context: .
       dockerfile: services/order-service/Dockerfile
+      args: *go-build-args
     environment:
       PORT: 8092
 
@@ -95,5 +104,6 @@ services:
     build:
       context: .
       dockerfile: services/payment-service/Dockerfile
+      args: *go-build-args
     ports:
       - "127.0.0.1:18083:8083"

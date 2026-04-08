@@ -4,7 +4,7 @@
 >
 > Start with [`README.md`](./README.md) for the overview and demo path. Use [`PROJECT_SPEC.md`](./PROJECT_SPEC.md) for full scope and [`DESIGN_DOC.md`](./DESIGN_DOC.md) for target-state design. If those documents disagree with the code, this file is the source of truth for current behavior.
 >
-> Phase 9 Milestones 1 through 3 are now part of the shipped runtime. The remaining Phase 9 planning docs under [`docs/phase9-planning/`](./docs/phase9-planning/) describe future work only. This file wins whenever planning docs disagree with current runtime behavior.
+> Phase 9 Milestones 1 through 4 are now part of the shipped runtime. The remaining Phase 9 planning docs under [`docs/phase9-planning/`](./docs/phase9-planning/) describe future work only. This file wins whenever planning docs disagree with current runtime behavior.
 
 ---
 
@@ -21,7 +21,7 @@ For broader product scope and future work, use:
 - [`DESIGN_DOC.md`](./DESIGN_DOC.md) for target architecture, algorithms, and tradeoffs
 - [`PROJECT_SPEC.md`](./PROJECT_SPEC.md) for full feature scope and project requirements
 - [`PROGRESS.md`](./PROGRESS.md) for what is shipped now versus planned next
-- [`docs/phase9-planning/`](./docs/phase9-planning/) for the remaining Chaos Observatory milestones beyond shipped M3
+- [`docs/phase9-planning/`](./docs/phase9-planning/) for the remaining Chaos Observatory milestones beyond shipped M4
 
 ---
 
@@ -71,6 +71,7 @@ For broader product scope and future work, use:
   - Redis kept internal-only on the Compose network
   - Prometheus and Grafana bound to `127.0.0.1` on the host for local-only access
 - Optional observatory overlay via [`docker-compose.observatory.yml`](./docker-compose.observatory.yml) adding Tempo, the OTel Collector, Toxiproxy, the local observatory API on `127.0.0.1:9000`, and gateway OTel/admin environment wiring
+- React frontend under [`web/`](./web/) served by the observatory overlay on `127.0.0.1:3001`, with same-origin `/api` proxying through nginx to the observatory API
 
 The codebase still contains some future-facing config fields so later phases can plug into the same route model. In the current implementation, unsupported later-phase features such as non-sliding-window rate limiting still fail closed instead of being silently ignored.
 
@@ -268,14 +269,26 @@ This server is separate from the public gateway listener on `:8080`. The default
 
 Phase 9 Milestones 2 and 3 add a separate observatory process under [`cmd/observatory`](./cmd/observatory) that binds to `127.0.0.1:9000` in the overlay and orchestrates the demo backend.
 
-- `GET /api/health` reports spec version plus JWT and Toxiproxy readiness
-- `GET /api/scenarios`, `GET /api/scenarios/{name}`, and `GET /api/scenarios/{name}/status` expose the built-in scenario catalog
+- `GET /api/health` reports aggregate status (`ok` or `degraded`), spec version, validated demo JWT readiness, Toxiproxy readiness, plus ordered per-service health for gateway, Redis, and the demo replicas used in the UI status rail
+- `GET /api/scenarios`, `GET /api/scenarios/statuses`, `GET /api/scenarios/{name}`, and `GET /api/scenarios/{name}/status` expose the built-in scenario catalog
 - `POST /api/scenarios/{name}/run` and `POST /api/scenarios/{name}/stop` require `Authorization: Bearer $DEMO_TOKEN`
 - `GET /api/events` streams gateway and system events over SSE for the demo UI
 - `GET /api/metrics/query` and `GET /api/metrics/query_range` proxy a restricted subset of Prometheus queries
+- `GET /api/dashboard/landing` and `GET /api/dashboard/chaos` batch the shipped frontend's Prometheus reads so the UI stays within the observatory rate-limit contract
 - `POST /api/reset` restores service health, clears Toxiproxy toxics, stops managed k6 containers, and resets gateway circuit breakers
 
 The observatory runner starts short-lived `grafana/k6` containers against the Docker network, passes scenario intensity into each run, uses Toxiproxy for Redis impairment scenarios, and relies on structured gateway event logs from [`internal/telemetry/events.go`](./internal/telemetry/events.go) for the SSE stream. The shipped catalog currently includes nine scenarios covering healthy traffic, auth rejection, rate limiting, single-target failure, retry absorption, circuit-breaker recovery, cascading failure, Redis impairment, and latency injection.
+
+### Observatory Frontend
+
+Phase 9 Milestone 4 adds a Vite/React/Tailwind frontend under [`web/`](./web/) with:
+
+- `/` landing page showing the animated gateway pipeline and live counter strip
+- `/about` for the problem framing, clickable pipeline nodes, and ADR decision cards
+- `/chaos` for the three-column observatory surface with scenario controls, live SSE feed, Prometheus-backed charts, and recent trace bar
+- `/observability` for Grafana metrics iframes, Tempo explore embedding, and filtered SSE log playback
+
+The `web` image is built in [`web/Dockerfile`](./web/Dockerfile), served by nginx on `127.0.0.1:3001`, and proxies `/api/*` to the observatory container so browser clients never need CORS exceptions for local demo runs. The observatory overlay also enables Grafana anonymous viewer access for demo-only iframe embedding on `/observability`.
 
 #### `Router`
 

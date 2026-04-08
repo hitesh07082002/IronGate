@@ -65,10 +65,11 @@ var (
 )
 
 type healthResponse struct {
-	Status         string `json:"status"`
-	SpecVersion    string `json:"spec_version"`
-	JWTValid       bool   `json:"jwt_valid"`
-	ToxiproxyReady bool   `json:"toxiproxy_ready"`
+	Status         string          `json:"status"`
+	SpecVersion    string          `json:"spec_version"`
+	JWTValid       bool            `json:"jwt_valid"`
+	ToxiproxyReady bool            `json:"toxiproxy_ready"`
+	Services       []serviceHealth `json:"services,omitempty"`
 }
 
 type runParams struct {
@@ -381,8 +382,11 @@ func (a *app) routes() http.Handler {
 
 	mux.HandleFunc("GET /api/health", a.handleHealth)
 	mux.HandleFunc("GET /api/scenarios", a.handleListScenarios)
+	mux.HandleFunc("GET /api/scenarios/statuses", a.handleScenarioStatuses)
 	mux.HandleFunc("GET /api/scenarios/{name}", a.handleGetScenario)
 	mux.HandleFunc("GET /api/scenarios/{name}/status", a.handleScenarioStatus)
+	mux.HandleFunc("GET /api/dashboard/landing", a.handleLandingDashboard)
+	mux.HandleFunc("GET /api/dashboard/chaos", a.handleChaosDashboard)
 	mux.HandleFunc("POST /api/scenarios/{name}/run", a.withMutationAuth(a.handleRunScenario))
 	mux.HandleFunc("POST /api/scenarios/{name}/stop", a.withMutationAuth(a.handleStopScenario))
 	mux.HandleFunc("GET /api/events", a.handleEvents)
@@ -428,13 +432,8 @@ func (a *app) withMutationAuth(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func (a *app) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, healthResponse{
-		Status:         "ok",
-		SpecVersion:    observatorySpecVersion,
-		JWTValid:       strings.TrimSpace(a.currentDemoJWT()) != "",
-		ToxiproxyReady: a.toxiproxyReady,
-	})
+func (a *app) handleHealth(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, a.healthSnapshot(r.Context()))
 }
 
 func (a *app) scenarioStatusFor(name string) scenarioStatus {

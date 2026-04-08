@@ -108,6 +108,7 @@ func RateLimiterWithMetrics(store ratelimit.Store, logger *slog.Logger, registry
 				telemetry.LogGatewayEvent(logger, slog.LevelWarn, "redis_unavailable", "rate limit store unavailable; allowing request", map[string]any{
 					"service":    route.Service,
 					"route":      route.Path,
+					"method":     req.Method,
 					"request_id": response.RequestID(req),
 					"trace_id":   telemetry.TraceIDFromContext(req.Context()),
 					"reason":     "store not configured",
@@ -141,6 +142,7 @@ func RateLimiterWithMetrics(store ratelimit.Store, logger *slog.Logger, registry
 				telemetry.LogGatewayEvent(logger, slog.LevelWarn, "redis_unavailable", "rate limit store unavailable; allowing request", map[string]any{
 					"service":    route.Service,
 					"route":      route.Path,
+					"method":     req.Method,
 					"request_id": response.RequestID(req),
 					"trace_id":   telemetry.TraceIDFromContext(req.Context()),
 					"error":      err.Error(),
@@ -164,6 +166,8 @@ func RateLimiterWithMetrics(store ratelimit.Store, logger *slog.Logger, registry
 				telemetry.LogGatewayEvent(logger, slog.LevelWarn, "rate_limited", rateLimitExceededMessage, map[string]any{
 					"service":    route.Service,
 					"route":      route.Path,
+					"method":     req.Method,
+					"status":     http.StatusTooManyRequests,
 					"request_id": response.RequestID(req),
 					"trace_id":   telemetry.TraceIDFromContext(req.Context()),
 					"remaining":  decision.Remaining,

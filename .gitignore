@@ -8,3 +8,8 @@ artifacts/demo/*.log
 artifacts/demo/*.mp4
 artifacts/demo/*.typescript
 .gstack/
+web/node_modules/
+web/dist/
+web/*.tsbuildinfo
+web/vite.config.js
+web/vite.config.d.ts

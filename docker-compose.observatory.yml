@@ -33,6 +33,9 @@ services:
       IRONGATE_ALLOW_LOGIN_OVERRIDES: "true"
 
   grafana:
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Editor
     volumes:
       - ./monitoring/grafana/provisioning/grafana-demo.ini:/etc/grafana/grafana.ini:ro
 
@@ -43,6 +46,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.observatory
+      args:
+        GOPROXY: "${IRONGATE_GOPROXY:-https://proxy.golang.org,direct}"
+        GOSUMDB: "${IRONGATE_GOSUMDB:-sum.golang.org}"
     depends_on:
       gateway:
         condition: service_started
@@ -58,9 +64,23 @@ services:
       DEMO_TOKEN: "${DEMO_TOKEN:?DEMO_TOKEN must be set}"
       ADMIN_TOKEN: "${ADMIN_TOKEN:?ADMIN_TOKEN must be set}"
       DEMO_JWT: "${DEMO_JWT:-}"
+      JWT_SECRET: "${JWT_SECRET:?JWT_SECRET must be set}"
       COMPOSE_PROJECT_NAME: "${COMPOSE_PROJECT_NAME:-irongate}"
       GATEWAY_CONTAINER_NAME: "${GATEWAY_CONTAINER_NAME:-irongate-gateway-1}"
       PROJECT_ROOT: "${PWD:?PWD must be set}"
       REDIS_ADDR: toxiproxy:6380
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+      args:
+        VITE_DEMO_TOKEN: "${DEMO_TOKEN:-demo-token}"
+        VITE_GITHUB_URL: "https://github.com/hitesh07082002/IronGate"
+    depends_on:
+      observatory:
+        condition: service_started
+    ports:
+      - "127.0.0.1:3001:3001"

@@ -120,10 +120,8 @@ func allowedPrometheusQuery(query string) bool {
 		if isPromQLDurationUnit(trimmed, index[0], lower) {
 			continue
 		}
-		if nextPromQLChar(trimmed, index[1]) == '(' {
-			if _, ok := allowedPromQLFunctions[lower]; ok {
-				continue
-			}
+		if _, ok := allowedPromQLFunctions[lower]; ok {
+			continue
 		}
 
 		return false
@@ -140,17 +138,6 @@ func allowedMetricIdentifier(token string) bool {
 	}
 
 	return false
-}
-
-func nextPromQLChar(query string, start int) byte {
-	for index := start; index < len(query); index++ {
-		if query[index] == ' ' || query[index] == '\t' || query[index] == '\n' {
-			continue
-		}
-		return query[index]
-	}
-
-	return 0
 }
 
 func isPromQLDurationUnit(query string, tokenStart int, token string) bool {

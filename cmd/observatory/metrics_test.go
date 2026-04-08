@@ -14,6 +14,9 @@ func TestAllowedPrometheusQuery(t *testing.T) {
 	if !allowedPrometheusQuery("rate(gateway_requests_total[1m])") {
 		t.Fatal("expected allowlisted function prefix to pass")
 	}
+	if !allowedPrometheusQuery("histogram_quantile(0.95, sum by (le) (rate(gateway_request_duration_seconds_bucket[1m])))") {
+		t.Fatal("expected allowlisted aggregation query to pass")
+	}
 	if allowedPrometheusQuery("up{job='evil'}") {
 		t.Fatal("expected non-allowlisted query to fail")
 	}
