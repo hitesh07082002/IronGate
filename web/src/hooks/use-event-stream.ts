@@ -66,14 +66,20 @@ export function useEventStream(url: string) {
       }
 
       setStatus((current) => (current === "open" ? "reconnecting" : "connecting"));
-      source = new EventSource(url);
+      const currentSource = new EventSource(url);
 
-      source.onopen = () => {
+      currentSource.onopen = () => {
+        if (source !== currentSource) {
+          return;
+        }
         retryDelay = 1000;
         setStatus("open");
       };
 
-      source.onmessage = (message) => {
+      currentSource.onmessage = (message) => {
+        if (source !== currentSource) {
+          return;
+        }
         try {
           const event = JSON.parse(message.data) as EventRecord;
           setEvents((current) => pruneEvents([event, ...current]));
@@ -103,12 +109,20 @@ export function useEventStream(url: string) {
         }
       };
 
-      source.onerror = () => {
-        source?.close();
+      currentSource.onerror = () => {
+        if (isDisposed || source !== currentSource) {
+          return;
+        }
+        currentSource.close();
+        if (reconnectTimer !== null) {
+          window.clearTimeout(reconnectTimer);
+        }
         setStatus("reconnecting");
         reconnectTimer = window.setTimeout(connect, retryDelay);
         retryDelay = Math.min(retryDelay * 2, 10_000);
       };
+
+      source = currentSource;
     };
 
     connect();

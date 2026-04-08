@@ -9,7 +9,7 @@ export function AppShell() {
         Skip to content
       </a>
       <SiteNav />
-      <main id="main-content">
+      <main id="main-content" tabIndex={-1}>
         <Outlet />
       </main>
     </div>

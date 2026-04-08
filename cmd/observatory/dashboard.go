@@ -13,9 +13,10 @@ import (
 )
 
 const (
-	dashboardRangeWindow  = 2 * time.Minute
-	dashboardRangeStep    = 10 * time.Second
-	dashboardQueryTimeout = 5 * time.Second
+	dashboardRangeWindow             = 2 * time.Minute
+	dashboardRangeStep               = 10 * time.Second
+	dashboardQueryTimeout            = 5 * time.Second
+	maxPrometheusResponseBytes int64 = 10 * 1024 * 1024
 )
 
 type landingDashboardResponse struct {
@@ -275,9 +276,12 @@ func (a *app) fetchPrometheusJSON(ctx context.Context, endpoint string, params u
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxPrometheusResponseBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("read prometheus response: %w", err)
+	}
+	if int64(len(body)) > maxPrometheusResponseBytes {
+		return nil, fmt.Errorf("prometheus response exceeded %d bytes", maxPrometheusResponseBytes)
 	}
 
 	if resp.StatusCode != http.StatusOK {

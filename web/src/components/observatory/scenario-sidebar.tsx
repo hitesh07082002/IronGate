@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, type KeyboardEvent, type RefObject } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import {
@@ -30,7 +30,7 @@ interface ScenarioSidebarProps {
   resetDisabled: boolean;
   runningName?: string | null;
   runningStatus?: ScenarioStatus;
-  runButtonRef: React.RefObject<HTMLButtonElement>;
+  runButtonRef: RefObject<HTMLButtonElement>;
   scenarioStatuses: Record<string, ScenarioStatus>;
   scenarios: ScenarioSummary[];
   selectedDuration: number;
@@ -68,6 +68,19 @@ export function ScenarioSidebar({
       runButtonRef.current?.focus();
     }
   }, [loading, runButtonRef, selectedName]);
+
+  const activateScenarioCard = (name: string) => {
+    onSelect(name);
+  };
+
+  const handleScenarioCardKeyDown = (event: KeyboardEvent<HTMLDivElement>, name: string) => {
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+
+    event.preventDefault();
+    activateScenarioCard(name);
+  };
 
   const activeSteps = detail?.chaos_sequence ?? [];
   const serviceMap = Object.fromEntries((services ?? []).map((service) => [service.name, service]));
@@ -141,12 +154,15 @@ export function ScenarioSidebar({
                 const status = scenarioStatuses[scenario.name] ?? "idle";
 
                 return (
-                  <button
+                  <div
                     key={scenario.name}
-                    type="button"
-                    onClick={() => onSelect(scenario.name)}
+                    role="button"
+                    tabIndex={0}
+                    aria-pressed={selected}
+                    onClick={() => activateScenarioCard(scenario.name)}
+                    onKeyDown={(event) => handleScenarioCardKeyDown(event, scenario.name)}
                     className={cn(
-                      "rounded-md border p-4 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ig-gateway",
+                      "cursor-pointer rounded-md border p-4 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ig-gateway",
                       selected
                         ? "border-ig-gateway bg-ig-gateway/10"
                         : "border-ig-border bg-ig-surface hover:border-zinc-700",
@@ -222,7 +238,7 @@ export function ScenarioSidebar({
                         </div>
                       </div>
                     )}
-                  </button>
+                  </div>
                 );
               })
             )}
@@ -235,6 +251,7 @@ export function ScenarioSidebar({
         <div className="mt-4 grid grid-cols-2 gap-3">
           {SYSTEM_SERVICES.map((name) => {
             const service = serviceMap[name];
+            const statusLabel = servicesLoading ? "checking" : service?.status ?? "unknown";
             return (
               <div key={name} className="flex items-center gap-3 rounded-sm border border-ig-border bg-ig-surface px-3 py-3 text-sm">
                 <div
@@ -243,7 +260,10 @@ export function ScenarioSidebar({
                     servicesLoading ? "animate-pulse bg-text-muted" : serviceStatusTone(service?.status ?? "unknown"),
                   )}
                 />
-                <div className="truncate text-text-secondary">{name}</div>
+                <div className="flex min-w-0 flex-col">
+                  <span className="truncate text-text-secondary">{name}</span>
+                  <span className="text-xs text-text-muted">{statusLabel}</span>
+                </div>
               </div>
             );
           })}

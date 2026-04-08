@@ -118,7 +118,8 @@ export function EventFeed({ events, isRunning, onRetry, status }: EventFeedProps
               const traceId = attrString(group.event.attrs, "trace_id");
               const requestId = attrString(group.event.attrs, "request_id");
               const route = attrString(group.event.attrs, "route");
-              const duration = group.event.attrs ? Number(group.event.attrs["duration_ms"]) : undefined;
+              const rawDuration = group.event.attrs?.["duration_ms"];
+              const duration = rawDuration === undefined ? undefined : Number(rawDuration);
               const count = group.items.length;
               const groupId = `${group.key}:${group.event.ts}`;
 
@@ -134,7 +135,7 @@ export function EventFeed({ events, isRunning, onRetry, status }: EventFeedProps
                       </div>
                       <div className="font-mono text-sm leading-6 text-text-primary">
                         {group.event.message}
-                        {typeof duration === "number" && (
+                        {typeof duration === "number" && Number.isFinite(duration) && (
                           <span className="ml-2 text-text-muted">({formatDuration(duration)})</span>
                         )}
                       </div>

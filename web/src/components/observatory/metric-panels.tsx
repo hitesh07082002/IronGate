@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import {
   Bar,
   BarChart,
@@ -15,11 +16,34 @@ import { cn, formatMetric, formatTime, serviceStatusTone } from "@/lib/utils";
 import type { ChartSeries } from "@/types/observatory";
 
 interface MetricPanelProps {
-  children?: React.ReactNode;
+  children?: ReactNode;
   error?: string;
   idleLabel?: string;
   loading?: boolean;
   title: string;
+}
+
+function joinSeriesByTimestamp(series: ChartSeries[]) {
+  const timestamps = Array.from(new Set(series.flatMap((entry) => entry.points.map((point) => point.timestamp)))).sort((a, b) => a - b);
+  const lookups = series.map((entry) => [entry.name, new Map(entry.points.map((point) => [point.timestamp, point.value] as const))] as const);
+
+  return timestamps.map((timestamp) => {
+    const row: Record<string, number | string | null> = {
+      timestamp,
+      label: formatTime(new Date(timestamp).toISOString()),
+    };
+
+    for (const [name, lookup] of lookups) {
+      row[name] = lookup.has(timestamp) ? lookup.get(timestamp) ?? null : null;
+    }
+
+    return row;
+  });
+}
+
+function numericValue(row: Record<string, number | string | null>, key: string) {
+  const value = row[key];
+  return typeof value === "number" ? value : null;
 }
 
 function MetricPanel({ children, error, idleLabel = "No traffic", loading, title }: MetricPanelProps) {
@@ -57,16 +81,7 @@ interface LineMetricPanelProps {
 }
 
 export function LineMetricPanel({ colors, error, label, loading, series }: LineMetricPanelProps) {
-  const points = series[0]?.points.map((point, index) => {
-    const row: Record<string, number | string> = {
-      timestamp: point.timestamp,
-      label: formatTime(new Date(point.timestamp).toISOString()),
-    };
-    for (const entry of series) {
-      row[entry.name] = entry.points[index]?.value ?? 0;
-    }
-    return row;
-  });
+  const points = series.length > 0 ? joinSeriesByTimestamp(series) : [];
 
   return (
     <MetricPanel title={label} loading={loading} error={error}>
@@ -112,11 +127,13 @@ interface StackedBarMetricPanelProps {
 }
 
 export function StackedBarMetricPanel({ error, loading, rejected, title, total }: StackedBarMetricPanelProps) {
-  const points = total?.points.map((point, index) => {
-    const rejectedValue = rejected?.points[index]?.value ?? 0;
+  const points = joinSeriesByTimestamp([total, rejected].filter((entry): entry is ChartSeries => Boolean(entry))).map((row) => {
+    const totalValue = total ? numericValue(row, total.name) : null;
+    const rejectedValue = rejected ? numericValue(row, rejected.name) : null;
+
     return {
-      label: formatTime(new Date(point.timestamp).toISOString()),
-      allowed: Math.max(point.value - rejectedValue, 0),
+      label: row.label,
+      allowed: totalValue === null ? null : Math.max(totalValue - (rejectedValue ?? 0), 0),
       rejected: rejectedValue,
     };
   });
