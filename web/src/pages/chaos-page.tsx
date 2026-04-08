@@ -53,13 +53,38 @@ export function ChaosPage() {
 
   const filteredEvents = events.filter((event) => filterIncludes(filterValue, event.type));
   const traceEvents = events.filter((event) => attrString(event.attrs, "trace_id"));
-  const recentTraces = traceEvents.slice(0, 3).map((event) => ({
-    traceId: attrString(event.attrs, "trace_id") ?? "",
-    method: attrString(event.attrs, "method") ?? "REQ",
-    path: attrString(event.attrs, "route") ?? attrString(event.attrs, "path") ?? "/",
-    status: attrNumber(event.attrs, "status"),
-    durationMs: attrNumber(event.attrs, "duration_ms"),
-  }));
+  const recentTraces = (() => {
+    const seen = new Set<string>();
+    const traces: Array<{
+      traceId: string;
+      method: string;
+      path: string;
+      status: number | undefined;
+      durationMs: number | undefined;
+    }> = [];
+
+    for (const event of traceEvents) {
+      const traceId = attrString(event.attrs, "trace_id");
+      if (!traceId || seen.has(traceId)) {
+        continue;
+      }
+
+      seen.add(traceId);
+      traces.push({
+        traceId,
+        method: attrString(event.attrs, "method") ?? "REQ",
+        path: attrString(event.attrs, "route") ?? attrString(event.attrs, "path") ?? "/",
+        status: attrNumber(event.attrs, "status"),
+        durationMs: attrNumber(event.attrs, "duration_ms"),
+      });
+
+      if (traces.length === 3) {
+        break;
+      }
+    }
+
+    return traces;
+  })();
 
   const requestSeries = rangeValues(asRangeResults(dashboard.data?.request_rate.data.result)).map((entry) => ({
     name: "total",
@@ -140,15 +165,27 @@ export function ChaosPage() {
               onDurationChange={scenarioState.setSelectedDuration}
               onIntensityChange={scenarioState.setSelectedIntensity}
               onReset={scenarioState.resetSystem}
-              onRun={() =>
-                scenarioState.runScenario({
-                  name: scenarioState.selectedName ?? "",
+              onRun={() => {
+                const name = scenarioState.selectedName;
+                if (!name) {
+                  return Promise.resolve(null);
+                }
+
+                return scenarioState.runScenario({
+                  name,
                   intensity: scenarioState.selectedIntensity,
                   duration: scenarioState.selectedDuration,
-                })
-              }
+                });
+              }}
               onSelect={scenarioState.setSelectedName}
-              onStop={() => scenarioState.stopScenario(scenarioState.runningScenarioName ?? scenarioState.selectedName ?? "")}
+              onStop={() => {
+                const name = scenarioState.runningScenarioName ?? scenarioState.selectedName;
+                if (!name) {
+                  return Promise.resolve(null);
+                }
+
+                return scenarioState.stopScenario(name);
+              }}
               resetDisabled={scenarioState.resetting || scenarioState.running}
               runningName={scenarioState.runningScenarioName}
               runningStatus={scenarioState.runningScenarioStatus}

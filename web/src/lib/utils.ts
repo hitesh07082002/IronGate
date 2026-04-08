@@ -30,7 +30,7 @@ export function formatMetric(value: number, digits = 1) {
 }
 
 export function formatDuration(durationMs?: number) {
-  if (!durationMs || durationMs <= 0) {
+  if (durationMs == null || !Number.isFinite(durationMs) || durationMs < 0) {
     return "--";
   }
 

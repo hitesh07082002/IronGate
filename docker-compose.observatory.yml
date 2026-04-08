@@ -64,6 +64,7 @@ services:
       DEMO_TOKEN: "${DEMO_TOKEN:?DEMO_TOKEN must be set}"
       ADMIN_TOKEN: "${ADMIN_TOKEN:?ADMIN_TOKEN must be set}"
       DEMO_JWT: "${DEMO_JWT:-}"
+      JWT_SECRET: "${JWT_SECRET:?JWT_SECRET must be set}"
       COMPOSE_PROJECT_NAME: "${COMPOSE_PROJECT_NAME:-irongate}"
       GATEWAY_CONTAINER_NAME: "${GATEWAY_CONTAINER_NAME:-irongate-gateway-1}"
       PROJECT_ROOT: "${PWD:?PWD must be set}"

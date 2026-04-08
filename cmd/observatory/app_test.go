@@ -14,6 +14,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/golang-jwt/jwt/v5"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -43,6 +45,7 @@ func newTestScenario() *Scenario {
 
 func newTestApp(t *testing.T) *app {
 	t.Helper()
+	t.Setenv("JWT_SECRET", "test-secret")
 
 	scenario := newTestScenario()
 	return &app{
@@ -52,7 +55,8 @@ func newTestApp(t *testing.T) *app {
 		}),
 		demoToken:      "demo-token",
 		adminToken:     "admin-token",
-		demoJWT:        "demo-jwt",
+		demoJWT:        newTestDemoJWT(t),
+		redis:          newRedisRateLimitStore(nil),
 		scenarios:      map[string]*Scenario{scenario.Name: scenario},
 		scenarioStatus: map[string]scenarioStatus{scenario.Name: statusIdle},
 		eventHub:       NewEventHub(newTestLogger()),
@@ -62,7 +66,27 @@ func newTestApp(t *testing.T) *app {
 		toxiproxy: NewToxiproxyClient(newTestHTTPClient(func(_ *http.Request) (*http.Response, error) {
 			return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{}`))}, nil
 		}), newTestLogger()),
+		toxiproxyReady: true,
 	}
+}
+
+func newTestDemoJWT(t *testing.T) string {
+	t.Helper()
+
+	now := time.Now().UTC()
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub":  "demo-user",
+		"role": "user",
+		"iat":  now.Add(-time.Minute).Unix(),
+		"exp":  now.Add(time.Hour).Unix(),
+	})
+
+	signed, err := token.SignedString([]byte("test-secret"))
+	if err != nil {
+		t.Fatalf("sign test demo jwt: %v", err)
+	}
+
+	return signed
 }
 
 func decodeJSONResponse[T any](t *testing.T, recorder *httptest.ResponseRecorder) T {
@@ -110,7 +134,7 @@ func TestRoutesServeHealthAndScenarioEndpoints(t *testing.T) {
 		t.Fatalf("health status = %d, want %d", health.Code, http.StatusOK)
 	}
 	healthPayload := decodeJSONResponse[healthResponse](t, health)
-	if !healthPayload.JWTValid || healthPayload.SpecVersion != observatorySpecVersion {
+	if healthPayload.Status != "ok" || !healthPayload.JWTValid || healthPayload.SpecVersion != observatorySpecVersion {
 		t.Fatalf("unexpected health payload: %#v", healthPayload)
 	}
 	if len(healthPayload.Services) != len(observatoryHealthServices) {
@@ -161,6 +185,19 @@ func TestRoutesServeHealthAndScenarioEndpoints(t *testing.T) {
 	missingStatus := request(http.MethodGet, "/api/scenarios/missing/status", nil)
 	if missingStatus.Code != http.StatusNotFound {
 		t.Fatalf("missing scenario status endpoint = %d, want %d", missingStatus.Code, http.StatusNotFound)
+	}
+}
+
+func TestHealthSnapshotDegradesWhenDemoJWTInvalid(t *testing.T) {
+	app := newTestApp(t)
+	app.setDemoJWT("not-a-valid-jwt")
+
+	health := app.healthSnapshot(context.Background())
+	if health.Status != "degraded" {
+		t.Fatalf("health status = %q, want degraded", health.Status)
+	}
+	if health.JWTValid {
+		t.Fatalf("expected invalid demo jwt, got %#v", health)
 	}
 }
 

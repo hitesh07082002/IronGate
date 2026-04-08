@@ -17,7 +17,30 @@ async function fetchJSON<T>(input: string, init?: RequestInit) {
   const response = await fetch(input, init);
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(body || `Request failed with ${response.status}`);
+    let payload: unknown;
+    try {
+      payload = body ? JSON.parse(body) : undefined;
+    } catch {
+      payload = undefined;
+    }
+
+    const record = payload && typeof payload === "object" ? (payload as Record<string, unknown>) : undefined;
+    const errorField = record?.error;
+    const message =
+      (typeof errorField === "string" ? errorField : undefined) ||
+      (errorField && typeof errorField === "object" && typeof (errorField as Record<string, unknown>).message === "string"
+        ? ((errorField as Record<string, unknown>).message as string)
+        : undefined) ||
+      (typeof record?.message === "string" ? record.message : undefined) ||
+      body.trim() ||
+      `Request failed with ${response.status}`;
+    const requestId =
+      (typeof record?.request_id === "string" ? record.request_id : undefined) ||
+      (typeof record?.requestId === "string" ? record.requestId : undefined) ||
+      (typeof record?.correlation_id === "string" ? record.correlation_id : undefined) ||
+      (typeof record?.correlationId === "string" ? record.correlationId : undefined);
+
+    throw new Error(requestId ? `${message} (${requestId})` : message);
   }
 
   return (await response.json()) as T;

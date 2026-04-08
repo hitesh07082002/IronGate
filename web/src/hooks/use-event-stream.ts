@@ -127,7 +127,11 @@ export function useEventStream(url: string) {
     if (typeof window === "undefined") {
       return;
     }
-    window.localStorage.setItem(TRACE_HISTORY_KEY, JSON.stringify(traceHistory));
+    try {
+      window.localStorage.setItem(TRACE_HISTORY_KEY, JSON.stringify(traceHistory));
+    } catch {
+      // Ignore quota and restricted-storage failures so the stream stays live.
+    }
   }, [traceHistory]);
 
   return {

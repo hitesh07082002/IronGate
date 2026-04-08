@@ -269,7 +269,7 @@ This server is separate from the public gateway listener on `:8080`. The default
 
 Phase 9 Milestones 2 and 3 add a separate observatory process under [`cmd/observatory`](./cmd/observatory) that binds to `127.0.0.1:9000` in the overlay and orchestrates the demo backend.
 
-- `GET /api/health` reports spec version, JWT and Toxiproxy readiness, plus ordered per-service health for gateway, Redis, and the demo replicas used in the UI status rail
+- `GET /api/health` reports aggregate status (`ok` or `degraded`), spec version, validated demo JWT readiness, Toxiproxy readiness, plus ordered per-service health for gateway, Redis, and the demo replicas used in the UI status rail
 - `GET /api/scenarios`, `GET /api/scenarios/statuses`, `GET /api/scenarios/{name}`, and `GET /api/scenarios/{name}/status` expose the built-in scenario catalog
 - `POST /api/scenarios/{name}/run` and `POST /api/scenarios/{name}/stop` require `Authorization: Bearer $DEMO_TOKEN`
 - `GET /api/events` streams gateway and system events over SSE for the demo UI

@@ -140,17 +140,6 @@ func allowedMetricIdentifier(token string) bool {
 	return false
 }
 
-func nextPromQLChar(query string, start int) byte {
-	for index := start; index < len(query); index++ {
-		if query[index] == ' ' || query[index] == '\t' || query[index] == '\n' {
-			continue
-		}
-		return query[index]
-	}
-
-	return 0
-}
-
 func isPromQLDurationUnit(query string, tokenStart int, token string) bool {
 	if tokenStart == 0 || len(token) != 1 {
 		return false

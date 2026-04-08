@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
+
+	"github.com/golang-jwt/jwt/v5"
 )
 
 const (
@@ -44,13 +47,59 @@ func (a *app) healthSnapshot(ctx context.Context) healthResponse {
 		ctx = context.Background()
 	}
 
-	return healthResponse{
-		Status:         "ok",
-		SpecVersion:    observatorySpecVersion,
-		JWTValid:       strings.TrimSpace(a.currentDemoJWT()) != "",
-		ToxiproxyReady: a.toxiproxyReady,
-		Services:       a.collectServiceHealth(ctx),
+	services := a.collectServiceHealth(ctx)
+	jwtValid := a.demoJWTValid()
+
+	status := "ok"
+	if !jwtValid || !a.toxiproxyReady {
+		status = "degraded"
 	}
+	for _, service := range services {
+		if service.Status != serviceStatusHealthy {
+			status = "degraded"
+			break
+		}
+	}
+
+	return healthResponse{
+		Status:         status,
+		SpecVersion:    observatorySpecVersion,
+		JWTValid:       jwtValid,
+		ToxiproxyReady: a.toxiproxyReady,
+		Services:       services,
+	}
+}
+
+type observatoryJWTClaims struct {
+	Role string `json:"role"`
+	jwt.RegisteredClaims
+}
+
+func (a *app) demoJWTValid() bool {
+	tokenString := strings.TrimSpace(a.currentDemoJWT())
+	secretValue := strings.TrimSpace(os.Getenv("JWT_SECRET"))
+	if tokenString == "" || secretValue == "" {
+		return false
+	}
+
+	parser := jwt.NewParser(
+		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+		jwt.WithExpirationRequired(),
+		jwt.WithIssuedAt(),
+	)
+
+	claims := &observatoryJWTClaims{}
+	token, err := parser.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (any, error) {
+		if token.Method == nil || token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
+			return nil, jwt.ErrTokenUnverifiable
+		}
+		return []byte(secretValue), nil
+	})
+	if err != nil || token == nil || !token.Valid {
+		return false
+	}
+
+	return claims.ExpiresAt != nil && claims.IssuedAt != nil && strings.TrimSpace(claims.Subject) != "" && strings.TrimSpace(claims.Role) != ""
 }
 
 func (a *app) collectServiceHealth(ctx context.Context) []serviceHealth {

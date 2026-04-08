@@ -20,9 +20,19 @@ export function useScenario() {
   });
 
   useEffect(() => {
-    if (!selectedName && scenariosQuery.data?.length) {
+    const names = scenariosQuery.data?.map((scenario) => scenario.name) ?? [];
+    if (names.length === 0) {
+      if (selectedName !== null) {
+        startTransition(() => {
+          setSelectedName(null);
+        });
+      }
+      return;
+    }
+
+    if (!selectedName || !names.includes(selectedName)) {
       startTransition(() => {
-        setSelectedName(scenariosQuery.data[0].name);
+        setSelectedName(names[0]);
       });
     }
   }, [selectedName, scenariosQuery.data]);

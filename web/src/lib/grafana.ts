@@ -1,4 +1,4 @@
-const DEFAULT_GRAFANA_URL = "http://127.0.0.1:3000";
+const DEFAULT_GRAFANA_URL = import.meta.env.VITE_GRAFANA_URL || "http://127.0.0.1:3000";
 const DASHBOARD_UID = "irongate-observability";
 const TEMPO_UID = "tempo";
 
@@ -10,6 +10,10 @@ function windowSafeLocation() {
 }
 
 export function grafanaBaseUrl() {
+  if (import.meta.env.VITE_GRAFANA_URL) {
+    return import.meta.env.VITE_GRAFANA_URL;
+  }
+
   const location = windowSafeLocation();
   if (!location) {
     return DEFAULT_GRAFANA_URL;

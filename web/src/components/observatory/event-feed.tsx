@@ -58,8 +58,8 @@ export function EventFeed({ events, isRunning, onRetry, status }: EventFeedProps
     groups.push({ key, event, items: [event] });
   }
 
-  const showEmpty = events.length === 0 && !isRunning;
   const showError = status === "reconnecting";
+  const showEmpty = events.length === 0 && !isRunning && !showError;
 
   return (
     <div className="panel-frame flex min-h-[22rem] flex-col rounded-lg">
@@ -120,6 +120,7 @@ export function EventFeed({ events, isRunning, onRetry, status }: EventFeedProps
               const route = attrString(group.event.attrs, "route");
               const duration = group.event.attrs ? Number(group.event.attrs["duration_ms"]) : undefined;
               const count = group.items.length;
+              const groupId = `${group.key}:${group.event.ts}`;
 
               return (
                 <div key={`${group.key}-${group.event.ts}`} className="rounded-md border border-ig-border bg-ig-surface px-4 py-3">
@@ -147,11 +148,11 @@ export function EventFeed({ events, isRunning, onRetry, status }: EventFeedProps
                           onClick={() =>
                             setExpanded((current) => ({
                               ...current,
-                              [group.key]: !current[group.key],
+                              [groupId]: !current[groupId],
                             }))
                           }
                         >
-                          {count} events {expanded[group.key] ? "↑" : "↓"}
+                          {count} events {expanded[groupId] ? "↑" : "↓"}
                         </button>
                       )}
                       {traceId && (
@@ -167,7 +168,7 @@ export function EventFeed({ events, isRunning, onRetry, status }: EventFeedProps
                     </div>
                   </div>
 
-                  {count > 1 && expanded[group.key] && (
+                  {count > 1 && expanded[groupId] && (
                     <div className="mt-3 space-y-2 border-t border-ig-border pt-3">
                       {group.items.slice(1).map((item, index) => (
                         <div key={`${item.ts}-${index}`} className="font-mono text-xs text-text-muted">

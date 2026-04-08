@@ -1,17 +1,27 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
 
 func TestDashboardEndpointsBatchPrometheusReads(t *testing.T) {
 	app := newTestApp(t)
+	var (
+		mu     sync.Mutex
+		counts = map[string]int{}
+	)
 	app.httpClient = newTestHTTPClient(func(req *http.Request) (*http.Response, error) {
+		mu.Lock()
+		counts[req.URL.Path]++
+		mu.Unlock()
+
 		query := req.URL.Query().Get("query")
 		resultType := "vector"
 		result := `[{"metric":{},"value":[1712550000,"1"]}]`
@@ -21,7 +31,7 @@ func TestDashboardEndpointsBatchPrometheusReads(t *testing.T) {
 		}
 		body := `{"status":"success","data":{"resultType":"` + resultType + `","result":` + result + `}}`
 		if strings.TrimSpace(query) == "" {
-			t.Fatalf("expected query in request URL, got %q", req.URL.String())
+			return nil, fmt.Errorf("expected query in request URL, got %q", req.URL.String())
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -49,6 +59,14 @@ func TestDashboardEndpointsBatchPrometheusReads(t *testing.T) {
 	if len(landingPayload.InFlight) == 0 || len(landingPayload.TotalRPS) == 0 || len(landingPayload.RateLimited) == 0 {
 		t.Fatalf("unexpected landing dashboard payload: %#v", landingPayload)
 	}
+	mu.Lock()
+	landingQueryCount := counts["/api/v1/query"]
+	landingRangeCount := counts["/api/v1/query_range"]
+	counts = map[string]int{}
+	mu.Unlock()
+	if landingQueryCount != 6 || landingRangeCount != 0 {
+		t.Fatalf("landing dashboard Prometheus reads = query:%d query_range:%d, want 6 and 0", landingQueryCount, landingRangeCount)
+	}
 
 	chaos := request("/api/dashboard/chaos")
 	if chaos.Code != http.StatusOK {
@@ -57,5 +75,12 @@ func TestDashboardEndpointsBatchPrometheusReads(t *testing.T) {
 	chaosPayload := decodeJSONResponse[chaosDashboardResponse](t, chaos)
 	if len(chaosPayload.RequestRate) == 0 || len(chaosPayload.LatencyP95) == 0 || len(chaosPayload.RetryCount) == 0 {
 		t.Fatalf("unexpected chaos dashboard payload: %#v", chaosPayload)
+	}
+	mu.Lock()
+	chaosQueryCount := counts["/api/v1/query"]
+	chaosRangeCount := counts["/api/v1/query_range"]
+	mu.Unlock()
+	if chaosQueryCount != 4 || chaosRangeCount != 7 {
+		t.Fatalf("chaos dashboard Prometheus reads = query:%d query_range:%d, want 4 and 7", chaosQueryCount, chaosRangeCount)
 	}
 }
