@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, NavLink } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
-import { Sheet, SheetClose, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { Sheet, SheetClose, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { NAV_ITEMS, REPO_URL } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 
@@ -62,10 +62,11 @@ export function SiteNav() {
             </SheetTrigger>
             <SheetContent side="right" className="w-[min(88vw,18rem)]">
               <div className="flex flex-col gap-6">
-                <div>
+                <SheetHeader>
                   <div className="text-sm font-semibold uppercase tracking-[0.28em] text-text-secondary">IronGate</div>
-                  <div className="mt-1 text-lg font-semibold text-text-primary">Mission Control</div>
-                </div>
+                  <SheetTitle className="mt-1">Mission Control</SheetTitle>
+                  <SheetDescription>Navigate between the about, observatory, and observability views.</SheetDescription>
+                </SheetHeader>
                 <nav className="flex flex-col gap-2" aria-label="Mobile">
                   {NAV_ITEMS.map((item) => (
                     <SheetClose asChild key={item.to}>
