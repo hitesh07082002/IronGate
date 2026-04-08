@@ -29,7 +29,7 @@ export function ChaosPage() {
   const scenarioState = useScenario();
   const systemStatus = useSystemStatus();
   const dashboard = useChaosDashboard();
-  const { eventCount, events, status, traceHistory } = useEventStream("/api/events");
+  const { events, status, traceHistory } = useEventStream("/api/events");
 
   useEffect(() => {
     if (scenarioState.runningScenarioName && !activeStartAt) {
@@ -51,8 +51,25 @@ export function ChaosPage() {
     return () => window.clearInterval(timer);
   }, [activeStartAt]);
 
-  const filteredEvents = events.filter((event) => filterIncludes(filterValue, event.type));
-  const traceEvents = events.filter((event) => attrString(event.attrs, "trace_id"));
+  const sessionEvents = (() => {
+    if (!scenarioState.runningScenarioName) {
+      return [];
+    }
+
+    const currentRunEvents: typeof events = [];
+    for (const event of events) {
+      currentRunEvents.push(event);
+      const scenarioName = attrString(event.attrs, "scenario");
+      if (event.type === "scenario_started" && (!scenarioName || scenarioName === scenarioState.runningScenarioName)) {
+        break;
+      }
+    }
+
+    return currentRunEvents;
+  })();
+
+  const filteredEvents = sessionEvents.filter((event) => filterIncludes(filterValue, event.type));
+  const traceEvents = sessionEvents.filter((event) => attrString(event.attrs, "trace_id"));
   const recentTraces = (() => {
     const seen = new Set<string>();
     const traces: Array<{
@@ -112,29 +129,37 @@ export function ChaosPage() {
   const rejectedRateSeries = rejectedRateResults[0]
     ? { name: "rejected", points: rejectedRateResults[0].points }
     : null;
+  const showLiveMetrics = Boolean(scenarioState.runningScenarioName);
 
-  const counterValues = [
-    {
-      label: "Success",
-      value: Math.max(
-        instantValue(asInstantResults(dashboard.data?.success_count.data.result)) -
-          instantValue(asInstantResults(dashboard.data?.error_count.data.result)),
-        0,
-      ),
-    },
-    {
-      label: "Error",
-      value: instantValue(asInstantResults(dashboard.data?.error_count.data.result)),
-    },
-    {
-      label: "Retry",
-      value: instantValue(asInstantResults(dashboard.data?.retry_count.data.result)),
-    },
-    {
-      label: "Rate-Limited",
-      value: instantValue(asInstantResults(dashboard.data?.rate_limited_count.data.result)),
-    },
-  ];
+  const counterValues = scenarioState.runningScenarioName
+    ? [
+        {
+          label: "Success",
+          value: Math.max(
+            instantValue(asInstantResults(dashboard.data?.success_count.data.result)) -
+              instantValue(asInstantResults(dashboard.data?.error_count.data.result)),
+            0,
+          ),
+        },
+        {
+          label: "Error",
+          value: instantValue(asInstantResults(dashboard.data?.error_count.data.result)),
+        },
+        {
+          label: "Retry",
+          value: instantValue(asInstantResults(dashboard.data?.retry_count.data.result)),
+        },
+        {
+          label: "Rate-Limited",
+          value: instantValue(asInstantResults(dashboard.data?.rate_limited_count.data.result)),
+        },
+      ]
+    : [
+        { label: "Success", value: 0 },
+        { label: "Error", value: 0 },
+        { label: "Retry", value: 0 },
+        { label: "Rate-Limited", value: 0 },
+      ];
 
   return (
     <section className="px-4 py-6 lg:px-8">
@@ -211,7 +236,7 @@ export function ChaosPage() {
                     LIVE
                   </div>
                 </div>
-                <Badge>{eventCount} events</Badge>
+                <Badge>{filteredEvents.length} events</Badge>
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
                 {EVENT_FILTERS.map((filter) => (
@@ -237,14 +262,14 @@ export function ChaosPage() {
               label="Request Rate"
               loading={dashboard.isLoading}
               error={dashboard.error instanceof Error ? dashboard.error.message : undefined}
-              series={[...requestSeries, ...errorSeries]}
+              series={showLiveMetrics ? [...requestSeries, ...errorSeries] : []}
               colors={{ total: "#3B82F6", errors: "#EF4444" }}
             />
             <LineMetricPanel
               label="Latency"
               loading={dashboard.isLoading}
               error={dashboard.error instanceof Error ? dashboard.error.message : undefined}
-              series={latencySeries}
+              series={showLiveMetrics ? latencySeries : []}
               colors={{ p50: "#10B981", p95: "#F59E0B", p99: "#EF4444" }}
             />
             <CircuitTimelinePanel
@@ -256,8 +281,8 @@ export function ChaosPage() {
               title="Rate Limit Activity"
               loading={dashboard.isLoading}
               error={dashboard.error instanceof Error ? dashboard.error.message : undefined}
-              total={totalRateSeries}
-              rejected={rejectedRateSeries}
+              total={showLiveMetrics ? totalRateSeries : null}
+              rejected={showLiveMetrics ? rejectedRateSeries : null}
             />
           </aside>
         </div>
