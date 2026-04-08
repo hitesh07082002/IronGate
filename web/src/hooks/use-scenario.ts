@@ -77,6 +77,16 @@ export function useScenario() {
   const runningScenarioName = runningEntry?.[0] ?? null;
   const runningScenarioStatus = runningEntry?.[1] as ScenarioStatus | undefined;
 
+  useEffect(() => {
+    if (!runningScenarioName || runningScenarioName === selectedName) {
+      return;
+    }
+
+    startTransition(() => {
+      setSelectedName(runningScenarioName);
+    });
+  }, [runningScenarioName, selectedName]);
+
   const runMutation = useMutation({
     mutationFn: (input: { name: string; intensity: string; duration: number }) =>
       runScenario(input.name, input.intensity, input.duration),

@@ -82,7 +82,8 @@ export function ScenarioSidebar({
     activateScenarioCard(name);
   };
 
-  const activeSteps = detail?.chaos_sequence ?? [];
+  const runningDetail = runningName && detail?.name === runningName ? detail : undefined;
+  const activeSteps = runningDetail?.chaos_sequence ?? [];
   const serviceMap = Object.fromEntries((services ?? []).map((service) => [service.name, service]));
 
   return (
@@ -102,7 +103,7 @@ export function ScenarioSidebar({
               <div>
                 <div className="text-xs uppercase tracking-[0.22em] text-ig-gateway">Active Scenario</div>
                 <div className="mt-2 text-lg font-semibold text-text-primary">
-                  {detail?.display_name ?? scenarios.find((scenario) => scenario.name === runningName)?.display_name ?? runningName}
+                  {runningDetail?.display_name ?? scenarios.find((scenario) => scenario.name === runningName)?.display_name ?? runningName}
                 </div>
               </div>
               <div className={cn("text-sm font-medium uppercase", statusTone(runningStatus ?? "idle"))}>
